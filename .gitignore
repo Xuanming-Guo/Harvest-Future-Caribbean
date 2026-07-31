@@ -1,0 +1,58 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+
+# Logs and local runtime state
+*.log
+logs/
+*.pid
+*.db
+*.sqlite
+*.sqlite3
+
+# JavaScript, TypeScript, Next.js, and Expo
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+.expo/
+.expo-shared/
+web-build/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# Model outputs and large generated artefacts
+artifacts/
+checkpoints/
+*.ckpt
+*.onnx
+*.pt
+*.pth
+*.joblib
+*.pkl
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+Desktop.ini
