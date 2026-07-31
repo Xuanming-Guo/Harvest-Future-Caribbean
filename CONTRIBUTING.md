@@ -10,9 +10,13 @@ long-lived branch.
 3. Make one focused change.
 4. Open a pull request into `main` and link the issue with `Closes #<number>`.
 5. Ask for a teammate review when it would help; reviews are not mandatory.
-6. Prefer a squash merge, then delete the feature branch.
+6. Leave the pull request open after creating or updating it.
+7. Xuanming manually decides whether to merge or close it and handles any
+   post-merge branch deletion.
 
 Do not push directly to `main`.
+Do not merge or close a pull request unless you are Xuanming. Do not enable
+auto-merge.
 
 ## Branch names
 
@@ -62,6 +66,7 @@ test:      tests or validation
 - Clearly label synthetic data and simulated outcomes.
 - Do not commit secrets, local environment files, private datasets, or
   generated artefacts.
+- Leave the final merge, close, and branch-deletion actions to Xuanming.
 
 Contract or architecture disagreements should be resolved in the issue before
 separate implementations drift apart.
