@@ -60,6 +60,15 @@ brainstorming and long-term ideas, so do not treat every item as current scope.
 - Never commit secrets, credentials, private personal data, or unapproved
   private datasets.
 
+## Pull request control
+
+- Agents and teammates may create branches and open or update pull requests.
+- Only Xuanming may merge or close a pull request.
+- Leave every pull request open after creating or updating it. Never enable
+  auto-merge or perform an automatic merge or close action.
+- Only Xuanming deletes a branch after its pull request is merged or closed.
+- Reviews are optional and may be requested when they are useful.
+
 ## Definition of done
 
 - The issue acceptance criteria are met.

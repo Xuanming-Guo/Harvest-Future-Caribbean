@@ -1,5 +1,8 @@
 Closes #
 
+> Leave this pull request open. Only Xuanming may merge or close it and delete
+> its branch afterward.
+
 ## Summary
 
 What outcome does this pull request deliver?
@@ -34,3 +37,4 @@ Add screenshots for visible changes, or write `Not applicable`.
 - [ ] Contracts are current if communication changed.
 - [ ] Synthetic data and outcomes are clearly labelled.
 - [ ] No secrets, private datasets, or generated artefacts are committed.
+- [ ] This pull request will be left open for Xuanming's final action.
