@@ -9,14 +9,16 @@ long-lived branch.
 2. Create a branch from the latest `main`.
 3. Make one focused change.
 4. Open a pull request into `main` and link the issue with `Closes #<number>`.
-5. Ask for a teammate review when it would help; reviews are not mandatory.
-6. Leave the pull request open after creating or updating it.
-7. Xuanming manually decides whether to merge or close it and handles any
-   post-merge branch deletion.
+5. Ask a human teammate for review when it would help; reviews are not
+   mandatory.
+6. AI agents leave the pull request open after creating or updating it.
+7. An authorised human manually decides whether to merge or close it and
+   handles any post-merge branch deletion.
 
 Do not push directly to `main`.
-Do not merge or close a pull request unless you are Xuanming. Do not enable
-auto-merge.
+AI agents and automated systems must never merge or close a pull request,
+submit a formal GitHub review, enable auto-merge, or delete a pull-request
+branch. Any merge must be deliberately initiated by an authorised human.
 
 ## Branch names
 
@@ -66,7 +68,9 @@ test:      tests or validation
 - Clearly label synthetic data and simulated outcomes.
 - Do not commit secrets, local environment files, private datasets, or
   generated artefacts.
-- Leave the final merge, close, and branch-deletion actions to Xuanming.
+- Leave formal reviews, approvals, merges, closes, and branch deletion to
+  humans. AI agents may inspect, test, and report findings, but must leave the
+  pull request open.
 
 Contract or architecture disagreements should be resolved in the issue before
 separate implementations drift apart.

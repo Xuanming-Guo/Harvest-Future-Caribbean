@@ -24,3 +24,12 @@ them.
   real-world impact.
 
 Communication with the Product API follows [`contracts/`](../contracts/).
+
+## Integration guide
+
+Use [`docs/api_info.md`](../docs/api_info.md) for the public operations used by
+Harvest-mode simulated actors, run/control-room operations, SSE replay rules,
+and the deterministic effect of every Product API event. The simulation service
+interface is [`contracts/simulation/openapi.yaml`](../contracts/simulation/openapi.yaml).
+Handlers must deduplicate event IDs, persist `Last-Event-ID`, schedule future
+effects, and never expose or rewrite hidden truth.

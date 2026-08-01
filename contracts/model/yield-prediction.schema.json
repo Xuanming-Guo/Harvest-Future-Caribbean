@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Yield prediction response",
+  "$ref": "#/$defs/YieldPredictionResponse",
+  "$defs": {
+    "YieldPredictionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestId",
+        "cropBatchId",
+        "cropType",
+        "farmId",
+        "requestedAt",
+        "provenance",
+        "features"
+      ],
+      "properties": {
+        "requestId": {
+          "$ref": "../common.schema.json#/$defs/Uuid"
+        },
+        "cropBatchId": {
+          "$ref": "../common.schema.json#/$defs/Uuid"
+        },
+        "cropType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "farmId": {
+          "$ref": "../common.schema.json#/$defs/Uuid"
+        },
+        "requestedAt": {
+          "$ref": "../common.schema.json#/$defs/UtcDateTime"
+        },
+        "simulationRunId": {
+          "$ref": "../common.schema.json#/$defs/Uuid"
+        },
+        "provenance": {
+          "$ref": "../common.schema.json#/$defs/Provenance"
+        },
+        "features": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["observationCount"],
+          "properties": {
+            "observationCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "plantedAreaHectares": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "cropStage": {
+              "type": "string"
+            },
+            "lastObservedAt": {
+              "$ref": "../common.schema.json#/$defs/UtcDateTime"
+            },
+            "weatherSummary": {
+              "type": "object",
+              "additionalProperties": {
+                "type": ["number", "string", "boolean", "null"]
+              }
+            },
+            "satelliteSummary": {
+              "type": "object",
+              "additionalProperties": {
+                "type": ["number", "string", "boolean", "null"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "YieldPredictionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "predictionId",
+        "requestId",
+        "cropBatchId",
+        "modelVersion",
+        "q10MarketableYield",
+        "q50MarketableYield",
+        "q90MarketableYield",
+        "harvestWindow",
+        "readiness",
+        "confidence",
+        "warnings",
+        "provenance",
+        "generatedAt"
+      ],
+      "properties": {
+        "predictionId": {
+          "$ref": "../common.schema.json#/$defs/Uuid"
+        },
+        "requestId": {
+          "$ref": "../common.schema.json#/$defs/Uuid"
+        },
+        "cropBatchId": {
+          "$ref": "../common.schema.json#/$defs/Uuid"
+        },
+        "modelVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "q10MarketableYield": {
+          "$ref": "../common.schema.json#/$defs/Quantity"
+        },
+        "q50MarketableYield": {
+          "$ref": "../common.schema.json#/$defs/Quantity"
+        },
+        "q90MarketableYield": {
+          "$ref": "../common.schema.json#/$defs/Quantity"
+        },
+        "harvestWindow": {
+          "$ref": "../common.schema.json#/$defs/DateRange"
+        },
+        "readiness": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "provenance": {
+          "const": "MODEL_PREDICTED"
+        },
+        "generatedAt": {
+          "$ref": "../common.schema.json#/$defs/UtcDateTime"
+        }
+      },
+      "allOf": [
+        {
+          "description": "Implementations must also enforce q10MarketableYield.value <= q50MarketableYield.value <= q90MarketableYield.value and identical units."
+        }
+      ],
+      "x-harvest-invariants": [
+        "q10MarketableYield.value <= q50MarketableYield.value",
+        "q50MarketableYield.value <= q90MarketableYield.value",
+        "q10MarketableYield.unit == q50MarketableYield.unit == q90MarketableYield.unit"
+      ]
+    }
+  },
+  "examples": [
+    {
+      "predictionId": "44444444-4444-4444-8444-444444444444",
+      "requestId": "33333333-3333-4333-8333-333333333333",
+      "cropBatchId": "11111111-1111-4111-8111-111111111111",
+      "modelVersion": "yield-v0.1.0",
+      "q10MarketableYield": { "value": 420, "unit": "kg" },
+      "q50MarketableYield": { "value": 500, "unit": "kg" },
+      "q90MarketableYield": { "value": 590, "unit": "kg" },
+      "harvestWindow": { "start": "2026-08-10", "end": "2026-08-17" },
+      "readiness": 0.76,
+      "confidence": 0.71,
+      "warnings": ["Sparse field observations"],
+      "provenance": "MODEL_PREDICTED",
+      "generatedAt": "2026-08-01T10:00:00Z"
+    }
+  ]
+}

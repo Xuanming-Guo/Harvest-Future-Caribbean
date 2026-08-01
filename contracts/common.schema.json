@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Harvest common contract types",
+  "type": "object",
+  "$defs": {
+    "Uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "UtcDateTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "SimulationTime": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Current timestamp on a simulation run's clock."
+    },
+    "Provenance": {
+      "type": "string",
+      "enum": [
+        "OBSERVED",
+        "INFERRED",
+        "SYNTHETIC",
+        "STAKEHOLDER_CALIBRATED",
+        "MODEL_PREDICTED"
+      ]
+    },
+    "ActorRole": {
+      "type": "string",
+      "enum": [
+        "FARMER",
+        "BUYER",
+        "TRANSPORTER",
+        "COORDINATOR",
+        "OPERATIONS",
+        "ADMIN",
+        "SIMULATION_SERVICE",
+        "MODEL_SERVICE"
+      ]
+    },
+    "Quantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "unit"],
+      "properties": {
+        "value": {
+          "type": "number",
+          "minimum": 0
+        },
+        "unit": {
+          "const": "kg"
+        }
+      }
+    },
+    "Money": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["amount", "currency"],
+      "properties": {
+        "amount": {
+          "type": "number",
+          "minimum": 0,
+          "multipleOf": 0.01
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$",
+          "examples": ["XCD"]
+        }
+      }
+    },
+    "GeoPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["latitude", "longitude"],
+      "properties": {
+        "latitude": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        },
+        "longitude": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        }
+      }
+    },
+    "DateRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date"
+        },
+        "end": {
+          "type": "string",
+          "format": "date"
+        }
+      }
+    },
+    "ActorContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actorId", "role"],
+      "properties": {
+        "actorId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "role": {
+          "$ref": "#/$defs/ActorRole"
+        },
+        "simulationRunId": {
+          "$ref": "#/$defs/Uuid"
+        }
+      },
+      "description": "Derived from authentication. Clients must not use body fields to impersonate an actor."
+    },
+    "PageInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hasNextPage"],
+      "properties": {
+        "nextCursor": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hasNextPage": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Problem": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type", "title", "status"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "format": "uri-reference"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "integer",
+          "minimum": 400,
+          "maximum": 599
+        },
+        "detail": {
+          "type": "string"
+        },
+        "instance": {
+          "type": "string",
+          "format": "uri-reference"
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]+$"
+        },
+        "traceId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "invalidParams": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "reason"],
+            "properties": {
+              "name": { "type": "string" },
+              "reason": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "TraceLink": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["traceId", "correlationId"],
+      "properties": {
+        "traceId": { "$ref": "#/$defs/Uuid" },
+        "correlationId": { "$ref": "#/$defs/Uuid" },
+        "causationId": { "$ref": "#/$defs/Uuid" }
+      }
+    }
+  }
+}

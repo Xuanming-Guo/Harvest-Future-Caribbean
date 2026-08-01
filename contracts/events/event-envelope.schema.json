@@ -1,0 +1,722 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Harvest domain event envelope",
+  "type": "object",
+  "unevaluatedProperties": false,
+  "required": [
+    "eventId",
+    "eventType",
+    "occurredAt",
+    "simulationRunId",
+    "actorId",
+    "entityId",
+    "traceId",
+    "correlationId",
+    "causationId",
+    "schemaVersion",
+    "provenance",
+    "payload"
+  ],
+  "properties": {
+    "eventId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "CROP_OBSERVATION_SUBMITTED",
+        "FORECAST_PRODUCED",
+        "LISTING_PUBLISHED",
+        "BUYER_DEMAND_CREATED",
+        "ORDER_REQUESTED",
+        "ALLOCATION_PROPOSED",
+        "ALLOCATION_APPROVED",
+        "DELIVERY_MISSION_CREATED",
+        "DELIVERY_MISSION_ACCEPTED",
+        "DELIVERY_UPDATE_POSTED",
+        "EXCEPTION_REPORTED",
+        "RECOVERY_APPROVED",
+        "DELIVERY_ACCEPTED",
+        "ORDER_FULFILLED",
+        "ORDER_PARTIALLY_FULFILLED",
+        "ORDER_REJECTED",
+        "ORDER_CANCELLED",
+        "SIMULATION_ACTOR_MOVED",
+        "SIMULATION_DISRUPTION_OBSERVED",
+        "SIMULATION_TASK_COMPLETED",
+        "BENCHMARK_RESULT_RECORDED"
+      ]
+    },
+    "occurredAt": { "$ref": "../common.schema.json#/$defs/UtcDateTime" },
+    "simulationTime": { "$ref": "../common.schema.json#/$defs/SimulationTime" },
+    "simulationRunId": {
+      "oneOf": [
+        { "$ref": "../common.schema.json#/$defs/Uuid" },
+        { "type": "null" }
+      ],
+      "description": "Null for real-world activity; required as a field so consumers make the distinction explicit."
+    },
+    "actorId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+    "entityId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+    "traceId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+    "correlationId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+    "causationId": {
+      "oneOf": [
+        { "$ref": "../common.schema.json#/$defs/Uuid" },
+        { "type": "null" }
+      ]
+    },
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*\\.[0-9]+$",
+      "examples": ["1.0"]
+    },
+    "provenance": { "$ref": "../common.schema.json#/$defs/Provenance" },
+    "payload": {
+      "oneOf": [
+        { "$ref": "#/$defs/CropObservationSubmittedPayload" },
+        { "$ref": "#/$defs/ForecastProducedPayload" },
+        { "$ref": "#/$defs/ListingPublishedPayload" },
+        { "$ref": "#/$defs/BuyerDemandCreatedPayload" },
+        { "$ref": "#/$defs/OrderRequestedPayload" },
+        { "$ref": "#/$defs/AllocationPayload" },
+        { "$ref": "#/$defs/DeliveryMissionPayload" },
+        { "$ref": "#/$defs/DeliveryUpdatePayload" },
+        { "$ref": "#/$defs/ExceptionPayload" },
+        { "$ref": "#/$defs/RecoveryPayload" },
+        { "$ref": "#/$defs/DeliveryAcceptedPayload" },
+        { "$ref": "#/$defs/OrderOutcomePayload" },
+        { "$ref": "#/$defs/SimulationActorMovedPayload" },
+        { "$ref": "#/$defs/SimulationDisruptionPayload" },
+        { "$ref": "#/$defs/SimulationTaskPayload" },
+        { "$ref": "#/$defs/BenchmarkResultPayload" }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "eventType": { "const": "CROP_OBSERVATION_SUBMITTED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/CropObservationSubmittedPayload" } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "FORECAST_PRODUCED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/ForecastProducedPayload" } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "LISTING_PUBLISHED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/ListingPublishedPayload" } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "BUYER_DEMAND_CREATED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/BuyerDemandCreatedPayload" } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "ORDER_REQUESTED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/OrderRequestedPayload" } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "enum": ["ALLOCATION_PROPOSED", "ALLOCATION_APPROVED"] } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/AllocationPayload" } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "DELIVERY_MISSION_CREATED" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "allOf": [
+              { "$ref": "#/$defs/DeliveryMissionPayload" },
+              { "properties": { "status": { "const": "AVAILABLE" } } }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "DELIVERY_MISSION_ACCEPTED" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "allOf": [
+              { "$ref": "#/$defs/DeliveryMissionPayload" },
+              { "properties": { "status": { "const": "ASSIGNED" } } }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "DELIVERY_UPDATE_POSTED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/DeliveryUpdatePayload" } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "EXCEPTION_REPORTED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/ExceptionPayload" } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "RECOVERY_APPROVED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/RecoveryPayload" } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "DELIVERY_ACCEPTED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/DeliveryAcceptedPayload" } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "ORDER_FULFILLED" } } },
+      "then": { "properties": { "payload": { "allOf": [{ "$ref": "#/$defs/OrderOutcomePayload" }, { "properties": { "status": { "const": "FULFILLED" } } }] } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "ORDER_PARTIALLY_FULFILLED" } } },
+      "then": { "properties": { "payload": { "allOf": [{ "$ref": "#/$defs/OrderOutcomePayload" }, { "properties": { "status": { "const": "PARTIALLY_FULFILLED" } } }] } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "ORDER_REJECTED" } } },
+      "then": { "properties": { "payload": { "allOf": [{ "$ref": "#/$defs/OrderOutcomePayload" }, { "properties": { "status": { "const": "REJECTED" } } }] } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "ORDER_CANCELLED" } } },
+      "then": { "properties": { "payload": { "allOf": [{ "$ref": "#/$defs/OrderOutcomePayload" }, { "properties": { "status": { "const": "CANCELLED" } } }] } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "SIMULATION_ACTOR_MOVED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/SimulationActorMovedPayload" } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "SIMULATION_DISRUPTION_OBSERVED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/SimulationDisruptionPayload" } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "SIMULATION_TASK_COMPLETED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/SimulationTaskPayload" } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "BENCHMARK_RESULT_RECORDED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/BenchmarkResultPayload" } } }
+    }
+  ],
+  "$defs": {
+    "CropObservationSubmittedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observationId", "cropBatchId", "observedAt", "cropStage"],
+      "properties": {
+        "observationId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "cropBatchId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "observedAt": { "$ref": "../common.schema.json#/$defs/UtcDateTime" },
+        "cropStage": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ForecastProducedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["predictionId", "cropBatchId", "q10MarketableYield", "availableToPromise"],
+      "properties": {
+        "predictionId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "cropBatchId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "q10MarketableYield": { "$ref": "../common.schema.json#/$defs/Quantity" },
+        "availableToPromise": { "$ref": "../common.schema.json#/$defs/Quantity" }
+      }
+    },
+    "ListingPublishedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["listingId", "cropBatchId", "quantity", "availableFrom"],
+      "properties": {
+        "listingId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "cropBatchId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "quantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
+        "availableFrom": { "type": "string", "format": "date" }
+      }
+    },
+    "BuyerDemandCreatedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["demandId", "cropType", "quantity", "neededBy"],
+      "properties": {
+        "demandId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "cropType": { "type": "string", "minLength": 1 },
+        "quantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
+        "neededBy": { "$ref": "../common.schema.json#/$defs/UtcDateTime" }
+      }
+    },
+    "OrderRequestedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["orderId", "cropType", "requestedQuantity", "status"],
+      "properties": {
+        "orderId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "cropType": { "type": "string", "minLength": 1 },
+        "requestedQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
+        "status": { "const": "REQUESTED" }
+      }
+    },
+    "AllocationPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allocationId", "orderId", "lines"],
+      "properties": {
+        "allocationId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "orderId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "lines": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["cropBatchId", "quantity"],
+            "properties": {
+              "cropBatchId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+              "quantity": { "$ref": "../common.schema.json#/$defs/Quantity" }
+            }
+          }
+        }
+      }
+    },
+    "DeliveryMissionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["missionId", "orderId", "status", "stops"],
+      "properties": {
+        "missionId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "orderId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "status": { "enum": ["AVAILABLE", "ASSIGNED"] },
+        "transporterId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "stops": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "../common.schema.json#/$defs/GeoPoint" }
+        }
+      }
+    },
+    "DeliveryUpdatePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["missionId", "updateType", "recordedAt"],
+      "properties": {
+        "missionId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "updateType": { "enum": ["PICKED_UP", "POSITION", "DELAYED", "ARRIVED", "DELIVERED"] },
+        "recordedAt": { "$ref": "../common.schema.json#/$defs/UtcDateTime" },
+        "position": { "$ref": "../common.schema.json#/$defs/GeoPoint" },
+        "note": { "type": "string", "maxLength": 500 }
+      }
+    },
+    "ExceptionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exceptionId", "exceptionType", "severity", "affectedEntityIds"],
+      "properties": {
+        "exceptionId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "exceptionType": { "enum": ["SHORTFALL", "DELAY", "QUALITY", "VEHICLE", "WEATHER", "OTHER"] },
+        "severity": { "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+        "affectedEntityIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "../common.schema.json#/$defs/Uuid" }
+        }
+      }
+    },
+    "RecoveryPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exceptionId", "approvalId", "actionType"],
+      "properties": {
+        "exceptionId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "approvalId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "actionType": { "enum": ["REALLOCATE", "REROUTE", "RESCHEDULE", "SUBSTITUTE", "CANCEL"] }
+      }
+    },
+    "DeliveryAcceptedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deliveryId", "orderId", "acceptedQuantity", "rejectedQuantity", "outcome"],
+      "properties": {
+        "deliveryId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "orderId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "acceptedQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
+        "rejectedQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
+        "outcome": { "enum": ["ACCEPTED", "PARTIALLY_ACCEPTED", "REJECTED"] }
+      }
+    },
+    "OrderOutcomePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["orderId", "status", "acceptedQuantity", "releasedReservationQuantity"],
+      "properties": {
+        "orderId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "status": { "enum": ["FULFILLED", "PARTIALLY_FULFILLED", "REJECTED", "CANCELLED"] },
+        "acceptedQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
+        "releasedReservationQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" }
+      }
+    },
+    "SimulationActorMovedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actorId", "position"],
+      "properties": {
+        "actorId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "position": { "$ref": "../common.schema.json#/$defs/GeoPoint" }
+      }
+    },
+    "SimulationDisruptionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["disruptionType", "affectedEntityIds", "observedAt"],
+      "properties": {
+        "disruptionType": { "enum": ["WEATHER", "ROAD", "VEHICLE", "CROP", "OTHER"] },
+        "affectedEntityIds": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "../common.schema.json#/$defs/Uuid" }
+        },
+        "observedAt": { "$ref": "../common.schema.json#/$defs/SimulationTime" },
+        "description": { "type": "string", "maxLength": 500 }
+      }
+    },
+    "SimulationTaskPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["taskId", "taskType", "actorId", "completedAt"],
+      "properties": {
+        "taskId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "taskType": { "enum": ["OBSERVE", "APPROVE", "HARVEST", "PICKUP", "DELIVER", "BUY"] },
+        "actorId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "completedAt": { "$ref": "../common.schema.json#/$defs/SimulationTime" }
+      }
+    },
+    "BenchmarkResultPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pairId", "baselineRunId", "harvestRunId", "metrics"],
+      "properties": {
+        "pairId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "baselineRunId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "harvestRunId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["localProcurementRate", "fulfilmentRate", "wasteQuantity"],
+          "properties": {
+            "localProcurementRate": { "type": "number", "minimum": 0, "maximum": 1 },
+            "fulfilmentRate": { "type": "number", "minimum": 0, "maximum": 1 },
+            "wasteQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" }
+          }
+        }
+      }
+    }
+  },
+  "x-harvest-event-examples": [
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000001",
+      "eventType": "CROP_OBSERVATION_SUBMITTED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000001",
+      "entityId": "10000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000001",
+      "causationId": null,
+      "schemaVersion": "1.0",
+      "provenance": "SYNTHETIC",
+      "payload": {"observationId": "11000000-0000-4000-8000-000000000001", "cropBatchId": "10000000-0000-4000-8000-000000000001", "observedAt": "2026-08-01T12:29:00Z", "cropStage": "FRUITING"}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000002",
+      "eventType": "FORECAST_PRODUCED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000001",
+      "entityId": "10000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000001",
+      "causationId": "e0000000-0000-4000-8000-000000000001",
+      "schemaVersion": "1.0",
+      "provenance": "MODEL_PREDICTED",
+      "payload": {"predictionId": "12000000-0000-4000-8000-000000000001", "cropBatchId": "10000000-0000-4000-8000-000000000001", "q10MarketableYield": {"value": 420, "unit": "kg"}, "availableToPromise": {"value": 380, "unit": "kg"}}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000003",
+      "eventType": "LISTING_PUBLISHED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000001",
+      "entityId": "13000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000001",
+      "causationId": "e0000000-0000-4000-8000-000000000002",
+      "schemaVersion": "1.0",
+      "provenance": "SYNTHETIC",
+      "payload": {"listingId": "13000000-0000-4000-8000-000000000001", "cropBatchId": "10000000-0000-4000-8000-000000000001", "quantity": {"value": 200, "unit": "kg"}, "availableFrom": "2026-08-10"}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000004",
+      "eventType": "BUYER_DEMAND_CREATED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000002",
+      "entityId": "14000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000002",
+      "causationId": null,
+      "schemaVersion": "1.0",
+      "provenance": "SYNTHETIC",
+      "payload": {"demandId": "14000000-0000-4000-8000-000000000001", "cropType": "TOMATO", "quantity": {"value": 120, "unit": "kg"}, "neededBy": "2026-08-12T14:00:00Z"}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000005",
+      "eventType": "ORDER_REQUESTED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000002",
+      "entityId": "15000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000002",
+      "causationId": null,
+      "schemaVersion": "1.0",
+      "provenance": "SYNTHETIC",
+      "payload": {"orderId": "15000000-0000-4000-8000-000000000001", "cropType": "TOMATO", "requestedQuantity": {"value": 120, "unit": "kg"}, "status": "REQUESTED"}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000006",
+      "eventType": "ALLOCATION_PROPOSED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000003",
+      "entityId": "16000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000002",
+      "causationId": "e0000000-0000-4000-8000-000000000005",
+      "schemaVersion": "1.0",
+      "provenance": "INFERRED",
+      "payload": {"allocationId": "16000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "lines": [{"cropBatchId": "10000000-0000-4000-8000-000000000001", "quantity": {"value": 120, "unit": "kg"}}]}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000007",
+      "eventType": "ALLOCATION_APPROVED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000001",
+      "entityId": "16000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000002",
+      "causationId": "e0000000-0000-4000-8000-000000000006",
+      "schemaVersion": "1.0",
+      "provenance": "OBSERVED",
+      "payload": {"allocationId": "16000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "lines": [{"cropBatchId": "10000000-0000-4000-8000-000000000001", "quantity": {"value": 120, "unit": "kg"}}]}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000008",
+      "eventType": "DELIVERY_MISSION_CREATED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000003",
+      "entityId": "17000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000002",
+      "causationId": "e0000000-0000-4000-8000-000000000007",
+      "schemaVersion": "1.0",
+      "provenance": "INFERRED",
+      "payload": {"missionId": "17000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "status": "AVAILABLE", "stops": [{"latitude": 13.94, "longitude": -60.96}, {"latitude": 13.91, "longitude": -60.98}]}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000009",
+      "eventType": "DELIVERY_MISSION_ACCEPTED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000004",
+      "entityId": "17000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000002",
+      "causationId": "e0000000-0000-4000-8000-000000000008",
+      "schemaVersion": "1.0",
+      "provenance": "SYNTHETIC",
+      "payload": {"missionId": "17000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "status": "ASSIGNED", "transporterId": "a0000000-0000-4000-8000-000000000004", "stops": [{"latitude": 13.94, "longitude": -60.96}, {"latitude": 13.91, "longitude": -60.98}]}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000010",
+      "eventType": "DELIVERY_UPDATE_POSTED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000004",
+      "entityId": "17000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000002",
+      "causationId": "e0000000-0000-4000-8000-000000000009",
+      "schemaVersion": "1.0",
+      "provenance": "SYNTHETIC",
+      "payload": {"missionId": "17000000-0000-4000-8000-000000000001", "updateType": "POSITION", "recordedAt": "2026-08-01T12:30:00Z", "position": {"latitude": 13.925, "longitude": -60.97}}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000011",
+      "eventType": "EXCEPTION_REPORTED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000004",
+      "entityId": "18000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000002",
+      "causationId": "e0000000-0000-4000-8000-000000000010",
+      "schemaVersion": "1.0",
+      "provenance": "OBSERVED",
+      "payload": {"exceptionId": "18000000-0000-4000-8000-000000000001", "exceptionType": "DELAY", "severity": "HIGH", "affectedEntityIds": ["15000000-0000-4000-8000-000000000001"]}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000012",
+      "eventType": "RECOVERY_APPROVED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000003",
+      "entityId": "18000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000002",
+      "causationId": "e0000000-0000-4000-8000-000000000011",
+      "schemaVersion": "1.0",
+      "provenance": "OBSERVED",
+      "payload": {"exceptionId": "18000000-0000-4000-8000-000000000001", "approvalId": "19000000-0000-4000-8000-000000000001", "actionType": "REROUTE"}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000013",
+      "eventType": "DELIVERY_ACCEPTED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000002",
+      "entityId": "20000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000002",
+      "causationId": "e0000000-0000-4000-8000-000000000010",
+      "schemaVersion": "1.0",
+      "provenance": "SYNTHETIC",
+      "payload": {"deliveryId": "20000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "acceptedQuantity": {"value": 120, "unit": "kg"}, "rejectedQuantity": {"value": 0, "unit": "kg"}, "outcome": "ACCEPTED"}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000014",
+      "eventType": "ORDER_FULFILLED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000002",
+      "entityId": "15000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000002",
+      "causationId": "e0000000-0000-4000-8000-000000000013",
+      "schemaVersion": "1.0",
+      "provenance": "SYNTHETIC",
+      "payload": {"orderId": "15000000-0000-4000-8000-000000000001", "status": "FULFILLED", "acceptedQuantity": {"value": 120, "unit": "kg"}, "releasedReservationQuantity": {"value": 5, "unit": "kg"}}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000015",
+      "eventType": "ORDER_PARTIALLY_FULFILLED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000002",
+      "entityId": "15000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000002",
+      "causationId": "e0000000-0000-4000-8000-000000000013",
+      "schemaVersion": "1.0",
+      "provenance": "SYNTHETIC",
+      "payload": {"orderId": "15000000-0000-4000-8000-000000000001", "status": "PARTIALLY_FULFILLED", "acceptedQuantity": {"value": 80, "unit": "kg"}, "releasedReservationQuantity": {"value": 40, "unit": "kg"}}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000016",
+      "eventType": "ORDER_REJECTED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000002",
+      "entityId": "15000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000002",
+      "causationId": "e0000000-0000-4000-8000-000000000013",
+      "schemaVersion": "1.0",
+      "provenance": "SYNTHETIC",
+      "payload": {"orderId": "15000000-0000-4000-8000-000000000001", "status": "REJECTED", "acceptedQuantity": {"value": 0, "unit": "kg"}, "releasedReservationQuantity": {"value": 120, "unit": "kg"}}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000017",
+      "eventType": "ORDER_CANCELLED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000003",
+      "entityId": "15000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000002",
+      "causationId": "e0000000-0000-4000-8000-000000000012",
+      "schemaVersion": "1.0",
+      "provenance": "OBSERVED",
+      "payload": {"orderId": "15000000-0000-4000-8000-000000000001", "status": "CANCELLED", "acceptedQuantity": {"value": 0, "unit": "kg"}, "releasedReservationQuantity": {"value": 120, "unit": "kg"}}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000018",
+      "eventType": "SIMULATION_ACTOR_MOVED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000004",
+      "entityId": "a0000000-0000-4000-8000-000000000004",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000003",
+      "causationId": null,
+      "schemaVersion": "1.0",
+      "provenance": "SYNTHETIC",
+      "payload": {"actorId": "a0000000-0000-4000-8000-000000000004", "position": {"latitude": 13.925, "longitude": -60.97}}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000019",
+      "eventType": "SIMULATION_DISRUPTION_OBSERVED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000003",
+      "entityId": "21000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000003",
+      "causationId": null,
+      "schemaVersion": "1.0",
+      "provenance": "SYNTHETIC",
+      "payload": {"disruptionType": "ROAD", "affectedEntityIds": ["17000000-0000-4000-8000-000000000001"], "observedAt": "2026-09-04T14:15:00Z", "description": "Road closure observed."}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000020",
+      "eventType": "SIMULATION_TASK_COMPLETED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000004",
+      "entityId": "22000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000003",
+      "causationId": "e0000000-0000-4000-8000-000000000018",
+      "schemaVersion": "1.0",
+      "provenance": "SYNTHETIC",
+      "payload": {"taskId": "22000000-0000-4000-8000-000000000001", "taskType": "DELIVER", "actorId": "a0000000-0000-4000-8000-000000000004", "completedAt": "2026-09-04T14:15:00Z"}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000021",
+      "eventType": "BENCHMARK_RESULT_RECORDED",
+      "occurredAt": "2026-08-01T12:30:00Z",
+      "simulationTime": "2026-09-04T14:15:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000003",
+      "entityId": "23000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000003",
+      "causationId": null,
+      "schemaVersion": "1.0",
+      "provenance": "SYNTHETIC",
+      "payload": {"pairId": "23000000-0000-4000-8000-000000000001", "baselineRunId": "b0000000-0000-4000-8000-000000000002", "harvestRunId": "b0000000-0000-4000-8000-000000000001", "metrics": {"localProcurementRate": 0.7, "fulfilmentRate": 0.91, "wasteQuantity": {"value": 80, "unit": "kg"}}}
+    }
+  ]
+}

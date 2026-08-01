@@ -4,9 +4,12 @@ Use this reading order:
 
 1. [`product.md`](product.md) — concise product scope and non-negotiables.
 2. [`architecture.md`](architecture.md) — system ownership and communication.
-3. [`../contracts/README.md`](../contracts/README.md) — interface governance.
-4. [`roadmap.md`](roadmap.md) — priorities and responsibility areas.
-5. [`context.md`](context.md) — complete application, research, and planning
+3. [`api_info.md`](api_info.md) — exact API consumers, state changes, events,
+   and simulation effects.
+4. [`../contracts/README.md`](../contracts/README.md) — machine-readable
+   interface governance.
+5. [`roadmap.md`](roadmap.md) — priorities and responsibility areas.
+6. [`context.md`](context.md) — complete application, research, and planning
    background.
 
 The linked GitHub issue defines the scope of a change. Product, architecture,

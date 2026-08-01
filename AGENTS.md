@@ -17,9 +17,11 @@ smallest coherent implementation that proves the end-to-end workflow.
 2. [`README.md`](README.md).
 3. [`docs/product.md`](docs/product.md).
 4. [`docs/architecture.md`](docs/architecture.md).
-5. The README for the area being changed.
-6. [`contracts/README.md`](contracts/README.md) and any relevant contracts.
-7. [`docs/roadmap.md`](docs/roadmap.md) for current priorities.
+5. [`docs/api_info.md`](docs/api_info.md) before implementing or calling an
+   API, event, simulation effect, or model interface.
+6. The README for the area being changed.
+7. [`contracts/README.md`](contracts/README.md) and any relevant contracts.
+8. [`docs/roadmap.md`](docs/roadmap.md) for current priorities.
 
 Use [`docs/context.md`](docs/context.md) for deeper background. It contains
 brainstorming and long-term ideas, so do not treat every item as current scope.
@@ -40,9 +42,17 @@ brainstorming and long-term ideas, so do not treat every item as current scope.
 ## Implementation rules
 
 - Work from one focused issue and avoid unrelated changes.
+- Locate an operation in the API catalogue and its machine-readable contract
+  before implementing or calling it.
 - Do not invent an endpoint, event, or model payload outside `contracts/`.
+- Do not invent state transitions or simulation effects outside
+  [`docs/api_info.md`](docs/api_info.md) and the event catalogue.
 - Update contracts, documentation, and affected consumers together when an
   interface changes. If that is impossible, link explicit blocking issues.
+- Every API or event change must update the applicable OpenAPI/JSON Schema,
+  `docs/api_info.md`, and affected generated clients/handlers together.
+- Simulation handlers must apply only the deterministic event effects defined
+  in `docs/api_info.md` and `contracts/events/EVENT_CATALOGUE.md`.
 - Use deterministic, validated code for quantities, reservations, allocation,
   routing, permissions, and state transitions.
 - Use AI for unstructured extraction, prediction support, and complex exception
@@ -62,12 +72,18 @@ brainstorming and long-term ideas, so do not treat every item as current scope.
 
 ## Pull request control
 
-- Agents and teammates may create branches and open or update pull requests.
-- Only Xuanming may merge or close a pull request.
-- Leave every pull request open after creating or updating it. Never enable
-  auto-merge or perform an automatic merge or close action.
-- Only Xuanming deletes a branch after its pull request is merged or closed.
-- Reviews are optional and may be requested when they are useful.
+- AI agents may create branches and open or update pull requests, but must stop
+  after doing so and leave the pull request open.
+- AI agents and automated systems must never push directly to `main`, merge a
+  branch or pull request into `main`, close a pull request, enable auto-merge,
+  or delete a pull-request branch.
+- Only a human may formally review, approve, request changes on, merge, or close
+  a pull request. Any authorised human collaborator may perform those actions.
+- Every merge must be deliberately initiated by a human. Auto-merge is always
+  forbidden.
+- Only a human deletes a branch after its pull request is merged or closed.
+- Human reviews are optional. AI agents may inspect, test, and report findings,
+  but must not submit a formal GitHub review or approval.
 
 ## Definition of done
 
