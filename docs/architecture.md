@@ -68,19 +68,30 @@ validated prediction affects operational recommendations.
 Contracts are updated before or with affected implementations so TypeScript and
 Python consumers do not drift.
 
+[`api_info.md`](api_info.md) maps each contracted operation to its caller,
+Product API state change, emitted event, deterministic simulation effect, and
+website/mobile consumer. Implementations must follow both sources together.
+
 ## State and events
 
 The intended operational record is an append-only event log linked to current
 state. Events support live interfaces, replay, benchmark calculations, agent
 traces, and debugging.
 
-Each event should eventually carry identifiers for the run, actor, entity, and
-trace, plus event time, source, payload, and provenance. Exact fields belong in
-the event contract when its implementation issue is opened.
+Each event carries event, run, actor, entity, trace, correlation, and causation
+identifiers; real and optional simulation time; schema version; provenance; and
+a typed payload. Exact validation is defined by
+[`event-envelope.schema.json`](../contracts/events/event-envelope.schema.json).
 
 Hidden simulation truth must remain separate from observed Product API state.
 Agents and models receive only the evidence available to Harvest at that point
 in the scenario.
+
+Simulation reactions are deterministic future schedule/world effects defined
+in [`api_info.md`](api_info.md) and the
+[`event catalogue`](../contracts/events/EVENT_CATALOGUE.md). The simulation
+deduplicates by event ID, persists its SSE cursor, and never accesses Product
+API storage directly.
 
 ## Deterministic and AI responsibilities
 

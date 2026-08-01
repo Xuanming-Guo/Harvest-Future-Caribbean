@@ -23,3 +23,12 @@ or inference work begins.
   not claim exact crop recognition or guaranteed yield from satellite imagery.
 
 Model interfaces belong in [`contracts/`](../contracts/).
+
+## Integration guide
+
+The internal inference operation is defined in
+[`contracts/model/openapi.yaml`](../contracts/model/openapi.yaml) and its shared
+request/response schema. [`docs/api_info.md`](../docs/api_info.md) explains how
+the Product API validates a prediction and calculates available-to-promise.
+The model returns uncertainty and evidence; it never calculates ATP, reserves
+inventory, or changes Product API state.

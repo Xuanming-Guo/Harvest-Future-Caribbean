@@ -1,0 +1,82 @@
+openapi: 3.1.0
+info:
+  title: Harvest Yield Model API
+  version: 0.1.0
+  description: >-
+    Internal FastAPI inference interface called only by the Product API. The
+    model returns an uncertain prediction; it does not calculate
+    available-to-promise, reserve inventory, or mutate operational state.
+servers:
+  - url: http://localhost:8002
+security:
+  - internalServiceToken: []
+paths:
+  /internal/v1/yield-predictions:
+    post:
+      operationId: createYieldPrediction
+      summary: Infer a marketable-yield range and harvest window
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: './yield-prediction.schema.json#/$defs/YieldPredictionRequest'}
+            example:
+              requestId: 33333333-3333-4333-8333-333333333333
+              cropBatchId: 11111111-1111-4111-8111-111111111111
+              cropType: TOMATO
+              farmId: 14141414-1414-4414-8414-141414141414
+              requestedAt: '2026-08-01T09:31:00Z'
+              simulationRunId: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+              provenance: SYNTHETIC
+              features:
+                observationCount: 3
+                plantedAreaHectares: 0.4
+                cropStage: FRUITING
+                lastObservedAt: '2026-08-01T09:30:00Z'
+                weatherSummary: {rainfall7dMm: 41.2}
+                satelliteSummary: {ndviMedian: 0.71}
+      responses:
+        '200':
+          description: >-
+            Valid prediction with q10 <= q50 <= q90 and a single unit. Product
+            API validates this response before storing it or calculating ATP.
+          content:
+            application/json:
+              schema: {$ref: './yield-prediction.schema.json'}
+              example:
+                predictionId: 44444444-4444-4444-8444-444444444444
+                requestId: 33333333-3333-4333-8333-333333333333
+                cropBatchId: 11111111-1111-4111-8111-111111111111
+                modelVersion: yield-v0.1.0
+                q10MarketableYield: {value: 420, unit: kg}
+                q50MarketableYield: {value: 500, unit: kg}
+                q90MarketableYield: {value: 590, unit: kg}
+                harvestWindow: {start: '2026-08-10', end: '2026-08-17'}
+                readiness: 0.76
+                confidence: 0.71
+                warnings: [Sparse field observations]
+                provenance: MODEL_PREDICTED
+                generatedAt: '2026-08-01T10:00:00Z'
+        default: {$ref: '#/components/responses/Problem'}
+components:
+  securitySchemes:
+    internalServiceToken:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-service-token
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, minLength: 8, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]+$'}
+      example: forecast-33333333-3333-4333-8333-333333333333
+  responses:
+    Problem:
+      description: RFC 7807 request, inference, or response-validation error.
+      content:
+        application/problem+json:
+          schema: {$ref: '../common.schema.json#/$defs/Problem'}
+          example: {type: /problems/prediction-invalid, title: Prediction failed validation, status: 422, code: QUANTILES_OUT_OF_ORDER}

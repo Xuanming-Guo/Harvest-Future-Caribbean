@@ -23,3 +23,12 @@ upfront.
 - Simulated users call the same Product API operations as real users.
 - Shared code must not duplicate backend business rules.
 - API requests and responses must be defined in [`contracts/`](../contracts/).
+
+## Integration guide
+
+Before implementing a page, mobile journey, or Product API handler, use
+[`docs/api_info.md`](../docs/api_info.md) to find the exact operation, caller
+role, state/event transaction, simulation effect, and affected interfaces.
+Generate the Next.js and Expo clients from
+[`contracts/openapi.yaml`](../contracts/openapi.yaml); do not maintain a second
+set of hand-written request/response types.
