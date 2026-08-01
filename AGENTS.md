@@ -72,12 +72,18 @@ brainstorming and long-term ideas, so do not treat every item as current scope.
 
 ## Pull request control
 
-- Agents and teammates may create branches and open or update pull requests.
-- Only Xuanming may merge or close a pull request.
-- Leave every pull request open after creating or updating it. Never enable
-  auto-merge or perform an automatic merge or close action.
-- Only Xuanming deletes a branch after its pull request is merged or closed.
-- Reviews are optional and may be requested when they are useful.
+- AI agents may create branches and open or update pull requests, but must stop
+  after doing so and leave the pull request open.
+- AI agents and automated systems must never push directly to `main`, merge a
+  branch or pull request into `main`, close a pull request, enable auto-merge,
+  or delete a pull-request branch.
+- Only a human may formally review, approve, request changes on, merge, or close
+  a pull request. Any authorised human collaborator may perform those actions.
+- Every merge must be deliberately initiated by a human. Auto-merge is always
+  forbidden.
+- Only a human deletes a branch after its pull request is merged or closed.
+- Human reviews are optional. AI agents may inspect, test, and report findings,
+  but must not submit a formal GitHub review or approval.
 
 ## Definition of done
 
