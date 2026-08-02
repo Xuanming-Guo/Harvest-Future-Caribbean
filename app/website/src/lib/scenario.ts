@@ -1,0 +1,4 @@
+export const DEMO_RUN_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+export const DEMO_PAIR_ID = "30303030-3030-4030-8030-303030303030";
+export const DEMO_TRACE_ID = "c0000000-0000-4000-8000-000000000001";
+export const DEMO_VEHICLE_ID = "51515151-5151-4515-8515-515151515151";

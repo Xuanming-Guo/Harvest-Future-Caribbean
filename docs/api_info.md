@@ -122,6 +122,17 @@ scope, not only the role name.
 
 ### Crop intelligence
 
+#### `GET /v1/crop-batches`
+
+- Callers: farmer for owned batches and authorised coordinator, operations, or
+  admin roles.
+- Request: optional `cropType`, status, cursor, and limit filters.
+- Response: a role-filtered page of observable crop batches with latest safe
+  prediction IDs, ATP, and provenance.
+- Product state/event and simulation effect: none; this is a read projection.
+- Consumers: operations supply table, Model Lab selector, and future mobile
+  crop lists.
+
 #### `POST /v1/crop-observations`
 
 - Callers: farmer for an owned batch; coordinator for an authorised farm.
@@ -166,7 +177,27 @@ scope, not only the role name.
 - Rules/failures: concurrent equivalent jobs return their existing receipt;
   reject missing evidence, inaccessible batches, and invalid job transitions.
 
+#### `GET /v1/yield-predictions/{predictionId}`
+
+- Callers: actors authorised for the related crop batch and operations roles.
+- Response: the Product API's validated prediction, allow-listed feature
+  snapshot, version, interval, confidence, warnings, provenance, and optional
+  accepted-outcome evaluation.
+- Product state/event and simulation effect: none.
+- Consumers: Model Lab and crop evidence panels. Website/mobile never call the
+  internal model endpoint directly and never receive model artefacts or hidden
+  simulation truth.
+
 ### Marketplace and orders
+
+#### `GET /v1/buyer-demands`
+
+- Callers: the buyer for owned demand plus authorised coordinator, operations,
+  and admin roles.
+- Request: optional crop, status, cursor, and limit filters.
+- Response: a role-filtered demand page.
+- Product state/event and simulation effect: none.
+- Consumers: operations demand table and future buyer demand history.
 
 #### `GET /v1/listings`
 
@@ -224,6 +255,15 @@ scope, not only the role name.
 - Rules/failures: duplicate business intent with the same key returns the same
   order; inaccessible listings, invalid quantity/date, or identity fields fail.
 
+#### `GET /v1/orders`
+
+- Callers: participating actors and authorised operations roles.
+- Request: optional lifecycle status, risk overlay, cursor, and limit filters.
+- Response: a role-filtered order page using the same lifecycle representation
+  as order detail.
+- Product state/event and simulation effect: none.
+- Consumers: operations order table and buyer order history.
+
 #### `GET /v1/orders/{orderId}`
 
 - Callers: participating buyer/farm/transporter when relevant; authorised
@@ -237,6 +277,16 @@ scope, not only the role name.
 - Rules/failures: role-filter sensitive farm, buyer, route, and location data.
 
 ### Approvals and delivery
+
+#### `GET /v1/approvals`
+
+- Callers: named approvers and authorised coordinator, operations, and admin
+  roles.
+- Request: optional status, subject type, cursor, and limit filters.
+- Response: pending or decided approvals with request time; decision identity,
+  time, and reason appear only after a final human decision.
+- Product state/event and simulation effect: none.
+- Consumers: operations approval queue and future focused mobile approvals.
 
 #### `POST /v1/approvals/{approvalId}/decisions`
 
@@ -320,6 +370,14 @@ scope, not only the role name.
 - Rules/failures: reject unknown/inaccessible entities, hidden-state fields, and
   an unsupported provenance.
 
+#### `GET /v1/exceptions`
+
+- Callers: affected actors and authorised operations roles.
+- Request: optional status, severity, cursor, and limit filters.
+- Response: role-filtered operational exceptions and provenance.
+- Product state/event and simulation effect: none.
+- Consumers: operations exception queue, control room, and recovery context.
+
 #### `POST /v1/deliveries/{deliveryId}/acceptance`
 
 - Callers: receiving buyer or explicitly authorised receiving coordinator.
@@ -357,7 +415,7 @@ scope, not only the role name.
   steps, and confidence where relevant.
 - Product state/event: none.
 - Simulation effect: none.
-- Consumers: trace viewer and Judge Mode.
+- Consumers: trace viewer and linked operations/control-room evidence.
 - Rules/failures: never return private chain-of-thought, secrets, hidden truth,
   or evidence the caller cannot access.
 
@@ -493,7 +551,7 @@ and returns observable projections. It never copies hidden truth into its DB.
 | Operations website | Operations snapshot, order/mission/trace detail | Scoped approvals and run actions | Role-filtered operational stream |
 | 3D control room | Run, observable world, snapshot | Run commands | Run-scoped operational and observable simulation events |
 | Benchmark website | Paired-run status/result | Create paired run | Benchmark result and run progress |
-| Trace viewer / Judge Mode | Agent trace and relevant entity detail | None | Trace-linked events |
+| Trace viewer | Agent trace and relevant entity detail | None | Trace-linked events |
 | Harvest simulated farmer | Same crop/listing/approval operations as farmer | Same request bodies as farmer | Run-scoped events |
 | Harvest simulated buyer | Same listing/demand/order/acceptance operations as buyer | Same request bodies as buyer | Run-scoped events |
 | Harvest simulated transporter | Same mission/update/exception operations as transporter | Same request bodies as transporter | Run-scoped events |

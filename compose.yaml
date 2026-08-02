@@ -1,0 +1,21 @@
+name: harvest
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: harvest
+      POSTGRES_USER: harvest
+      POSTGRES_PASSWORD: harvest-local-only
+    ports:
+      - "5432:5432"
+    volumes:
+      - harvest-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U harvest -d harvest"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  harvest-postgres:

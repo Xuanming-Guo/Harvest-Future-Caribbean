@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Harvest Product API
-  version: 0.1.0
+  version: 0.2.0
   description: >-
     Canonical operational API for real users, Harvest-mode simulated actors,
     website/mobile clients, and internal simulation ingestion. Operational
@@ -65,6 +65,27 @@ paths:
                 provenance: OBSERVED
                 traceId: 13131313-1313-4313-8313-131313131313
         default: {$ref: '#/components/responses/Problem'}
+  /v1/crop-batches:
+    get:
+      tags: [Crop]
+      operationId: listCropBatches
+      summary: List observable crop supply visible to the caller
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+        - name: cropType
+          in: query
+          schema: {type: string}
+        - name: status
+          in: query
+          schema: {enum: [PLANNED, GROWING, HARVEST_READY, HARVESTED, CLOSED]}
+      responses:
+        '200':
+          description: Role-filtered crop batches.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CropBatchPage'}
+        default: {$ref: '#/components/responses/Problem'}
   /v1/crop-batches/{cropBatchId}:
     get:
       tags: [Crop]
@@ -113,6 +134,20 @@ paths:
                 cropBatchId: 11111111-1111-4111-8111-111111111111
                 status: QUEUED
                 requestedAt: '2026-08-01T09:31:00Z'
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/yield-predictions/{predictionId}:
+    get:
+      tags: [Crop]
+      operationId: getYieldPrediction
+      summary: Read a validated prediction and its safe evidence snapshot
+      parameters:
+        - $ref: '#/components/parameters/PredictionId'
+      responses:
+        '200':
+          description: A role-filtered Product API projection, never a direct model-service response.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/YieldPredictionEvidence'}
         default: {$ref: '#/components/responses/Problem'}
   /v1/listings:
     get:
@@ -181,6 +216,26 @@ paths:
                 createdAt: '2026-08-01T10:00:00Z'
         default: {$ref: '#/components/responses/Problem'}
   /v1/buyer-demands:
+    get:
+      tags: [Marketplace]
+      operationId: listBuyerDemands
+      summary: List role-filtered buyer demand
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+        - name: cropType
+          in: query
+          schema: {type: string}
+        - name: status
+          in: query
+          schema: {enum: [OPEN, MATCHING, SATISFIED, CANCELLED]}
+      responses:
+        '200':
+          description: Buyer demands visible to the caller.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BuyerDemandPage'}
+        default: {$ref: '#/components/responses/Problem'}
     post:
       tags: [Marketplace]
       operationId: createBuyerDemand
@@ -216,6 +271,26 @@ paths:
                 createdAt: '2026-08-01T10:10:00Z'
         default: {$ref: '#/components/responses/Problem'}
   /v1/orders:
+    get:
+      tags: [Orders]
+      operationId: listOrders
+      summary: List role-filtered orders and risk overlays
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+        - name: status
+          in: query
+          schema: {$ref: '#/components/schemas/OrderStatus'}
+        - name: atRisk
+          in: query
+          schema: {type: boolean}
+      responses:
+        '200':
+          description: Orders visible to the caller.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderPage'}
+        default: {$ref: '#/components/responses/Problem'}
     post:
       tags: [Orders]
       operationId: createOrder
@@ -276,6 +351,27 @@ paths:
                 createdAt: '2026-08-01T10:15:00Z'
                 updatedAt: '2026-08-12T13:45:00Z'
         default: {$ref: '#/components/responses/Problem'}
+  /v1/approvals:
+    get:
+      tags: [Orders]
+      operationId: listApprovals
+      summary: List pending and decided human approvals
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+        - name: status
+          in: query
+          schema: {enum: [PENDING, APPROVED, REJECTED]}
+        - name: subjectType
+          in: query
+          schema: {enum: [ALLOCATION, RECOVERY, CANCELLATION, SUBSTITUTION, PRICE_CHANGE, LOCATION_DISCLOSURE, PRODUCE_REJECTION, INTER_ISLAND_COMMITMENT]}
+      responses:
+        '200':
+          description: Approval requests visible to the caller.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ApprovalPage'}
+        default: {$ref: '#/components/responses/Problem'}
   /v1/approvals/{approvalId}/decisions:
     post:
       tags: [Orders]
@@ -303,6 +399,7 @@ paths:
                 subjectType: ALLOCATION
                 subjectId: 22222222-2222-4222-8222-222222222222
                 status: APPROVED
+                requestedAt: '2026-08-01T10:55:00Z'
                 decidedBy: 17171717-1717-4717-8717-171717171717
                 decidedAt: '2026-08-01T11:00:00Z'
         default: {$ref: '#/components/responses/Problem'}
@@ -426,6 +523,26 @@ paths:
                 note: En route to buyer.
         default: {$ref: '#/components/responses/Problem'}
   /v1/exceptions:
+    get:
+      tags: [Delivery]
+      operationId: listExceptions
+      summary: List operational exceptions visible to the caller
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+        - name: status
+          in: query
+          schema: {enum: [OPEN, RECOVERY_PENDING, RESOLVED]}
+        - name: severity
+          in: query
+          schema: {enum: [LOW, MEDIUM, HIGH, CRITICAL]}
+      responses:
+        '200':
+          description: Role-filtered operational exceptions.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ExceptionPage'}
+        default: {$ref: '#/components/responses/Problem'}
     post:
       tags: [Delivery]
       operationId: createException
@@ -840,6 +957,11 @@ components:
       in: path
       required: true
       schema: {type: string, format: uuid}
+    PredictionId:
+      name: predictionId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
     ApprovalId:
       name: approvalId
       in: path
@@ -921,6 +1043,13 @@ components:
         latestPredictionId: {type: string, format: uuid}
         availableToPromise: {$ref: './common.schema.json#/$defs/Quantity'}
         provenance: {$ref: './common.schema.json#/$defs/Provenance'}
+    CropBatchPage:
+      type: object
+      additionalProperties: false
+      required: [items, pageInfo]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/CropBatch'}}
+        pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
     ForecastRequest:
       type: object
       additionalProperties: false
@@ -936,6 +1065,36 @@ components:
         cropBatchId: {type: string, format: uuid}
         status: {enum: [QUEUED, RUNNING, COMPLETED, FAILED]}
         requestedAt: {type: string, format: date-time}
+    YieldPredictionEvidence:
+      type: object
+      additionalProperties: false
+      required: [predictionId, requestId, cropBatchId, modelVersion, q10MarketableYield, q50MarketableYield, q90MarketableYield, harvestWindow, readiness, confidence, warnings, featureSnapshot, provenance, generatedAt]
+      properties:
+        predictionId: {type: string, format: uuid}
+        requestId: {type: string, format: uuid}
+        cropBatchId: {type: string, format: uuid}
+        modelVersion: {type: string, minLength: 1}
+        q10MarketableYield: {$ref: './common.schema.json#/$defs/Quantity'}
+        q50MarketableYield: {$ref: './common.schema.json#/$defs/Quantity'}
+        q90MarketableYield: {$ref: './common.schema.json#/$defs/Quantity'}
+        harvestWindow: {$ref: './common.schema.json#/$defs/DateRange'}
+        readiness: {type: number, minimum: 0, maximum: 1}
+        confidence: {type: number, minimum: 0, maximum: 1}
+        warnings: {type: array, uniqueItems: true, items: {type: string}}
+        featureSnapshot:
+          type: object
+          additionalProperties: true
+          description: Allow-listed feature evidence stored by the Product API; never model artefacts or simulation hidden truth.
+        provenance: {const: MODEL_PREDICTED}
+        generatedAt: {type: string, format: date-time}
+        actualOutcome: {$ref: './common.schema.json#/$defs/Quantity'}
+        evaluation:
+          type: object
+          additionalProperties: false
+          required: [absoluteError, intervalCovered]
+          properties:
+            absoluteError: {$ref: './common.schema.json#/$defs/Quantity'}
+            intervalCovered: {type: boolean}
     ListingCreate:
       type: object
       additionalProperties: false
@@ -992,6 +1151,13 @@ components:
         maxUnitPrice: {$ref: './common.schema.json#/$defs/Money'}
         status: {enum: [OPEN, MATCHING, SATISFIED, CANCELLED]}
         createdAt: {type: string, format: date-time}
+    BuyerDemandPage:
+      type: object
+      additionalProperties: false
+      required: [items, pageInfo]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/BuyerDemand'}}
+        pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
     OrderCreate:
       type: object
       additionalProperties: false
@@ -1026,6 +1192,13 @@ components:
         updatedAt: {type: string, format: date-time}
     OrderStatus:
       enum: [REQUESTED, ALLOCATION_PROPOSED, AWAITING_APPROVAL, COMMITTED, IN_DELIVERY, FULFILLED, PARTIALLY_FULFILLED, REJECTED, CANCELLED]
+    OrderPage:
+      type: object
+      additionalProperties: false
+      required: [items, pageInfo]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/Order'}}
+        pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
     ApprovalDecision:
       type: object
       additionalProperties: false
@@ -1036,14 +1209,23 @@ components:
     Approval:
       type: object
       additionalProperties: false
-      required: [approvalId, subjectType, subjectId, status, decidedBy, decidedAt]
+      required: [approvalId, subjectType, subjectId, status, requestedAt]
       properties:
         approvalId: {type: string, format: uuid}
         subjectType: {enum: [ALLOCATION, RECOVERY, CANCELLATION, SUBSTITUTION, PRICE_CHANGE, LOCATION_DISCLOSURE, PRODUCE_REJECTION, INTER_ISLAND_COMMITMENT]}
         subjectId: {type: string, format: uuid}
-        status: {enum: [APPROVED, REJECTED]}
+        status: {enum: [PENDING, APPROVED, REJECTED]}
+        requestedAt: {type: string, format: date-time}
         decidedBy: {type: string, format: uuid}
         decidedAt: {type: string, format: date-time}
+        reason: {type: string, maxLength: 1000}
+    ApprovalPage:
+      type: object
+      additionalProperties: false
+      required: [items, pageInfo]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/Approval'}}
+        pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
     MissionStatus:
       enum: [AVAILABLE, ASSIGNED, PICKUP_IN_PROGRESS, IN_TRANSIT, DELIVERED, CANCELLED]
     DeliveryStop:
@@ -1126,6 +1308,13 @@ components:
         status: {enum: [OPEN, RECOVERY_PENDING, RESOLVED]}
         provenance: {$ref: './common.schema.json#/$defs/Provenance'}
         reportedAt: {type: string, format: date-time}
+    ExceptionPage:
+      type: object
+      additionalProperties: false
+      required: [items, pageInfo]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/OperationalException'}}
+        pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
     DeliveryAcceptanceCreate:
       type: object
       additionalProperties: false

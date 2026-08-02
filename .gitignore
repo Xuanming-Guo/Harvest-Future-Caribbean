@@ -17,14 +17,18 @@ logs/
 # JavaScript, TypeScript, Next.js, and Expo
 node_modules/
 .next/
+.turbo/
 out/
 dist/
 build/
 coverage/
+playwright-report/
+test-results/
 .expo/
 .expo-shared/
 web-build/
 *.tsbuildinfo
+app/shared/src/generated/
 
 # Python
 __pycache__/

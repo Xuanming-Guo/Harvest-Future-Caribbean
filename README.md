@@ -2,7 +2,7 @@
 
 > An agentic farm-to-market coordination network for Caribbean food systems.
 
-**Current phase:** repository foundations and hackathon implementation planning.
+**Current phase:** hackathon implementation.
 
 Harvest helps turn uncertain farmer updates into safer supply commitments,
 multi-farm fulfilment, coordinated delivery, exception recovery, traceability,
@@ -22,6 +22,22 @@ and better future forecasts.
 | [`docs/`](docs/) | Product context, architecture, priorities, and decision guidance |
 
 Deeper source folders are added only when an implementation issue needs them.
+
+## Run the local product
+
+Requirements: Node.js 20+ and Docker Desktop with Docker Compose.
+
+```bash
+npm install
+npm run dev
+```
+
+This starts PostgreSQL in Docker, applies the committed Prisma migration,
+seeds the labelled Saint Lucia counterfactual scenario, and runs the Product
+API at `http://localhost:3001` plus the website at `http://localhost:3000`.
+See [`app/api/README.md`](app/api/README.md) and
+[`app/website/README.md`](app/website/README.md) for configuration and route
+details.
 
 ## Architecture at a glance
 

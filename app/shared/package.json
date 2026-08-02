@@ -1,0 +1,22 @@
+{
+  "name": "@harvest/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "generate": "openapi-typescript ../../contracts/openapi.yaml -o src/generated/product-api.d.ts && cd ../../contracts/events && json2ts -i event-envelope.schema.json -o ../../app/shared/src/generated/event-envelope.d.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.14.0"
+  },
+  "devDependencies": {
+    "json-schema-to-typescript": "^15.0.4",
+    "openapi-typescript": "^7.9.1",
+    "typescript": "^5.9.2"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "harvest",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "app/api",
+    "app/shared",
+    "app/website"
+  ],
+  "scripts": {
+    "predev": "npm run db:up && npm run contracts:generate && npm run db:generate && npm run db:migrate && npm run db:seed",
+    "dev": "concurrently --kill-others-on-fail --names api,web --prefix-colors magenta,green \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "npm run dev --workspace @harvest/api",
+    "dev:web": "npm run dev --workspace @harvest/website",
+    "db:up": "docker compose up -d --wait postgres",
+    "db:down": "docker compose down",
+    "db:generate": "npm run db:generate --workspace @harvest/api",
+    "db:migrate": "npm run db:migrate --workspace @harvest/api",
+    "db:seed": "npm run db:seed --workspace @harvest/api",
+    "db:studio": "npm run db:studio --workspace @harvest/api",
+    "contracts:generate": "npm run generate --workspace @harvest/shared",
+    "prebuild": "npm run contracts:generate && npm run db:generate",
+    "build": "npm run build --workspace @harvest/shared && npm run build --workspace @harvest/api && npm run build --workspace @harvest/website",
+    "lint": "npm run lint --workspace @harvest/api && npm run lint --workspace @harvest/website",
+    "typecheck": "npm run typecheck --workspace @harvest/shared && npm run typecheck --workspace @harvest/api && npm run typecheck --workspace @harvest/website",
+    "test": "npm run test --workspace @harvest/api && npm run test --workspace @harvest/website",
+    "test:e2e": "npm run test:e2e --workspace @harvest/website",
+    "check": "npm run lint && npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "engines": {
+    "node": ">=20.18"
+  }
+}

@@ -134,3 +134,16 @@ Every important input must state whether it is:
 Synthetic operational data is acceptable for the hackathon when clearly
 labelled. Simulation measures operational and economic behaviour; usability and
 adoption claims require real stakeholder testing.
+
+## Local implementation
+
+The hackathon development stack runs PostgreSQL 16 in Docker and runs Fastify
+and Next.js directly through npm. Prisma migrations define Product API storage.
+A seeded development JWT issuer supplies synthetic role personas; production
+configuration accepts Supabase-compatible JWTs instead. Development model and
+simulation adapters implement the documented boundaries with deterministic
+fixture data and can be replaced by the Python services through configuration.
+
+The browser never treats local storage as operational state. Website caches and
+navigation state are disposable; PostgreSQL plus the append-only event log are
+authoritative.
