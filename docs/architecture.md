@@ -1,23 +1,23 @@
 # Architecture
 
-Harvest is one instrumented workflow, not separate app, simulation, and model
-demos. All components communicate through documented contracts.
+Harvest is one instrumented workflow presented through separate, purpose-built
+interfaces. All components communicate through documented contracts.
 
 ## System flow
 
 ```text
-Website / mobile / simulated actors
-                 |
-                 v
-        Product API and agent runtime
-            |                 |
-            v                 v
- Operational state        Model service
- and append-only log      predictions
-            |
-            v
- Website, mobile, simulation control room,
- traces, and benchmark views update
+Farmer / buyer / transporter / coordinator website (port 3000)
+Future mobile app                         Future simulated actors
+                       \                   /
+                        v                 v
+                         Product API (3001)
+                         /               \
+                        v                 v
+            Operational PostgreSQL      Model service
+
+Future simulation engine <-> future simulation/control-room website (3002)
+          |                         map, benchmark and technical evidence
+          +------ documented Product API and event contracts only --------+
 ```
 
 ## Ownership
@@ -35,6 +35,11 @@ The Product API owns user-visible operational state, including:
 
 Website, mobile, and simulated users call this API. They do not access its
 database directly.
+
+The product website is role-facing. It contains crop, marketplace, order,
+delivery and coordination-task journeys, not a global operations console.
+Resource-level Fastify checks remain authoritative even when the browser also
+guards routes.
 
 ### Simulation
 
@@ -134,3 +139,20 @@ Every important input must state whether it is:
 Synthetic operational data is acceptable for the hackathon when clearly
 labelled. Simulation measures operational and economic behaviour; usability and
 adoption claims require real stakeholder testing.
+
+## Local implementation
+
+The hackathon development stack runs PostgreSQL 16 in Docker and runs Fastify
+and Next.js directly through npm. Prisma migrations define Product API storage.
+A seeded development JWT issuer supplies synthetic role personas; production
+configuration accepts Supabase-compatible JWTs instead. The development model
+adapter provides deterministic fixture predictions and can later be replaced
+by the Python model service through configuration.
+
+`npm run dev` starts PostgreSQL, the Product API on `3001`, and the participant
+website on `3000`. Port `3002` is reserved for the future simulation website.
+Issue #8 does not implement its package, runtime routes, models or navigation.
+
+The browser never treats local storage as operational state. Website caches and
+navigation state are disposable; PostgreSQL plus the append-only event log are
+authoritative.

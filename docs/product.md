@@ -39,6 +39,25 @@ promised, moved, accepted, and learned from.
 10. Actual pickup, delivery, acceptance, and rejection outcomes update
     traceability, reliability, and future model evaluation.
 
+## Product interfaces
+
+The first product website exposes the same workflow at the level each
+participant needs:
+
+- farmers update their crops, review forecast ranges and ATP, publish safe
+  supply, see participating orders, and decide on commitments;
+- buyers record demand, browse marketplace supply, create orders, decide on
+  allocations, track delivery, and record accepted or rejected quantities;
+- transporters accept delivery jobs, follow stops, post progress and report
+  exceptions;
+- coordinators work from a narrow queue of permitted-farm verification,
+  missing information, recovery approvals and escalations.
+
+Internal model evidence, raw traces, provenance registries, the simulation
+world and baseline benchmark are not participant-facing product pages. They
+belong to the future simulation/control-room frontend used for demonstration
+and evaluation.
+
 ## Hackathon demonstration
 
 The target demonstration is a historically calibrated counterfactual simulation

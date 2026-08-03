@@ -1,0 +1,39 @@
+{
+  "name": "@harvest/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "lint": "eslint src prisma --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "npm run db:seed",
+    "test": "vitest run",
+    "db:generate": "node scripts/prisma.mjs generate",
+    "db:migrate": "node scripts/prisma.mjs migrate deploy",
+    "db:seed": "node scripts/prisma.mjs db seed",
+    "db:studio": "node scripts/prisma.mjs studio"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.1.0",
+    "@harvest/shared": "*",
+    "@prisma/client": "^6.15.0",
+    "fastify": "^5.5.0",
+    "jose": "^6.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.34.0",
+    "@types/node": "^24.3.0",
+    "eslint": "^9.34.0",
+    "prisma": "^6.15.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.41.0",
+    "vitest": "^3.2.4"
+  }
+}

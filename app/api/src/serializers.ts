@@ -1,0 +1,158 @@
+import type {
+  AgentTrace,
+  Approval,
+  BuyerDemand,
+  CropBatch,
+  DeliveryMission,
+  Listing,
+  OperationalException,
+  Order,
+  TraceStep,
+  YieldPrediction,
+} from "@prisma/client";
+
+export const quantity = (value: number) => ({ value, unit: "kg" as const });
+export const dateOnly = (value: Date) => value.toISOString().slice(0, 10);
+
+export function cropBatchDto(row: CropBatch) {
+  return {
+    cropBatchId: row.id,
+    farmId: row.farmId,
+    cropType: row.cropType,
+    status: row.status,
+    ...(row.latestObservationId ? { latestObservationId: row.latestObservationId } : {}),
+    ...(row.latestPredictionId ? { latestPredictionId: row.latestPredictionId } : {}),
+    availableToPromise: quantity(row.availableToPromise),
+    provenance: row.provenance,
+  };
+}
+
+export function listingDto(row: Listing) {
+  return {
+    listingId: row.id,
+    cropBatchId: row.cropBatchId,
+    farmerId: row.farmerId,
+    cropType: row.cropType,
+    quantity: quantity(row.quantity),
+    unitPrice: { amount: row.unitPrice, currency: row.currency },
+    availableFrom: dateOnly(row.availableFrom),
+    availableUntil: dateOnly(row.availableUntil),
+    status: row.status,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+export function demandDto(row: BuyerDemand) {
+  return {
+    demandId: row.id,
+    buyerId: row.buyerId,
+    cropType: row.cropType,
+    quantity: quantity(row.quantity),
+    neededBy: row.neededBy.toISOString(),
+    deliveryLocation: { latitude: row.latitude, longitude: row.longitude },
+    ...(row.maxUnitPrice !== null
+      ? { maxUnitPrice: { amount: row.maxUnitPrice, currency: row.currency ?? "XCD" } }
+      : {}),
+    status: row.status,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+export function orderDto(row: Order) {
+  return {
+    orderId: row.id,
+    buyerId: row.buyerId,
+    cropType: row.cropType,
+    requestedQuantity: quantity(row.requestedQuantity),
+    acceptedQuantity: quantity(row.acceptedQuantity),
+    neededBy: row.neededBy.toISOString(),
+    lifecycleStatus: row.lifecycleStatus,
+    atRisk: row.atRisk,
+    activeExceptionIds: row.activeExceptionIds as string[],
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function approvalDto(row: Approval) {
+  return {
+    approvalId: row.id,
+    subjectType: row.subjectType,
+    subjectId: row.subjectId,
+    requestedFromActorId: row.requestedFromActorId,
+    status: row.status,
+    requestedAt: row.requestedAt.toISOString(),
+    ...(row.decidedBy ? { decidedBy: row.decidedBy } : {}),
+    ...(row.decidedAt ? { decidedAt: row.decidedAt.toISOString() } : {}),
+    ...(row.reason ? { reason: row.reason } : {}),
+  };
+}
+
+export function missionDto(row: DeliveryMission) {
+  return {
+    missionId: row.id,
+    orderId: row.orderId,
+    status: row.status,
+    ...(row.transporterId ? { transporterId: row.transporterId } : {}),
+    ...(row.vehicleId ? { vehicleId: row.vehicleId } : {}),
+    quantity: quantity(row.quantity),
+    deadline: row.deadline.toISOString(),
+    stops: row.stops,
+  };
+}
+
+export function exceptionDto(row: OperationalException) {
+  return {
+    exceptionId: row.id,
+    exceptionType: row.exceptionType,
+    severity: row.severity,
+    affectedEntityIds: row.affectedEntityIds,
+    description: row.description,
+    status: row.status,
+    provenance: row.provenance,
+    reportedAt: row.reportedAt.toISOString(),
+  };
+}
+
+export function predictionDto(row: YieldPrediction) {
+  return {
+    predictionId: row.id,
+    requestId: row.requestId,
+    cropBatchId: row.cropBatchId,
+    modelVersion: row.modelVersion,
+    q10MarketableYield: quantity(row.q10),
+    q50MarketableYield: quantity(row.q50),
+    q90MarketableYield: quantity(row.q90),
+    harvestWindow: { start: dateOnly(row.harvestStart), end: dateOnly(row.harvestEnd) },
+    readiness: row.readiness,
+    confidence: row.confidence,
+    warnings: row.warnings,
+    featureSnapshot: row.featureSnapshot,
+    provenance: row.provenance,
+    generatedAt: row.generatedAt.toISOString(),
+    ...(row.actualQuantity !== null
+      ? { actualOutcome: quantity(row.actualQuantity) }
+      : {}),
+    ...(row.absoluteError !== null
+      ? { evaluation: { absoluteError: quantity(row.absoluteError), intervalCovered: row.actualQuantity !== null && row.actualQuantity >= row.q10 && row.actualQuantity <= row.q90 } }
+      : {}),
+  };
+}
+
+export function traceDto(trace: AgentTrace, steps: TraceStep[]) {
+  return {
+    traceId: trace.id,
+    subjectType: trace.subjectType,
+    subjectId: trace.subjectId,
+    status: trace.status,
+    summary: trace.summary,
+    steps: steps.map((step) => ({
+      recordedAt: step.recordedAt.toISOString(),
+      kind: step.kind,
+      summary: step.summary,
+      ...(step.confidence !== null ? { confidence: step.confidence } : {}),
+    })),
+  };
+}
+
+export const pageInfo = { hasNextPage: false };
