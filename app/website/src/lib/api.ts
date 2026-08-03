@@ -6,11 +6,13 @@ export const productApiUrl =
 const TOKEN_KEY = "harvest.access-token";
 const ACTOR_KEY = "harvest.actor";
 
+export type ProductRole = "FARMER" | "BUYER" | "TRANSPORTER" | "COORDINATOR";
+
 export interface SessionActor {
   actorId: string;
   authSubject: string;
   name: string;
-  role: string;
+  role: ProductRole;
   synthetic: boolean;
 }
 
@@ -41,11 +43,21 @@ export function currentActor(): SessionActor | null {
   }
 }
 
-export function currentToken() {
-  return typeof window === "undefined" ? null : window.localStorage.getItem(TOKEN_KEY);
+export function clearDevelopmentSession() {
+  window.localStorage.removeItem(TOKEN_KEY);
+  window.localStorage.removeItem(ACTOR_KEY);
 }
 
-export async function createDevelopmentSession(persona = "operations-demo") {
+export function roleHome(role: ProductRole) {
+  return {
+    FARMER: "/farmer",
+    BUYER: "/buyer",
+    TRANSPORTER: "/transporter",
+    COORDINATOR: "/coordinator",
+  }[role];
+}
+
+export async function createDevelopmentSession(persona: string) {
   const response = await fetch(`${productApiUrl}/dev/session`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -58,16 +70,12 @@ export async function createDevelopmentSession(persona = "operations-demo") {
   return session.actor;
 }
 
-export async function ensureDevelopmentSession() {
-  return currentActor() ?? createDevelopmentSession();
-}
-
-export async function problemFromResponse(response: Response) {
+async function problemFromResponse(response: Response) {
   let body: { detail?: string; code?: string } = {};
   try {
     body = (await response.json()) as typeof body;
   } catch {
-    // A non-JSON upstream error still becomes a useful client error.
+    // Preserve a useful message when an upstream service returns non-JSON.
   }
   return new ApiProblem(
     body.detail ?? `Product API returned ${response.status}.`,
@@ -76,7 +84,7 @@ export async function problemFromResponse(response: Response) {
   );
 }
 
-export function unwrap<T>(result: { data?: T; error?: unknown; response: Response }): T {
+function unwrap<T>(result: { data?: T; error?: unknown; response: Response }): T {
   if (result.error !== undefined || result.data === undefined) {
     const detail = result.error as { detail?: string; code?: string } | undefined;
     throw new ApiProblem(
@@ -92,17 +100,41 @@ export const api = {
   async cropBatches() {
     return unwrap(await client.GET("/v1/crop-batches"));
   },
+  async cropBatch(cropBatchId: string) {
+    return unwrap(await client.GET("/v1/crop-batches/{cropBatchId}", { params: { path: { cropBatchId } } }));
+  },
+  async submitObservation(body: ApiSchema<"CropObservationCreate">) {
+    return unwrap(await client.POST("/v1/crop-observations", {
+      params: { header: { "Idempotency-Key": newIdempotencyKey("observation") } },
+      body,
+    }));
+  },
+  async requestForecast(cropBatchId: string, reason: "NEW_OBSERVATION" | "MANUAL_REFRESH") {
+    return unwrap(await client.POST("/v1/crop-batches/{cropBatchId}/forecast-requests", {
+      params: { path: { cropBatchId }, header: { "Idempotency-Key": newIdempotencyKey("forecast") } },
+      body: { reason },
+    }));
+  },
   async prediction(predictionId: string) {
     return unwrap(await client.GET("/v1/yield-predictions/{predictionId}", { params: { path: { predictionId } } }));
   },
   async listings(cropType?: string) {
     return unwrap(await client.GET("/v1/listings", { params: { query: { cropType } } }));
   },
+  async createListing(body: ApiSchema<"ListingCreate">) {
+    return unwrap(await client.POST("/v1/listings", {
+      params: { header: { "Idempotency-Key": newIdempotencyKey("listing") } },
+      body,
+    }));
+  },
   async demands() {
     return unwrap(await client.GET("/v1/buyer-demands"));
   },
   async createDemand(body: ApiSchema<"BuyerDemandCreate">) {
-    return unwrap(await client.POST("/v1/buyer-demands", { params: { header: { "Idempotency-Key": newIdempotencyKey("demand") } }, body }));
+    return unwrap(await client.POST("/v1/buyer-demands", {
+      params: { header: { "Idempotency-Key": newIdempotencyKey("demand") } },
+      body,
+    }));
   },
   async orders() {
     return unwrap(await client.GET("/v1/orders"));
@@ -111,51 +143,66 @@ export const api = {
     return unwrap(await client.GET("/v1/orders/{orderId}", { params: { path: { orderId } } }));
   },
   async createOrder(body: ApiSchema<"OrderCreate">) {
-    return unwrap(await client.POST("/v1/orders", { params: { header: { "Idempotency-Key": newIdempotencyKey("order") } }, body }));
+    return unwrap(await client.POST("/v1/orders", {
+      params: { header: { "Idempotency-Key": newIdempotencyKey("order") } },
+      body,
+    }));
   },
-  async approvals(status?: "PENDING" | "APPROVED" | "REJECTED") {
+  async approvals(status?: "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED") {
     return unwrap(await client.GET("/v1/approvals", { params: { query: { status } } }));
   },
   async decideApproval(approvalId: string, decision: "APPROVE" | "REJECT", reason?: string) {
-    return unwrap(await client.POST("/v1/approvals/{approvalId}/decisions", { params: { path: { approvalId }, header: { "Idempotency-Key": newIdempotencyKey("approval") } }, body: { decision, reason } }));
+    return unwrap(await client.POST("/v1/approvals/{approvalId}/decisions", {
+      params: { path: { approvalId }, header: { "Idempotency-Key": newIdempotencyKey("approval") } },
+      body: { decision, reason },
+    }));
   },
-  async missions() {
-    return unwrap(await client.GET("/v1/delivery-missions"));
+  async missions(status?: "AVAILABLE" | "ASSIGNED" | "PICKUP_IN_PROGRESS" | "IN_TRANSIT" | "DELIVERED" | "CANCELLED") {
+    return unwrap(await client.GET("/v1/delivery-missions", { params: { query: { status } } }));
+  },
+  async mission(missionId: string) {
+    return unwrap(await client.GET("/v1/delivery-missions/{missionId}", { params: { path: { missionId } } }));
   },
   async acceptMission(missionId: string, vehicleId: string) {
-    return unwrap(await client.POST("/v1/delivery-missions/{missionId}/acceptance", { params: { path: { missionId }, header: { "Idempotency-Key": newIdempotencyKey("mission") } }, body: { decision: "ACCEPT", vehicleId } }));
+    return unwrap(await client.POST("/v1/delivery-missions/{missionId}/acceptance", {
+      params: { path: { missionId }, header: { "Idempotency-Key": newIdempotencyKey("mission") } },
+      body: { decision: "ACCEPT", vehicleId },
+    }));
   },
-  async updateMission(missionId: string, updateType: "PICKED_UP" | "POSITION" | "DELAYED" | "ARRIVED" | "DELIVERED") {
-    return unwrap(await client.POST("/v1/delivery-missions/{missionId}/updates", { params: { path: { missionId }, header: { "Idempotency-Key": newIdempotencyKey("delivery") } }, body: { updateType, recordedAt: new Date().toISOString() } }));
+  async updateMission(
+    missionId: string,
+    updateType: "PICKED_UP" | "POSITION" | "DELAYED" | "ARRIVED" | "DELIVERED",
+    note?: string,
+  ) {
+    return unwrap(await client.POST("/v1/delivery-missions/{missionId}/updates", {
+      params: { path: { missionId }, header: { "Idempotency-Key": newIdempotencyKey("delivery") } },
+      body: { updateType, recordedAt: new Date().toISOString(), note },
+    }));
   },
   async exceptions() {
     return unwrap(await client.GET("/v1/exceptions"));
   },
   async createException(body: ApiSchema<"ExceptionCreate">) {
-    return unwrap(await client.POST("/v1/exceptions", { params: { header: { "Idempotency-Key": newIdempotencyKey("exception") } }, body }));
+    return unwrap(await client.POST("/v1/exceptions", {
+      params: { header: { "Idempotency-Key": newIdempotencyKey("exception") } },
+      body,
+    }));
   },
-  async acceptDelivery(deliveryId: string, acceptedQuantity: number) {
-    return unwrap(await client.POST("/v1/deliveries/{deliveryId}/acceptance", { params: { path: { deliveryId }, header: { "Idempotency-Key": newIdempotencyKey("receipt") } }, body: { outcome: "ACCEPTED", acceptedQuantity: { value: acceptedQuantity, unit: "kg" }, rejectedQuantity: { value: 0, unit: "kg" } } }));
-  },
-  async snapshot(simulationRunId?: string) {
-    return unwrap(await client.GET("/v1/operations/snapshot", { params: { query: { simulationRunId } } }));
-  },
-  async trace(traceId: string) {
-    return unwrap(await client.GET("/v1/agent-traces/{traceId}", { params: { path: { traceId } } }));
-  },
-  async simulationRun(runId: string) {
-    return unwrap(await client.GET("/v1/simulation-runs/{runId}", { params: { path: { runId } } }));
-  },
-  async simulationWorld(runId: string) {
-    return unwrap(await client.GET("/v1/simulation-runs/{runId}/world", { params: { path: { runId } } }));
-  },
-  async commandSimulation(runId: string, body: ApiSchema<"SimulationCommand">) {
-    return unwrap(await client.POST("/v1/simulation-runs/{runId}/commands", { params: { path: { runId }, header: { "Idempotency-Key": newIdempotencyKey("simulation") } }, body }));
-  },
-  async createPair() {
-    return unwrap(await client.POST("/v1/paired-runs", { params: { header: { "Idempotency-Key": newIdempotencyKey("benchmark") } }, body: { scenarioId: "saint-lucia-demo-v1", seed: 8675309 } }));
-  },
-  async pair(pairId: string) {
-    return unwrap(await client.GET("/v1/paired-runs/{pairId}", { params: { path: { pairId } } }));
+  async acceptDelivery(
+    deliveryId: string,
+    acceptedQuantity: number,
+    rejectedQuantity: number,
+    outcome: "ACCEPTED" | "PARTIALLY_ACCEPTED" | "REJECTED",
+    note?: string,
+  ) {
+    return unwrap(await client.POST("/v1/deliveries/{deliveryId}/acceptance", {
+      params: { path: { deliveryId }, header: { "Idempotency-Key": newIdempotencyKey("receipt") } },
+      body: {
+        outcome,
+        acceptedQuantity: { value: acceptedQuantity, unit: "kg" },
+        rejectedQuantity: { value: rejectedQuantity, unit: "kg" },
+        note,
+      },
+    }));
   },
 };

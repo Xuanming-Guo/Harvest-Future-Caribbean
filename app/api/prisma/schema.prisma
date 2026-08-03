@@ -193,6 +193,7 @@ model Approval {
   id          String    @id @db.Uuid
   subjectType String    @map("subject_type")
   subjectId   String    @map("subject_id") @db.Uuid
+  requestedFromActorId String @map("requested_from_actor_id") @db.Uuid
   status      String
   requestedAt DateTime  @map("requested_at") @db.Timestamptz(3)
   decidedBy   String?   @map("decided_by") @db.Uuid
@@ -272,32 +273,6 @@ model TraceStep {
   confidence Float?
 
   @@map("trace_steps")
-}
-
-model SimulationRun {
-  id          String   @id @db.Uuid
-  scenarioId  String   @map("scenario_id")
-  policy      String
-  seed        BigInt
-  speed       Float
-  status      String
-  currentTime DateTime @map("current_time") @db.Timestamptz(3)
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  world       Json
-
-  @@map("simulation_runs")
-}
-
-model PairedRun {
-  id            String   @id @db.Uuid
-  scenarioId    String   @map("scenario_id")
-  seed          BigInt
-  baselineRunId String   @map("baseline_run_id") @db.Uuid
-  harvestRunId  String   @map("harvest_run_id") @db.Uuid
-  status        String
-  result        Json?
-
-  @@map("paired_runs")
 }
 
 model DomainEvent {

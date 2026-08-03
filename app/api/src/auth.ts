@@ -16,7 +16,6 @@ export interface AuthActor {
   name: string;
   role: ActorRole;
   isSynthetic: boolean;
-  simulationRunId?: string;
 }
 
 declare module "fastify" {
@@ -30,15 +29,13 @@ const remoteKeys = config.supabaseJwksUrl
   ? createRemoteJWKSet(new URL(config.supabaseJwksUrl))
   : null;
 
-function actorView(actor: Actor, payload: JWTPayload): AuthActor {
+function actorView(actor: Actor, _payload: JWTPayload): AuthActor {
   return {
     id: actor.id,
     authSubject: actor.authSubject,
     name: actor.name,
     role: actor.role,
     isSynthetic: actor.isSynthetic,
-    simulationRunId:
-      typeof payload.simulationRunId === "string" ? payload.simulationRunId : undefined,
   };
 }
 

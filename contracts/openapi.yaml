@@ -361,7 +361,7 @@ paths:
         - {$ref: '#/components/parameters/Limit'}
         - name: status
           in: query
-          schema: {enum: [PENDING, APPROVED, REJECTED]}
+          schema: {enum: [PENDING, APPROVED, REJECTED, CANCELLED]}
         - name: subjectType
           in: query
           schema: {enum: [ALLOCATION, RECOVERY, CANCELLATION, SUBSTITUTION, PRICE_CHANGE, LOCATION_DISCLOSURE, PRODUCE_REJECTION, INTER_ISLAND_COMMITMENT]}
@@ -1188,6 +1188,7 @@ components:
           type: array
           uniqueItems: true
           items: {type: string, format: uuid}
+        allocation: {$ref: '#/components/schemas/AllocationSummary'}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
     OrderStatus:
@@ -1209,16 +1210,34 @@ components:
     Approval:
       type: object
       additionalProperties: false
-      required: [approvalId, subjectType, subjectId, status, requestedAt]
+      required: [approvalId, subjectType, subjectId, requestedFromActorId, status, requestedAt]
       properties:
         approvalId: {type: string, format: uuid}
         subjectType: {enum: [ALLOCATION, RECOVERY, CANCELLATION, SUBSTITUTION, PRICE_CHANGE, LOCATION_DISCLOSURE, PRODUCE_REJECTION, INTER_ISLAND_COMMITMENT]}
         subjectId: {type: string, format: uuid}
-        status: {enum: [PENDING, APPROVED, REJECTED]}
+        requestedFromActorId: {type: string, format: uuid}
+        status: {enum: [PENDING, APPROVED, REJECTED, CANCELLED]}
         requestedAt: {type: string, format: date-time}
         decidedBy: {type: string, format: uuid}
         decidedAt: {type: string, format: date-time}
         reason: {type: string, maxLength: 1000}
+    AllocationSummary:
+      type: object
+      additionalProperties: false
+      required: [allocationId, status, lines]
+      properties:
+        allocationId: {type: string, format: uuid}
+        status: {enum: [PROPOSED, APPROVED, REJECTED]}
+        lines:
+          type: array
+          items: {$ref: '#/components/schemas/AllocationLineSummary'}
+    AllocationLineSummary:
+      type: object
+      additionalProperties: false
+      required: [cropBatchId, quantity]
+      properties:
+        cropBatchId: {type: string, format: uuid}
+        quantity: {$ref: './common.schema.json#/$defs/Quantity'}
     ApprovalPage:
       type: object
       additionalProperties: false

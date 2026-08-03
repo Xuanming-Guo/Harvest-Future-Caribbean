@@ -185,6 +185,7 @@ CREATE TABLE "approvals" (
     "id" UUID NOT NULL,
     "subject_type" TEXT NOT NULL,
     "subject_id" UUID NOT NULL,
+    "requested_from_actor_id" UUID NOT NULL,
     "status" TEXT NOT NULL,
     "requested_at" TIMESTAMPTZ(3) NOT NULL,
     "decided_by" UUID,
@@ -270,34 +271,6 @@ CREATE TABLE "trace_steps" (
     "confidence" DOUBLE PRECISION,
 
     CONSTRAINT "trace_steps_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "simulation_runs" (
-    "id" UUID NOT NULL,
-    "scenario_id" TEXT NOT NULL,
-    "policy" TEXT NOT NULL,
-    "seed" BIGINT NOT NULL,
-    "speed" DOUBLE PRECISION NOT NULL,
-    "status" TEXT NOT NULL,
-    "current_time" TIMESTAMPTZ(3) NOT NULL,
-    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "world" JSONB NOT NULL,
-
-    CONSTRAINT "simulation_runs_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "paired_runs" (
-    "id" UUID NOT NULL,
-    "scenario_id" TEXT NOT NULL,
-    "seed" BIGINT NOT NULL,
-    "baseline_run_id" UUID NOT NULL,
-    "harvest_run_id" UUID NOT NULL,
-    "status" TEXT NOT NULL,
-    "result" JSONB,
-
-    CONSTRAINT "paired_runs_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable

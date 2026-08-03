@@ -1,41 +1,83 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { Check, Circle, Clock3, PackageCheck, Truck } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, CheckCircle2, PackageCheck, Truck } from "lucide-react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
+import { FormEvent, useState } from "react";
 
-import { EventFeed, useLiveEvents } from "@/components/live-events";
+import { ApprovalList } from "@/components/approval-list";
 import { useSession } from "@/components/providers";
-import { Badge, Card, ErrorState, LoadingState, Metric, PageHeader, SectionTitle } from "@/components/ui";
+import { Badge, Card, ErrorState, LoadingState, PageHeader, SectionTitle } from "@/components/ui";
 import { api } from "@/lib/api";
-import { compactId, formatDate, titleCase } from "@/lib/format";
+import { formatDate, titleCase } from "@/lib/format";
 
-const lifecycle = ["REQUESTED", "AWAITING_APPROVAL", "COMMITTED", "IN_DELIVERY", "FULFILLED"];
+const lifecycle = ["REQUESTED", "ALLOCATION_PROPOSED", "AWAITING_APPROVAL", "COMMITTED", "IN_DELIVERY", "FULFILLED"];
 
-export default function OrderPage() {
+export default function OrderDetailPage() {
   const { orderId } = useParams<{ orderId: string }>();
-  const { ready } = useSession();
-  const order = useQuery({ queryKey: ["order", orderId], queryFn: () => api.order(orderId), enabled: ready });
-  const missions = useQuery({ queryKey: ["missions"], queryFn: api.missions, enabled: ready });
-  const { events } = useLiveEvents();
-  if (order.error) return <ErrorState error={order.error} />;
-  if (!order.data) return <LoadingState />;
-  const activeIndex = lifecycle.indexOf(order.data.lifecycleStatus === "PARTIALLY_FULFILLED" || order.data.lifecycleStatus === "REJECTED" ? "FULFILLED" : order.data.lifecycleStatus);
+  const { actor } = useSession();
+  const queryClient = useQueryClient();
+  const [accepted, setAccepted] = useState(0);
+  const [rejected, setRejected] = useState(0);
+  const [note, setNote] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
+  const order = useQuery({ queryKey: ["order", orderId], queryFn: () => api.order(orderId) });
+  const missions = useQuery({ queryKey: ["missions", orderId], queryFn: () => api.missions() });
   const mission = missions.data?.items.find((item) => item.orderId === orderId);
-  const orderEvents = events.filter((event) => event.entityId === orderId || (event.payload as unknown as Record<string, unknown>).orderId === orderId);
+  const acceptance = useMutation({
+    mutationFn: () => {
+      if (!mission) throw new Error("No delivery is ready to accept.");
+      const outcome = rejected === 0 ? "ACCEPTED" : accepted === 0 ? "REJECTED" : "PARTIALLY_ACCEPTED";
+      return api.acceptDelivery(mission.missionId, accepted, rejected, outcome, note || undefined);
+    },
+    onSuccess: () => { setMessage("Delivery acceptance recorded. The order has been updated."); void queryClient.invalidateQueries(); },
+  });
 
-  return <>
-    <PageHeader eyebrow={`Order ${compactId(orderId)}`} title={`${order.data.requestedQuantity.value} kg ${titleCase(order.data.cropType)}`} description="A single operational record connects the buyer request, farm allocation, human decisions, delivery and accepted outcome." actions={<Badge>{order.data.lifecycleStatus}</Badge>} />
-    <div className="grid metrics-grid">
-      <Metric label="Requested" value={`${order.data.requestedQuantity.value} kg`} detail={`Due ${formatDate(order.data.neededBy)}`} icon={PackageCheck} />
-      <Metric label="Accepted" value={`${order.data.acceptedQuantity.value} kg`} detail="Buyer-confirmed outcome" icon={Check} tone="green" />
-      <Metric label="Risk overlay" value={order.data.atRisk ? "At risk" : "Clear"} detail={`${order.data.activeExceptionIds?.length ?? 0} active exceptions`} icon={Circle} tone={order.data.atRisk ? "red" : "green"} />
-      <Metric label="Delivery" value={mission ? titleCase(mission.status) : "Pending"} detail={mission ? compactId(mission.missionId) : "Created after approval"} icon={Truck} tone="blue" />
-    </div>
-    <div className="grid two-column" style={{marginTop:18}}>
-      <Card><SectionTitle title="Commitment lifecycle" detail="Binding steps require a person"/><div className="order-timeline">{lifecycle.map((step, index) => <div className={`timeline-step ${index > activeIndex ? "pending" : ""}`} key={step}><span className="timeline-dot">{index < activeIndex ? <Check size={11}/> : index + 1}</span><div><strong>{titleCase(step)}</strong><small>{index === 1 ? "Allocation waits for explicit approval." : index === 4 ? "Final state follows buyer acceptance." : "Recorded in Product API state and event history."}</small></div></div>)}</div></Card>
-      <Card><SectionTitle title="Order activity" detail={`${orderEvents.length} streamed events`}/><EventFeed events={orderEvents} compact/></Card>
-    </div>
-    {mission && <div style={{marginTop:18}}><Card><SectionTitle title="Delivery mission" detail={compactId(mission.missionId)}/><div className="grid three-column"><div><span className="muted small">Status</span><p><Badge>{mission.status}</Badge></p></div><div><span className="muted small">Quantity</span><p><strong>{mission.quantity.value} kg</strong></p></div><div><span className="muted small">Deadline</span><p><Clock3 size={13}/> {formatDate(mission.deadline)}</p></div></div></Card></div>}
-  </>;
+  if (order.error) return <ErrorState error={order.error} />;
+  if (!order.data) return <LoadingState label="Loading order..." />;
+  const currentIndex = lifecycle.indexOf(order.data.lifecycleStatus);
+
+  return (
+    <>
+      <Link className="back-link" href="/orders"><ArrowLeft size={16} />Back to orders</Link>
+      <PageHeader eyebrow="Order" title={`${order.data.requestedQuantity.value} kg ${titleCase(order.data.cropType)}`} description={`Needed by ${formatDate(order.data.neededBy)}`} actions={<Badge tone={order.data.atRisk ? "high" : undefined}>{order.data.lifecycleStatus}</Badge>} />
+      <Card>
+        <SectionTitle title="Order progress" detail={order.data.atRisk ? "Needs attention" : "On track"} />
+        <div className="lifecycle">
+          {lifecycle.map((status, index) => <div className={index <= currentIndex ? "complete" : ""} key={status}><span>{index < currentIndex ? <CheckCircle2 size={16} /> : index + 1}</span><small>{titleCase(status)}</small></div>)}
+        </div>
+      </Card>
+      <div className="grid two-column section-gap">
+        <Card>
+          <SectionTitle title="Supply commitment" detail="Confirmed only after everyone approves" />
+          {!order.data.allocation ? <p>Harvest is still finding safe supply for this order.</p> : (
+            <div className="allocation-list">
+              <div className="split"><span>Allocation status</span><Badge>{order.data.allocation.status}</Badge></div>
+              {order.data.allocation.lines.map((line) => <div className="allocation-row" key={line.cropBatchId}><PackageCheck size={19} /><span><strong>{line.quantity.value} kg</strong><small>Local crop batch</small></span></div>)}
+            </div>
+          )}
+        </Card>
+        <Card>
+          <SectionTitle title="Delivery" detail={mission ? titleCase(mission.status) : "Not scheduled"} />
+          {!mission ? <p>A delivery job will be created when the supply commitment is approved.</p> : (
+            <div className="delivery-summary"><Truck size={28} /><div><strong>{mission.quantity.value} kg</strong><span>Due {formatDate(mission.deadline)}</span></div><Link className="text-link" href={`/missions/${mission.missionId}`}>View delivery</Link></div>
+          )}
+        </Card>
+      </div>
+      {actor?.role !== "COORDINATOR" && <div className="section-gap"><ApprovalList /></div>}
+      {actor?.role === "BUYER" && mission?.status === "DELIVERED" && (
+        <Card className="section-gap">
+          <SectionTitle title="Accept this delivery" detail="Record what arrived" />
+          <form className="form-grid" onSubmit={(event: FormEvent) => { event.preventDefault(); acceptance.mutate(); }}>
+            <div className="field"><label>Accepted quantity (kg)</label><input type="number" min="0" max={mission.quantity.value} step="0.1" value={accepted} onChange={(event) => setAccepted(Number(event.target.value))} /></div>
+            <div className="field"><label>Rejected quantity (kg)</label><input type="number" min="0" max={mission.quantity.value} step="0.1" value={rejected} onChange={(event) => setRejected(Number(event.target.value))} /></div>
+            <div className="field field-full"><label>Note (optional)</label><textarea rows={2} value={note} onChange={(event) => setNote(event.target.value)} /></div>
+            <button className="button field-full" disabled={acceptance.isPending || accepted + rejected !== mission.quantity.value}><CheckCircle2 size={17} />Confirm delivery</button>
+          </form>
+          {(message || acceptance.error) && <p className={acceptance.error ? "form-error" : "form-success"}>{message ?? acceptance.error?.message}</p>}
+        </Card>
+      )}
+    </>
+  );
 }

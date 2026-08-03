@@ -8,6 +8,21 @@ each operation and what it must cause.
 Do not add an endpoint, event, state transition, or simulation effect only in
 code. Change the machine contract and this guide together first.
 
+## Current implementation boundary
+
+Issue #8 implements the participant Product API used by the farmer, buyer,
+transporter and coordinator website on port `3000`. Its Fastify runtime serves
+the crop, forecast, listing, demand, order, actor-targeted approval, delivery
+mission, exception and delivery-acceptance operations described below.
+
+The operations snapshot, public SSE/trace viewer, simulation-run, observable
+world, paired-run and simulation-ingestion operations remain agreed **planned
+contracts only**. Issue #8 does not serve them, persist their run models, or
+expose them in the product website. They will be implemented with the separate
+simulation engine and simulation/control-room frontend, whose development port
+is reserved as `3002`. Retaining a path in OpenAPI does not imply that its
+runtime exists today.
+
 ## Canonical architecture
 
 ```text
@@ -251,18 +266,18 @@ scope, not only the role name.
   `ORDER_REQUESTED`. Creation does not reserve stock.
 - Simulation effect: mark buyer demand pending and schedule matching/actor
   reactions.
-- Consumers: buyer order timeline, operations demand/orders.
+- Consumers: buyer marketplace and order timeline.
 - Rules/failures: duplicate business intent with the same key returns the same
   order; inaccessible listings, invalid quantity/date, or identity fields fail.
 
 #### `GET /v1/orders`
 
-- Callers: participating actors and authorised operations roles.
+- Callers: the buyer, participating farmers, and authorised coordinators.
 - Request: optional lifecycle status, risk overlay, cursor, and limit filters.
 - Response: a role-filtered order page using the same lifecycle representation
   as order detail.
 - Product state/event and simulation effect: none.
-- Consumers: operations order table and buyer order history.
+- Consumers: buyer, farmer, and coordinator order lists.
 
 #### `GET /v1/orders/{orderId}`
 
@@ -270,23 +285,24 @@ scope, not only the role name.
   coordinator/operations/admin.
 - Request: order UUID.
 - Response: quantities, deadline, lifecycle status, `atRisk`, active exception
-  IDs, and timestamps.
+  IDs, timestamps, and a safe allocation summary containing only batch IDs and
+  committed quantities. Private farm coordinates are not exposed here.
 - Product state/event: none.
 - Simulation effect: none.
-- Consumers: buyer/farmer order status, transporter context, operations detail.
+- Consumers: buyer/farmer order status and coordinator order detail.
 - Rules/failures: role-filter sensitive farm, buyer, route, and location data.
 
 ### Approvals and delivery
 
 #### `GET /v1/approvals`
 
-- Callers: named approvers and authorised coordinator, operations, and admin
-  roles.
+- Callers: the actor named in `requestedFromActorId`; coordinators see only
+  approvals explicitly targeted to them.
 - Request: optional status, subject type, cursor, and limit filters.
 - Response: pending or decided approvals with request time; decision identity,
   time, and reason appear only after a final human decision.
 - Product state/event and simulation effect: none.
-- Consumers: operations approval queue and future focused mobile approvals.
+- Consumers: focused farmer, buyer, and coordinator decision cards.
 
 #### `POST /v1/approvals/{approvalId}/decisions`
 
@@ -294,9 +310,13 @@ scope, not only the role name.
   an explicitly audited override.
 - Request: `decision` (`APPROVE`/`REJECT`) and optional `reason`.
 - Response: approval subject, final status, decider, and time.
-- Product state/event: record one final decision. Allocation approval creates
-  reservations and commitment in the same transaction and emits
-  `ALLOCATION_APPROVED`; recovery approval applies its validated operational
+- Product state/event: record one final decision. An allocation creates one
+  targeted approval for its buyer and one for every participating farmer. No
+  reservation, commitment, or mission exists until all remain valid and every
+  required actor approves. The final approval atomically creates reservations
+  and the mission and emits `ALLOCATION_APPROVED`. Any rejection marks the
+  allocation/order rejected and cancels the other pending approvals without
+  committing inventory. Recovery approval applies its validated operational
   changes and emits `RECOVERY_APPROVED`.
 - Simulation effect: allocation approval schedules harvest/pickup obligations
   and reduces planned uncommitted supply; recovery approval deterministically
@@ -308,25 +328,27 @@ scope, not only the role name.
 
 #### `GET /v1/delivery-missions`
 
-- Callers: transporter (available/owned jobs), coordinator/operations/admin.
+- Callers: transporter (available/owned jobs) and actors participating in the
+  related order; coordinators remain limited to relevant orders.
 - Request: optional status, cursor, limit.
 - Response: visible mission page with route stops, quantity, deadline,
   assignment/status, and `pageInfo`.
 - Product state/event: none.
 - Simulation effect: none until a simulated transporter takes its scheduled
   browse/accept action.
-- Consumers: transporter job list, operations delivery queue.
+- Consumers: transporter job list and participant order tracking.
 - Rules/failures: private pickup/drop-off coordinates are role/scope-filtered.
 
 #### `GET /v1/delivery-missions/{missionId}`
 
-- Callers: assigned/eligible transporter and authorised operations roles.
+- Callers: assigned/eligible transporter or an actor participating in the
+  related order.
 - Request: mission UUID.
 - Response: mission/order IDs, status, assignment, vehicle, quantity, deadline,
   and ordered stops.
 - Product state/event: none.
 - Simulation effect: none.
-- Consumers: transporter job detail, tracking view, control room.
+- Consumers: transporter job detail and participant delivery tracking.
 - Rules/failures: return no private route to unrelated actors.
 
 #### `POST /v1/delivery-missions/{missionId}/acceptance`
@@ -338,27 +360,27 @@ scope, not only the role name.
   `DELIVERY_MISSION_ACCEPTED`.
 - Simulation effect: make that transporter/vehicle unavailable for conflicting
   work and schedule pickup tasks.
-- Consumers: transporter active job, blue active control-room route, tracking.
+- Consumers: transporter active job and participant tracking.
 - Rules/failures: competing acceptances produce one winner; later attempts
   return `409`; reject unavailable/unauthorised vehicles.
 
 #### `POST /v1/delivery-missions/{missionId}/updates`
 
-- Callers: assigned transporter; authorised coordinator for a verified update.
+- Callers: assigned transporter.
 - Request: `updateType`, `recordedAt`; optional `position`, `quantity`, `note`.
 - Response: update and mission IDs plus submitted safe fields.
 - Product state/event: append progress, advance allowed mission/order state,
   and emit `DELIVERY_UPDATE_POSTED`.
 - Simulation effect: advance observable vehicle position and future actor/task
   schedules. It cannot rewrite past positions.
-- Consumers: live map, order timeline, ETA/tracking, operations feed.
+- Consumers: transporter progress and participant order tracking.
 - Rules/failures: update type must be valid for current mission state; time must
   be monotonic; position is required for `POSITION`.
 
 #### `POST /v1/exceptions`
 
-- Callers: farmer, buyer, assigned transporter, coordinator, operations; only
-  for an entity visible to the caller.
+- Callers in Issue #8: assigned transporter or coordinator, only for an entity
+  visible to that actor.
 - Request: type, severity, affected entity IDs, description, provenance.
 - Response: exception ID, status, report time, and submitted safe fields.
 - Product state/event: store exception, set `atRisk` overlay on affected active
@@ -376,7 +398,7 @@ scope, not only the role name.
 - Request: optional status, severity, cursor, and limit filters.
 - Response: role-filtered operational exceptions and provenance.
 - Product state/event and simulation effect: none.
-- Consumers: operations exception queue, control room, and recovery context.
+- Consumers: the coordinator recovery workspace and related participant state.
 
 #### `POST /v1/deliveries/{deliveryId}/acceptance`
 
@@ -394,7 +416,7 @@ scope, not only the role name.
 - Rules/failures: quantities must use one unit, be non-negative, sum to the
   delivered amount, and match outcome; produce rejection requires approval.
 
-### Operational and live views
+### Planned operational and live views (not served by Issue #8)
 
 #### `GET /v1/operations/snapshot`
 
@@ -434,11 +456,12 @@ scope, not only the role name.
 - Rules/failures: stream is role/run-filtered. An expired/invalid cursor returns
   `409`; client refreshes snapshot, stores the new boundary, and reconnects.
 
-### Simulation gateway
+### Planned simulation gateway (not served by Issue #8)
 
-The Product API exposes these operations to the control room. It validates and
-authorises them, calls the internal [simulation API](../contracts/simulation/openapi.yaml),
-and returns observable projections. It never copies hidden truth into its DB.
+The future Product API gateway will expose these operations to the separate
+control room. It will validate and authorise them, call the internal
+[simulation API](../contracts/simulation/openapi.yaml), and return observable
+projections. It must never copy hidden truth into Product API storage.
 
 #### `POST /v1/simulation-runs`
 
@@ -513,7 +536,7 @@ and returns observable projections. It never copies hidden truth into its DB.
 - Rules/failures: no result is fabricated while incomplete; metrics are labelled
   simulated and trace back to run IDs.
 
-### Internal ingestion
+### Planned internal ingestion (not served by Issue #8)
 
 #### `POST /internal/v1/simulation-events`
 
@@ -544,14 +567,13 @@ and returns observable projections. It never copies hidden truth into its DB.
 
 | Interface | Reads | Writes/actions | Live events |
 |---|---|---|---|
-| Farmer mobile | Crop batch, order status, relevant trace | Crop observation, forecast request, listing, approval decision | Crop/forecast/listing/allocation/order/delivery outcomes |
-| Buyer mobile/website | Listings, order, delivery tracking | Buyer demand, order, relevant approval, delivery acceptance | Demand/allocation/mission/delivery/order outcomes |
-| Transporter mobile | Mission list/detail, relevant order | Mission acceptance, delivery updates, exception | Mission/update/exception/recovery/order outcome |
-| Coordinator mobile | Crop/order/mission context, snapshot, trace | Authorised observation/demand, approvals, verified update, exception | All scoped operational events |
-| Operations website | Operations snapshot, order/mission/trace detail | Scoped approvals and run actions | Role-filtered operational stream |
-| 3D control room | Run, observable world, snapshot | Run commands | Run-scoped operational and observable simulation events |
-| Benchmark website | Paired-run status/result | Create paired run | Benchmark result and run progress |
-| Trace viewer | Agent trace and relevant entity detail | None | Trace-linked events |
+| Farmer website/future mobile | Owned crop batches, prediction, participating orders and missions | Crop observation, forecast request, safe listing, own approval decision | Crop/forecast/listing/allocation/order/delivery outcomes |
+| Buyer website/future mobile | Listings, owned demand/orders, relevant approval and delivery | Buyer demand, order, own approval decision, delivery acceptance | Demand/allocation/mission/delivery/order outcomes |
+| Transporter website/future mobile | Available and assigned mission detail | Mission acceptance, delivery updates, exception | Mission/update/exception/recovery/order outcome |
+| Coordinator website/future mobile | Permitted crops, relevant orders, targeted approvals and exceptions | Approval decision, verified update, exception escalation | Scoped operational events |
+| Future 3D control room | Run, observable world, snapshot | Run commands | Run-scoped operational and observable simulation events |
+| Future benchmark view | Paired-run status/result | Create paired run | Benchmark result and run progress |
+| Future trace/evidence view | Agent trace and relevant entity detail | None | Trace-linked events |
 | Harvest simulated farmer | Same crop/listing/approval operations as farmer | Same request bodies as farmer | Run-scoped events |
 | Harvest simulated buyer | Same listing/demand/order/acceptance operations as buyer | Same request bodies as buyer | Run-scoped events |
 | Harvest simulated transporter | Same mission/update/exception operations as transporter | Same request bodies as transporter | Run-scoped events |

@@ -11,7 +11,6 @@ const ids = {
   buyer: "a0000000-0000-4000-8000-000000000002",
   coordinator: "a0000000-0000-4000-8000-000000000003",
   transporter: "a0000000-0000-4000-8000-000000000004",
-  operations: "a0000000-0000-4000-8000-000000000006",
   farmOne: "14141414-1414-4414-8414-141414141414",
   farmTwo: "14141414-1414-4414-8414-141414141415",
   batchOne: "11111111-1111-4111-8111-111111111111",
@@ -25,23 +24,47 @@ const ids = {
   demand: "18181818-1818-4818-8818-181818181818",
   order: "20202020-2020-4020-8020-202020202020",
   allocation: "22222222-2222-4222-8222-222222222222",
-  approval: "21212121-2121-4121-8121-212121212121",
+  buyerApproval: "21212121-2121-4121-8121-212121212121",
+  farmerOneApproval: "21212121-2121-4121-8121-212121212122",
+  farmerTwoApproval: "21212121-2121-4121-8121-212121212123",
   trace: "c0000000-0000-4000-8000-000000000001",
-  run: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-  pair: "30303030-3030-4030-8030-303030303030",
-  baselineRun: "31313131-3131-4131-8131-313131313131",
 };
 
 const at = (value: string) => new Date(value);
 
 async function main() {
+  // Development seed data is disposable. Clear derived workflow state first so
+  // every local start and integration-test run begins from the same scenario.
+  await prisma.$transaction([
+    prisma.deliveryAcceptance.deleteMany(),
+    prisma.deliveryUpdate.deleteMany(),
+    prisma.deliveryMission.deleteMany(),
+    prisma.reservation.deleteMany(),
+    prisma.approval.deleteMany(),
+    prisma.allocationLine.deleteMany(),
+    prisma.allocation.deleteMany(),
+    prisma.operationalException.deleteMany(),
+    prisma.idempotencyRecord.deleteMany(),
+    prisma.traceStep.deleteMany(),
+    prisma.domainEvent.deleteMany(),
+    prisma.agentTrace.deleteMany(),
+    prisma.order.deleteMany(),
+    prisma.buyerDemand.deleteMany(),
+    prisma.listing.deleteMany(),
+    prisma.yieldPrediction.deleteMany(),
+    prisma.cropObservation.deleteMany(),
+    prisma.cropBatch.deleteMany(),
+    prisma.farmPermission.deleteMany(),
+    prisma.farm.deleteMany(),
+    prisma.actor.deleteMany(),
+  ]);
+
   const actors = [
     [ids.farmerOne, "farmer-ana", "Ana Joseph", "FARMER"],
     [ids.farmerTwo, "farmer-marcus", "Marcus Pierre", "FARMER"],
     [ids.buyer, "buyer-hotel", "Bay Gardens Hotel", "BUYER"],
     [ids.coordinator, "coordinator-maya", "Maya Charles", "COORDINATOR"],
     [ids.transporter, "transporter-daniel", "Daniel Felix", "TRANSPORTER"],
-    [ids.operations, "operations-demo", "Harvest Operations", "OPERATIONS"],
   ] as const;
 
   for (const [id, authSubject, name, role] of actors) {
@@ -63,11 +86,16 @@ async function main() {
     create: { id: ids.farmTwo, name: "Mabouya Growers", farmerId: ids.farmerTwo, latitude: 13.941, longitude: -60.918 },
   });
 
-  for (const actorId of [ids.farmerOne, ids.coordinator, ids.operations]) {
+  for (const { farmId, actorId, role } of [
+    { farmId: ids.farmOne, actorId: ids.farmerOne, role: "FARMER" },
+    { farmId: ids.farmTwo, actorId: ids.farmerTwo, role: "FARMER" },
+    { farmId: ids.farmOne, actorId: ids.coordinator, role: "COORDINATOR" },
+    { farmId: ids.farmTwo, actorId: ids.coordinator, role: "COORDINATOR" },
+  ] as const) {
     await prisma.farmPermission.upsert({
-      where: { farmId_actorId: { farmId: ids.farmOne, actorId } },
-      update: {},
-      create: { farmId: ids.farmOne, actorId, role: actorId === ids.farmerOne ? "FARMER" : actorId === ids.coordinator ? "COORDINATOR" : "OPERATIONS" },
+      where: { farmId_actorId: { farmId, actorId } },
+      update: { role },
+      create: { farmId, actorId, role },
     });
   }
 
@@ -208,10 +236,13 @@ async function main() {
       { allocationId: ids.allocation, cropBatchId: ids.batchTwo, listingId: ids.listingTwo, quantity: 6 },
     ],
   });
-  await prisma.approval.upsert({
-    where: { id: ids.approval },
-    update: { status: "PENDING", decidedBy: null, decidedAt: null, reason: null },
-    create: { id: ids.approval, subjectType: "ALLOCATION", subjectId: ids.allocation, status: "PENDING", requestedAt: at("2026-09-04T08:13:00Z") },
+  await prisma.approval.deleteMany({ where: { subjectType: "ALLOCATION", subjectId: ids.allocation } });
+  await prisma.approval.createMany({
+    data: [
+      { id: ids.buyerApproval, subjectType: "ALLOCATION", subjectId: ids.allocation, requestedFromActorId: ids.buyer, status: "PENDING", requestedAt: at("2026-09-04T08:13:00Z") },
+      { id: ids.farmerOneApproval, subjectType: "ALLOCATION", subjectId: ids.allocation, requestedFromActorId: ids.farmerOne, status: "PENDING", requestedAt: at("2026-09-04T08:13:00Z") },
+      { id: ids.farmerTwoApproval, subjectType: "ALLOCATION", subjectId: ids.allocation, requestedFromActorId: ids.farmerTwo, status: "PENDING", requestedAt: at("2026-09-04T08:13:00Z") },
+    ],
   });
 
   await prisma.agentTrace.upsert({
@@ -236,46 +267,7 @@ async function main() {
     ],
   });
 
-  const world = {
-    actors: [
-      { actorId: ids.farmerOne, role: "FARMER", position: { latitude: 13.953, longitude: -61.005 }, activity: "Preparing 14 kg" },
-      { actorId: ids.farmerTwo, role: "FARMER", position: { latitude: 13.941, longitude: -60.918 }, activity: "Preparing 6 kg" },
-      { actorId: ids.buyer, role: "BUYER", position: { latitude: 14.0101, longitude: -60.9875 }, activity: "Awaiting order" },
-      { actorId: ids.transporter, role: "TRANSPORTER", position: { latitude: 13.998, longitude: -60.986 }, activity: "Available" },
-    ],
-    routes: [],
-    disruptions: [],
-  };
-  await prisma.simulationRun.upsert({
-    where: { id: ids.run },
-    update: { status: "PAUSED", speed: 8, currentTime: at("2026-09-04T08:13:00Z"), world },
-    create: { id: ids.run, scenarioId: "saint-lucia-demo-v1", policy: "HARVEST", seed: 8675309n, speed: 8, status: "PAUSED", currentTime: at("2026-09-04T08:13:00Z"), createdAt: at("2026-09-04T08:00:00Z"), world },
-  });
-  await prisma.simulationRun.upsert({
-    where: { id: ids.baselineRun },
-    update: {},
-    create: { id: ids.baselineRun, scenarioId: "saint-lucia-demo-v1", policy: "BASELINE", seed: 8675309n, speed: 8, status: "COMPLETED", currentTime: at("2026-09-05T18:00:00Z"), createdAt: at("2026-09-04T08:00:00Z"), world },
-  });
-  await prisma.pairedRun.upsert({
-    where: { id: ids.pair },
-    update: {},
-    create: {
-      id: ids.pair,
-      scenarioId: "saint-lucia-demo-v1",
-      seed: 8675309n,
-      baselineRunId: ids.baselineRun,
-      harvestRunId: ids.run,
-      status: "COMPLETED",
-      result: {
-        baseline: { localProcurementRate: 0.44, fulfilmentRate: 0.68, wasteQuantity: { value: 17, unit: "kg" } },
-        harvest: { localProcurementRate: 0.7, fulfilmentRate: 0.91, wasteQuantity: { value: 8, unit: "kg" } },
-      },
-    },
-  });
-
   const eventBase = {
-    simulationTime: at("2026-09-04T08:13:00Z"),
-    simulationRunId: ids.run,
     traceId: ids.trace,
     correlationId: "d0000000-0000-4000-8000-000000000001",
     schemaVersion: "1.0",

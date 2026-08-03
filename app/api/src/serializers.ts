@@ -7,7 +7,6 @@ import type {
   Listing,
   OperationalException,
   Order,
-  SimulationRun,
   TraceStep,
   YieldPrediction,
 } from "@prisma/client";
@@ -80,6 +79,7 @@ export function approvalDto(row: Approval) {
     approvalId: row.id,
     subjectType: row.subjectType,
     subjectId: row.subjectId,
+    requestedFromActorId: row.requestedFromActorId,
     status: row.status,
     requestedAt: row.requestedAt.toISOString(),
     ...(row.decidedBy ? { decidedBy: row.decidedBy } : {}),
@@ -152,19 +152,6 @@ export function traceDto(trace: AgentTrace, steps: TraceStep[]) {
       summary: step.summary,
       ...(step.confidence !== null ? { confidence: step.confidence } : {}),
     })),
-  };
-}
-
-export function simulationRunDto(row: SimulationRun) {
-  return {
-    runId: row.id,
-    scenarioId: row.scenarioId,
-    policy: row.policy,
-    seed: Number(row.seed),
-    speed: row.speed,
-    status: row.status,
-    currentTime: row.currentTime.toISOString(),
-    createdAt: row.createdAt.toISOString(),
   };
 }
 

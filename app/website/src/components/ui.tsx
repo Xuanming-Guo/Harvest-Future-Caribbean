@@ -23,12 +23,12 @@ export function Badge({ children, tone }: { children: React.ReactNode; tone?: st
   return <span className={`badge badge-${tone ?? inferred}`}>{typeof children === "string" ? titleCase(children) : children}</span>;
 }
 
-export function LoadingState({ label = "Loading current Harvest state…" }: { label?: string }) {
+export function LoadingState({ label = "Loading your Harvest workspace..." }: { label?: string }) {
   return <div className="state-panel"><span className="spinner" />{label}</div>;
 }
 
 export function ErrorState({ error }: { error: unknown }) {
-  return <div className="state-panel error"><strong>Could not load this view.</strong><span>{error instanceof Error ? error.message : "The Product API is unavailable."}</span></div>;
+  return <div className="state-panel error"><strong>We could not load this page.</strong><span>{error instanceof Error ? error.message : "Harvest is temporarily unavailable."}</span></div>;
 }
 
 export function EmptyState({ title, detail }: { title: string; detail: string }) {

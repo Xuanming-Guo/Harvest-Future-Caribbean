@@ -660,6 +660,14 @@ Keep this narrow:
 
 # Website
 
+> **Scope clarification for implementation:** the judge-facing website section
+> below is the design brief for a future, separate simulation/control-room
+> frontend. It is not `app/website`, which is the real product used by farmers,
+> buyers, transporters and coordinators. The product website runs on port 3000.
+> The future simulation frontend may use port 3002 and should contain the map,
+> benchmark, Model Lab, data/provenance evidence and trace viewer described
+> below. Issue #8 does not implement or scaffold that frontend.
+
 The website is where most of the judge-facing wow factor should live.
 
 ## 1. Simulation Control Room

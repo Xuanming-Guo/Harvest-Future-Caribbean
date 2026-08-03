@@ -6,8 +6,8 @@ import { Providers } from "@/components/providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Harvest Operations",
-  description: "Farm-to-market coordination for Caribbean food systems.",
+  title: "Harvest Saint Lucia",
+  description: "Local farm-to-market coordination for farmers, buyers and transporters.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

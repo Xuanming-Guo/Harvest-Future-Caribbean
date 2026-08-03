@@ -117,18 +117,24 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
   }
 
   const allocationId = randomUUID();
-  const approvalId = randomUUID();
+  const farmers = await prisma.listing.findMany({
+    where: { id: { in: lines.map((line) => line.listingId) } },
+    select: { farmerId: true },
+  });
+  const approverIds = [...new Set([order.buyerId, ...farmers.map((listing) => listing.farmerId)])];
+  const approvalIds = approverIds.map(() => randomUUID());
   await prisma.$transaction(async (tx) => {
     await tx.allocation.create({ data: { id: allocationId, orderId, status: "PROPOSED" } });
     await tx.allocationLine.createMany({ data: lines.map((line) => ({ allocationId, ...line })) });
-    await tx.approval.create({
-      data: {
-        id: approvalId,
+    await tx.approval.createMany({
+      data: approverIds.map((requestedFromActorId, index) => ({
+        id: approvalIds[index],
         subjectType: "ALLOCATION",
         subjectId: allocationId,
+        requestedFromActorId,
         status: "PENDING",
         requestedAt: new Date(),
-      },
+      })),
     });
     await tx.order.update({ where: { id: orderId }, data: { lifecycleStatus: "AWAITING_APPROVAL" } });
     await tx.agentTrace.update({ where: { id: traceId }, data: { status: "AWAITING_APPROVAL" } });
@@ -154,7 +160,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
       },
     });
   });
-  return { allocationId, approvalId };
+  return { allocationId, approvalIds };
 }
 
 export async function approveAllocation(
@@ -167,6 +173,7 @@ export async function approveAllocation(
       const approval = await tx.approval.findUnique({ where: { id: approvalId } });
       if (!approval) throw httpError(404, "APPROVAL_NOT_FOUND", "Approval was not found.");
       if (approval.status !== "PENDING") throw httpError(409, "APPROVAL_ALREADY_DECIDED", "This approval already has a final decision.");
+      if (approval.requestedFromActorId !== actorId) throw httpError(403, "APPROVAL_FORBIDDEN", "This decision belongs to another participant.");
       if (approval.subjectType !== "ALLOCATION") {
         return approveRecovery(tx, approval, actorId, reason);
       }
@@ -190,6 +197,12 @@ export async function approveAllocation(
         where: { id: approvalId },
         data: { status: "APPROVED", decidedBy: actorId, decidedAt, reason },
       });
+      const remainingApprovals = await tx.approval.count({
+        where: { subjectType: "ALLOCATION", subjectId: allocation.id, status: "PENDING" },
+      });
+      if (remainingApprovals > 0) {
+        return tx.approval.findUniqueOrThrow({ where: { id: approvalId } });
+      }
       await tx.allocation.update({ where: { id: allocation.id }, data: { status: "APPROVED" } });
       for (const line of lines) {
         await tx.reservation.create({ data: { allocationId: allocation.id, cropBatchId: line.cropBatchId, quantity: line.quantity, status: "ACTIVE" } });
@@ -270,10 +283,15 @@ export async function rejectApproval(approvalId: string, actorId: string, reason
     const approval = await tx.approval.findUnique({ where: { id: approvalId } });
     if (!approval) throw httpError(404, "APPROVAL_NOT_FOUND", "Approval was not found.");
     if (approval.status !== "PENDING") throw httpError(409, "APPROVAL_ALREADY_DECIDED", "This approval already has a final decision.");
+    if (approval.requestedFromActorId !== actorId) throw httpError(403, "APPROVAL_FORBIDDEN", "This decision belongs to another participant.");
     const updated = await tx.approval.update({ where: { id: approvalId }, data: { status: "REJECTED", decidedBy: actorId, decidedAt: new Date(), reason } });
     if (approval.subjectType === "ALLOCATION") {
       const allocation = await tx.allocation.update({ where: { id: approval.subjectId }, data: { status: "REJECTED" } });
       await tx.order.update({ where: { id: allocation.orderId }, data: { lifecycleStatus: "REJECTED" } });
+      await tx.approval.updateMany({
+        where: { subjectType: "ALLOCATION", subjectId: allocation.id, status: "PENDING" },
+        data: { status: "CANCELLED", decidedAt: new Date(), reason: "Cancelled after another participant rejected the allocation." },
+      });
     }
     return updated;
   });

@@ -36,7 +36,6 @@ All `/v1` operations require a bearer JWT. In development only,
 `POST /dev/session` returns a short-lived local JWT for one of the seeded
 personas:
 
-- `operations-demo`
 - `buyer-hotel`
 - `farmer-ana`
 - `farmer-marcus`
@@ -52,22 +51,25 @@ deployment configures `SUPABASE_JWKS_URL`, `SUPABASE_JWT_ISSUER`, and
 ## Data and events
 
 Prisma models cover actors and permissions, crop evidence and predictions,
-marketplace demand, orders and reservations, approvals, delivery, exceptions,
-traces, simulation projections, benchmark results, the immutable event log,
-and idempotency receipts.
+marketplace demand, orders and reservations, actor-targeted approvals,
+delivery, exceptions, safe internal traces, the immutable event log, and
+idempotency receipts.
 
 Mutation handlers validate domain invariants and write Product API state plus
 the corresponding event transactionally. Every POST requires
 `Idempotency-Key`. `/v1/events/stream` replays retained events from
 `Last-Event-ID` and then tails new records with server-sent events.
 
-## Model and simulation adapters
+## Model integration and simulation boundary
 
-`MODEL_ADAPTER=fixture` and `SIMULATION_ADAPTER=fixture` are the local defaults.
-They return deterministic, contract-valid synthetic evidence and never expose
-hidden truth. Issues #4 and #7 can add HTTP adapters for the Python FastAPI
-services without changing public routes, website code, mobile code, or Product
-API database ownership.
+`MODEL_ADAPTER=fixture` is the local default and returns deterministic,
+contract-valid prediction evidence. A later model issue can replace it with an
+HTTP adapter without changing website or mobile payloads.
+
+Issue #8 does not serve simulation runs, observable world projections, paired
+runs, an operations snapshot, or a browser event stream. Those OpenAPI paths
+remain planned contracts for the separate simulation/control-room issue; they
+have no runtime handler or Product API database model in this implementation.
 
 The canonical wire contract is [`../../contracts/openapi.yaml`](../../contracts/openapi.yaml),
 with behaviour and deterministic effects in

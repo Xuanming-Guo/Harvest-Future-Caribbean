@@ -1,7 +1,7 @@
-export const compactId = (value?: string) => (value ? `${value.slice(0, 8)}…` : "—");
+export const compactId = (value?: string) => (value ? `${value.slice(0, 8)}...` : "-");
 
 export const formatDate = (value?: string, includeTime = true) => {
-  if (!value) return "—";
+  if (!value) return "-";
   return new Intl.DateTimeFormat("en-LC", {
     dateStyle: "medium",
     ...(includeTime ? { timeStyle: "short" } : {}),

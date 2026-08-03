@@ -39,6 +39,10 @@ See [`app/api/README.md`](app/api/README.md) and
 [`app/website/README.md`](app/website/README.md) for configuration and route
 details.
 
+The website on `3000` is only the real-user product interface. Port `3002` is
+reserved for a separate future simulation/control-room website; it is not
+started or scaffolded by the current application.
+
 ## Architecture at a glance
 
 Website, mobile, and simulated users all interact through the same Product API.
