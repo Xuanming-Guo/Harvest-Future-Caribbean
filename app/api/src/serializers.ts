@@ -3,18 +3,22 @@ import type {
   Approval,
   BuyerDemand,
   CropBatch,
+  DeliveryAcceptance,
   DeliveryMission,
+  DeliveryUpdate,
   Listing,
   OperationalException,
   Order,
   TraceStep,
+  Vehicle,
+  VerificationTask,
   YieldPrediction,
 } from "@prisma/client";
 
 export const quantity = (value: number) => ({ value, unit: "kg" as const });
 export const dateOnly = (value: Date) => value.toISOString().slice(0, 10);
 
-export function cropBatchDto(row: CropBatch) {
+export function cropBatchDto(row: CropBatch, verificationStatus = "UNVERIFIED") {
   return {
     cropBatchId: row.id,
     farmId: row.farmId,
@@ -24,6 +28,7 @@ export function cropBatchDto(row: CropBatch) {
     ...(row.latestPredictionId ? { latestPredictionId: row.latestPredictionId } : {}),
     availableToPromise: quantity(row.availableToPromise),
     provenance: row.provenance,
+    verificationStatus,
   };
 }
 
@@ -74,7 +79,7 @@ export function orderDto(row: Order) {
   };
 }
 
-export function approvalDto(row: Approval) {
+export function approvalDto(row: Approval, context?: Record<string, unknown>) {
   return {
     approvalId: row.id,
     subjectType: row.subjectType,
@@ -85,6 +90,7 @@ export function approvalDto(row: Approval) {
     ...(row.decidedBy ? { decidedBy: row.decidedBy } : {}),
     ...(row.decidedAt ? { decidedAt: row.decidedAt.toISOString() } : {}),
     ...(row.reason ? { reason: row.reason } : {}),
+    ...(context ? { context } : {}),
   };
 }
 
@@ -98,6 +104,21 @@ export function missionDto(row: DeliveryMission) {
     quantity: quantity(row.quantity),
     deadline: row.deadline.toISOString(),
     stops: row.stops,
+    currentStopSequence: row.currentStopSequence,
+  };
+}
+
+export function deliveryUpdateDto(row: DeliveryUpdate) {
+  const position = row.position && row.position !== null ? row.position : undefined;
+  return {
+    updateId: row.id,
+    missionId: row.missionId,
+    updateType: row.updateType,
+    recordedAt: row.recordedAt.toISOString(),
+    ...(position ? { position } : {}),
+    ...(row.quantity !== null ? { quantity: quantity(row.quantity) } : {}),
+    ...(row.note ? { note: row.note } : {}),
+    ...(row.stopSequence !== null ? { stopSequence: row.stopSequence } : {}),
   };
 }
 
@@ -111,6 +132,66 @@ export function exceptionDto(row: OperationalException) {
     status: row.status,
     provenance: row.provenance,
     reportedAt: row.reportedAt.toISOString(),
+  };
+}
+
+export function exceptionDetailDto(
+  row: OperationalException,
+  approvalSummary?: Record<string, unknown>,
+) {
+  return {
+    ...exceptionDto(row),
+    ...(row.recoveryAction && row.recoverySummary && row.recoveryChanges
+      ? {
+          recoveryProposal: {
+            action: row.recoveryAction,
+            summary: row.recoverySummary,
+            changes: row.recoveryChanges,
+          },
+        }
+      : {}),
+    ...(approvalSummary ? { approvalSummary } : {}),
+  };
+}
+
+export function verificationTaskDto(row: VerificationTask) {
+  return {
+    taskId: row.id,
+    farmId: row.farmId,
+    cropBatchId: row.cropBatchId,
+    subjectType: row.subjectType,
+    subjectId: row.subjectId,
+    taskType: row.taskType,
+    status: row.status,
+    summary: row.summary,
+    createdAt: row.createdAt.toISOString(),
+    ...(row.resolvedBy ? { resolvedBy: row.resolvedBy } : {}),
+    ...(row.resolvedAt ? { resolvedAt: row.resolvedAt.toISOString() } : {}),
+    ...(row.note ? { note: row.note } : {}),
+  };
+}
+
+export function vehicleDto(row: Vehicle) {
+  return {
+    vehicleId: row.id,
+    label: row.label,
+    ...(row.registrationNumber ? { registrationNumber: row.registrationNumber } : {}),
+    ...(row.capacityKg !== null ? { capacity: quantity(row.capacityKg) } : {}),
+    status: row.status,
+  };
+}
+
+export function deliveryAcceptanceDto(row: DeliveryAcceptance) {
+  return {
+    deliveryId: row.id,
+    orderId: row.orderId,
+    outcome: row.outcome,
+    acceptedQuantity: quantity(row.acceptedQuantity),
+    rejectedQuantity: quantity(row.rejectedQuantity),
+    lineOutcomes: row.lineOutcomes,
+    ...(row.note ? { note: row.note } : {}),
+    acceptedBy: row.acceptedBy,
+    acceptedAt: row.acceptedAt.toISOString(),
   };
 }
 

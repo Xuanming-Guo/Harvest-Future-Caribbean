@@ -30,6 +30,9 @@ model Actor {
   name          String
   role          ActorRole
   isSynthetic   Boolean   @default(false) @map("is_synthetic")
+  defaultLatitude  Float? @map("default_latitude")
+  defaultLongitude Float? @map("default_longitude")
+  serviceZone      String? @map("service_zone")
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@map("actors")
@@ -41,6 +44,7 @@ model Farm {
   farmerId    String   @map("farmer_id") @db.Uuid
   latitude    Float
   longitude   Float
+  productionZone String @default("Saint Lucia") @map("production_zone")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@map("farms")
@@ -84,6 +88,25 @@ model CropObservation {
   traceId           String     @map("trace_id") @db.Uuid
 
   @@map("crop_observations")
+}
+
+model VerificationTask {
+  id          String   @id @db.Uuid
+  farmId      String   @map("farm_id") @db.Uuid
+  cropBatchId String   @map("crop_batch_id") @db.Uuid
+  subjectType String   @map("subject_type")
+  subjectId   String   @map("subject_id") @db.Uuid
+  taskType    String   @map("task_type")
+  status      String
+  summary     String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  resolvedBy  String?  @map("resolved_by") @db.Uuid
+  resolvedAt  DateTime? @map("resolved_at") @db.Timestamptz(3)
+  note        String?
+
+  @@index([farmId, status])
+  @@index([cropBatchId, createdAt])
+  @@map("verification_tasks")
 }
 
 model YieldPrediction {
@@ -212,6 +235,7 @@ model DeliveryMission {
   quantity      Float
   deadline      DateTime @db.Timestamptz(3)
   stops         Json
+  currentStopSequence Int @default(0) @map("current_stop_sequence")
 
   @@map("delivery_missions")
 }
@@ -224,6 +248,7 @@ model DeliveryUpdate {
   position   Json?
   quantity   Float?
   note       String?
+  stopSequence Int?    @map("stop_sequence")
 
   @@map("delivery_updates")
 }
@@ -237,6 +262,9 @@ model OperationalException {
   status            String
   provenance        Provenance
   reportedAt        DateTime   @map("reported_at") @db.Timestamptz(3)
+  recoveryAction    String?    @map("recovery_action")
+  recoverySummary   String?    @map("recovery_summary")
+  recoveryChanges   Json?      @map("recovery_changes")
 
   @@map("operational_exceptions")
 }
@@ -250,8 +278,23 @@ model DeliveryAcceptance {
   note             String?
   acceptedBy       String   @map("accepted_by") @db.Uuid
   acceptedAt       DateTime @map("accepted_at") @db.Timestamptz(3)
+  lineOutcomes     Json     @map("line_outcomes")
 
+  @@unique([orderId])
   @@map("delivery_acceptances")
+}
+
+model Vehicle {
+  id                 String   @id @db.Uuid
+  transporterId      String   @map("transporter_id") @db.Uuid
+  label              String
+  registrationNumber String?  @map("registration_number")
+  capacityKg         Float?   @map("capacity_kg")
+  status             String
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([transporterId, status])
+  @@map("vehicles")
 }
 
 model AgentTrace {

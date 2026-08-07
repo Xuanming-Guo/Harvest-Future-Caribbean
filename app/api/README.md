@@ -52,7 +52,8 @@ deployment configures `SUPABASE_JWKS_URL`, `SUPABASE_JWT_ISSUER`, and
 
 Prisma models cover actors and permissions, crop evidence and predictions,
 marketplace demand, orders and reservations, actor-targeted approvals,
-delivery, exceptions, safe internal traces, the immutable event log, and
+transporter vehicles, verification tasks, delivery, concrete exception
+recovery proposals, safe internal traces, the immutable event log, and
 idempotency receipts.
 
 Mutation handlers validate domain invariants and write Product API state plus
@@ -74,3 +75,15 @@ have no runtime handler or Product API database model in this implementation.
 The canonical wire contract is [`../../contracts/openapi.yaml`](../../contracts/openapi.yaml),
 with behaviour and deterministic effects in
 [`../../docs/api_info.md`](../../docs/api_info.md).
+
+## Participant workflow projections
+
+The P0 API includes privacy-safe listing evidence and market opportunities,
+profile-backed buyer delivery defaults, transporter-owned vehicles, explicit
+coordinator verification tasks, aggregated order details, chronological
+mission updates, concrete exception recovery proposals, and per-crop delivery
+outcomes. These projections are shared by the website and future mobile app.
+
+The eleven simulation/control-room and internal-ingestion operations remain in
+OpenAPI with `x-harvest-status: planned`; Fastify intentionally does not serve
+them yet.

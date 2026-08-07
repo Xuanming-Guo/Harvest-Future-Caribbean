@@ -10,8 +10,8 @@ import { roleHome } from "@/lib/api";
 const personas = [
   { id: "farmer-ana", role: "Farmer", name: "Ana Joseph", detail: "Update crops, review forecasts and approve supply.", Icon: Sprout },
   { id: "buyer-hotel", role: "Buyer", name: "Bay Gardens Hotel", detail: "Find local produce, place orders and receive deliveries.", Icon: ShoppingBasket },
-  { id: "transporter-daniel", role: "Transporter", name: "Daniel Charles", detail: "Accept delivery jobs and share journey updates.", Icon: Truck },
-  { id: "coordinator-maya", role: "Coordinator", name: "Maya Augustin", detail: "Resolve missing information, approvals and exceptions.", Icon: ClipboardCheck },
+  { id: "transporter-daniel", role: "Transporter", name: "Daniel Felix", detail: "Accept delivery jobs and share journey updates.", Icon: Truck },
+  { id: "coordinator-maya", role: "Coordinator", name: "Maya Charles", detail: "Resolve missing information, approvals and exceptions.", Icon: ClipboardCheck },
 ] as const;
 
 export default function SignInPage() {

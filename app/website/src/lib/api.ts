@@ -14,6 +14,8 @@ export interface SessionActor {
   name: string;
   role: ProductRole;
   synthetic: boolean;
+  serviceZone?: string;
+  deliveryLocation?: { latitude: number; longitude: number };
 }
 
 export class ApiProblem extends Error {
@@ -121,6 +123,12 @@ export const api = {
   async listings(cropType?: string) {
     return unwrap(await client.GET("/v1/listings", { params: { query: { cropType } } }));
   },
+  async listing(listingId: string) {
+    return unwrap(await client.GET("/v1/listings/{listingId}", { params: { path: { listingId } } }));
+  },
+  async marketOpportunities(cropType?: string) {
+    return unwrap(await client.GET("/v1/market-opportunities", { params: { query: { cropType } } }));
+  },
   async createListing(body: ApiSchema<"ListingCreate">) {
     return unwrap(await client.POST("/v1/listings", {
       params: { header: { "Idempotency-Key": newIdempotencyKey("listing") } },
@@ -163,6 +171,12 @@ export const api = {
   async mission(missionId: string) {
     return unwrap(await client.GET("/v1/delivery-missions/{missionId}", { params: { path: { missionId } } }));
   },
+  async missionUpdates(missionId: string) {
+    return unwrap(await client.GET("/v1/delivery-missions/{missionId}/updates", { params: { path: { missionId } } }));
+  },
+  async vehicles() {
+    return unwrap(await client.GET("/v1/me/vehicles"));
+  },
   async acceptMission(missionId: string, vehicleId: string) {
     return unwrap(await client.POST("/v1/delivery-missions/{missionId}/acceptance", {
       params: { path: { missionId }, header: { "Idempotency-Key": newIdempotencyKey("mission") } },
@@ -182,6 +196,18 @@ export const api = {
   async exceptions() {
     return unwrap(await client.GET("/v1/exceptions"));
   },
+  async exception(exceptionId: string) {
+    return unwrap(await client.GET("/v1/exceptions/{exceptionId}", { params: { path: { exceptionId } } }));
+  },
+  async verificationTasks(status?: "OPEN" | "VERIFIED" | "CHANGES_REQUESTED" | "UNVERIFIED") {
+    return unwrap(await client.GET("/v1/verification-tasks", { params: { query: { status } } }));
+  },
+  async decideVerificationTask(taskId: string, decision: "VERIFY" | "REQUEST_CHANGES", note?: string) {
+    return unwrap(await client.POST("/v1/verification-tasks/{taskId}/decisions", {
+      params: { path: { taskId }, header: { "Idempotency-Key": newIdempotencyKey("verification") } },
+      body: { decision, note },
+    }));
+  },
   async createException(body: ApiSchema<"ExceptionCreate">) {
     return unwrap(await client.POST("/v1/exceptions", {
       params: { header: { "Idempotency-Key": newIdempotencyKey("exception") } },
@@ -193,6 +219,7 @@ export const api = {
     acceptedQuantity: number,
     rejectedQuantity: number,
     outcome: "ACCEPTED" | "PARTIALLY_ACCEPTED" | "REJECTED",
+    lineOutcomes: ApiSchema<"DeliveryLineOutcome">[],
     note?: string,
   ) {
     return unwrap(await client.POST("/v1/deliveries/{deliveryId}/acceptance", {
@@ -201,6 +228,7 @@ export const api = {
         outcome,
         acceptedQuantity: { value: acceptedQuantity, unit: "kg" },
         rejectedQuantity: { value: rejectedQuantity, unit: "kg" },
+        lineOutcomes,
         note,
       },
     }));

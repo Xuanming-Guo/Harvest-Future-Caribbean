@@ -31,6 +31,7 @@ The Product API owns user-visible operational state, including:
 - marketplace listings and buyer demand;
 - orders, reservations, and allocations;
 - approvals, delivery missions, and exceptions;
+- transporter vehicles and coordinator verification tasks;
 - traceability and accepted operational outcomes.
 
 Website, mobile, and simulated users call this API. They do not access its

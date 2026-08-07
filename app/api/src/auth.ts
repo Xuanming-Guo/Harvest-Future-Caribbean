@@ -16,6 +16,9 @@ export interface AuthActor {
   name: string;
   role: ActorRole;
   isSynthetic: boolean;
+  defaultLatitude: number | null;
+  defaultLongitude: number | null;
+  serviceZone: string | null;
 }
 
 declare module "fastify" {
@@ -36,6 +39,9 @@ function actorView(actor: Actor, _payload: JWTPayload): AuthActor {
     name: actor.name,
     role: actor.role,
     isSynthetic: actor.isSynthetic,
+    defaultLatitude: actor.defaultLatitude,
+    defaultLongitude: actor.defaultLongitude,
+    serviceZone: actor.serviceZone,
   };
 }
 

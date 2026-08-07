@@ -9,7 +9,7 @@ import { FormEvent, useState } from "react";
 import { useSession } from "@/components/providers";
 import { Badge, Card, ErrorState, LoadingState, PageHeader, SectionTitle } from "@/components/ui";
 import { api } from "@/lib/api";
-import { formatDate, formatPercent } from "@/lib/format";
+import { dateInputOffset, formatDate, formatPercent, titleCase } from "@/lib/format";
 
 export default function CropDetailPage() {
   const { cropBatchId } = useParams<{ cropBatchId: string }>();
@@ -20,15 +20,16 @@ export default function CropDetailPage() {
   const [notes, setNotes] = useState("");
   const [listingQuantity, setListingQuantity] = useState(10);
   const [price, setPrice] = useState(7.5);
-  const [availableFrom, setAvailableFrom] = useState("2026-09-05");
-  const [availableUntil, setAvailableUntil] = useState("2026-09-10");
+  const [availableFrom, setAvailableFrom] = useState(() => dateInputOffset(1));
+  const [availableUntil, setAvailableUntil] = useState(() => dateInputOffset(6));
   const [message, setMessage] = useState<string | null>(null);
 
-  const batch = useQuery({ queryKey: ["crop-batch", cropBatchId], queryFn: () => api.cropBatch(cropBatchId) });
+  const batch = useQuery({ queryKey: ["crop-batch", cropBatchId], queryFn: () => api.cropBatch(cropBatchId), refetchInterval: 15_000 });
   const prediction = useQuery({
     queryKey: ["prediction", batch.data?.latestPredictionId],
     queryFn: () => api.prediction(batch.data!.latestPredictionId!),
     enabled: Boolean(batch.data?.latestPredictionId),
+    refetchInterval: 15_000,
   });
   const observation = useMutation({
     mutationFn: () => api.submitObservation({
@@ -39,9 +40,8 @@ export default function CropDetailPage() {
       notes: notes || undefined,
       provenance: "OBSERVED",
     }),
-    onSuccess: async () => {
-      await api.requestForecast(cropBatchId, "NEW_OBSERVATION");
-      setMessage("Crop update saved and the forecast is being refreshed.");
+    onSuccess: () => {
+      setMessage("Crop update saved. Harvest created one refreshed forecast and a coordinator verification task.");
       void queryClient.invalidateQueries({ queryKey: ["crop-batch", cropBatchId] });
     },
   });
@@ -82,6 +82,9 @@ export default function CropDetailPage() {
               </div>
               <div className="split"><span>Expected harvest</span><strong>{formatDate(prediction.data.harvestWindow.start, false)} - {formatDate(prediction.data.harvestWindow.end, false)}</strong></div>
               <div className="split"><span>Confidence</span><strong>{formatPercent(prediction.data.confidence)}</strong></div>
+              <div className="split"><span>Evidence</span><strong>{titleCase(prediction.data.provenance)}</strong></div>
+              <div className="split"><span>Forecast updated</span><strong>{formatDate(prediction.data.generatedAt)}</strong></div>
+              <div className="split"><span>Verification</span><Badge>{batch.data.verificationStatus ?? "UNVERIFIED"}</Badge></div>
               {prediction.data.warnings.length > 0 && <div className="notice"><strong>Please check</strong>{prediction.data.warnings.join("; ")}</div>}
               {canEdit && <button className="button button-secondary" disabled={refresh.isPending} onClick={() => refresh.mutate()}><RefreshCw size={16} />Refresh forecast</button>}
             </div>

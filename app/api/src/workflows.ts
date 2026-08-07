@@ -187,7 +187,8 @@ export async function approveAllocation(
       const lines = await tx.allocationLine.findMany({ where: { allocationId: allocation.id } });
       for (const line of lines) {
         const batch = await tx.cropBatch.findUnique({ where: { id: line.cropBatchId } });
-        if (!batch || batch.availableToPromise < line.quantity) {
+        const listing = await tx.listing.findUnique({ where: { id: line.listingId } });
+        if (!batch || !listing || listing.status !== "ACTIVE" || batch.availableToPromise < line.quantity || listing.quantity < line.quantity) {
           throw httpError(409, "SUPPLY_CHANGED", "Available-to-promise supply changed before approval.");
         }
       }
@@ -207,7 +208,9 @@ export async function approveAllocation(
       for (const line of lines) {
         await tx.reservation.create({ data: { allocationId: allocation.id, cropBatchId: line.cropBatchId, quantity: line.quantity, status: "ACTIVE" } });
         await tx.cropBatch.update({ where: { id: line.cropBatchId }, data: { availableToPromise: { decrement: line.quantity } } });
-        await tx.listing.update({ where: { id: line.listingId }, data: { status: "RESERVED" } });
+        const listing = await tx.listing.findUniqueOrThrow({ where: { id: line.listingId } });
+        const remainingQuantity = Math.max(0, listing.quantity - line.quantity);
+        await tx.listing.update({ where: { id: line.listingId }, data: { quantity: remainingQuantity, status: remainingQuantity > 0.0001 ? "ACTIVE" : "SOLD_OUT" } });
       }
       await tx.order.update({ where: { id: order.id }, data: { lifecycleStatus: "COMMITTED" } });
 
@@ -261,10 +264,21 @@ async function approveRecovery(
   }
   const exception = await tx.operationalException.findUnique({ where: { id: approval.subjectId } });
   if (!exception || exception.status === "RESOLVED") throw httpError(409, "STALE_APPROVAL", "The exception is no longer pending recovery.");
-  const affected = exception.affectedEntityIds as string[];
+  if (exception.recoveryAction !== "RESCHEDULE" || !exception.recoveryChanges) throw httpError(409, "RECOVERY_NOT_ACTIONABLE", "This exception has no actionable recovery proposal.");
+  const changes = exception.recoveryChanges as { missionId?: unknown; proposedDeadline?: unknown };
+  if (typeof changes.missionId !== "string" || typeof changes.proposedDeadline !== "string") throw httpError(409, "RECOVERY_INVALID", "The stored recovery proposal is incomplete.");
+  const proposedDeadline = new Date(changes.proposedDeadline);
+  if (Number.isNaN(proposedDeadline.valueOf())) throw httpError(409, "RECOVERY_INVALID", "The stored recovery deadline is invalid.");
+  const mission = await tx.deliveryMission.findUnique({ where: { id: changes.missionId } });
+  if (!mission || ["DELIVERED", "CANCELLED"].includes(mission.status)) throw httpError(409, "STALE_APPROVAL", "The delivery mission can no longer be rescheduled.");
   await tx.approval.update({ where: { id: approval.id }, data: { status: "APPROVED", decidedBy: actorId, decidedAt: new Date(), reason } });
+  await tx.deliveryMission.update({ where: { id: mission.id }, data: { deadline: proposedDeadline } });
   await tx.operationalException.update({ where: { id: exception.id }, data: { status: "RESOLVED" } });
-  await tx.order.updateMany({ where: { id: { in: affected } }, data: { atRisk: false, activeExceptionIds: [] } });
+  const order = await tx.order.findUnique({ where: { id: mission.orderId } });
+  if (order) {
+    const remainingExceptions = (order.activeExceptionIds as string[]).filter((id) => id !== exception.id);
+    await tx.order.update({ where: { id: order.id }, data: { atRisk: remainingExceptions.length > 0, activeExceptionIds: remainingExceptions } });
+  }
   const trace = await tx.agentTrace.findFirst({ where: { subjectType: "EXCEPTION", subjectId: exception.id } });
   const traceId = trace?.id ?? randomUUID();
   await recordEvent(tx, {
@@ -273,7 +287,7 @@ async function approveRecovery(
     entityId: exception.id,
     traceId,
     provenance: Provenance.OBSERVED,
-    payload: { exceptionId: exception.id, approvalId: approval.id, actionType: "REROUTE" },
+    payload: { exceptionId: exception.id, approvalId: approval.id, actionType: "RESCHEDULE", missionId: mission.id, deadline: proposedDeadline.toISOString() },
   });
   return tx.approval.findUniqueOrThrow({ where: { id: approval.id } });
 }
@@ -292,6 +306,8 @@ export async function rejectApproval(approvalId: string, actorId: string, reason
         where: { subjectType: "ALLOCATION", subjectId: allocation.id, status: "PENDING" },
         data: { status: "CANCELLED", decidedAt: new Date(), reason: "Cancelled after another participant rejected the allocation." },
       });
+    } else if (approval.subjectType === "RECOVERY") {
+      await tx.operationalException.update({ where: { id: approval.subjectId }, data: { status: "OPEN" } });
     }
     return updated;
   });

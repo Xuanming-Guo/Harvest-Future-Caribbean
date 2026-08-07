@@ -9,7 +9,7 @@ import { formatDate } from "@/lib/format";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, SectionTitle } from "./ui";
 
 export function OrderList({ limit }: { limit?: number }) {
-  const orders = useQuery({ queryKey: ["orders"], queryFn: api.orders });
+  const orders = useQuery({ queryKey: ["orders"], queryFn: api.orders, refetchInterval: 5_000 });
   if (orders.error) return <ErrorState error={orders.error} />;
   if (!orders.data) return <LoadingState label="Loading orders..." />;
   const items = limit ? orders.data.items.slice(0, limit) : orders.data.items;

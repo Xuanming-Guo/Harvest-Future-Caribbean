@@ -9,7 +9,7 @@ import { Badge, Card, EmptyState, ErrorState, LoadingState, SectionTitle } from 
 
 export function ApprovalList({ compact = false }: { compact?: boolean }) {
   const queryClient = useQueryClient();
-  const approvals = useQuery({ queryKey: ["approvals", "PENDING"], queryFn: () => api.approvals("PENDING") });
+  const approvals = useQuery({ queryKey: ["approvals", "PENDING"], queryFn: () => api.approvals("PENDING"), refetchInterval: 5_000 });
   const decision = useMutation({
     mutationFn: ({ id, value }: { id: string; value: "APPROVE" | "REJECT" }) => api.decideApproval(id, value),
     onSuccess: () => void queryClient.invalidateQueries(),
@@ -26,11 +26,11 @@ export function ApprovalList({ compact = false }: { compact?: boolean }) {
       <SectionTitle title="Needs your decision" detail={`${approvals.data.items.length} pending`} />
       <div className="task-list">
         {approvals.data.items.map((approval) => (
-          <article className="task-row" key={approval.approvalId}>
+          <article className="task-row approval-row" key={approval.approvalId}>
             <div>
               <Badge tone="pending">Decision needed</Badge>
-              <h3>{titleCase(approval.subjectType)}</h3>
-              <p>{approval.subjectType === "ALLOCATION" ? "Confirm that you agree with this order allocation." : "Confirm the proposed recovery action."}</p>
+              <h3>{approval.context?.title ?? titleCase(approval.subjectType)}</h3>
+              <p>{approval.context?.quantity ? `Confirm ${approval.context.quantity.value} kg${approval.context.cropType ? ` of ${titleCase(approval.context.cropType)}` : ""}${approval.context.neededBy ? ` for delivery by ${formatDate(approval.context.neededBy)}` : ""}.` : approval.context?.summary ?? (approval.subjectType === "ALLOCATION" ? "Confirm that you agree with this order allocation." : "Confirm the proposed recovery action.")}</p>
               {!compact && <small>Requested {formatDate(approval.requestedAt)}</small>}
             </div>
             <div className="inline-actions">
