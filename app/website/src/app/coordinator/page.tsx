@@ -1,8 +1,9 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowRight, CheckCircle2, ClipboardCheck, Sprout } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, ArrowRight, Check, CheckCircle2, ClipboardCheck, Sprout, X } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
 
 import { ApprovalList } from "@/components/approval-list";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, Metric, PageHeader, SectionTitle } from "@/components/ui";
@@ -10,12 +11,19 @@ import { api } from "@/lib/api";
 import { formatDate, titleCase } from "@/lib/format";
 
 export default function CoordinatorHome() {
-  const approvals = useQuery({ queryKey: ["approvals", "PENDING"], queryFn: () => api.approvals("PENDING") });
-  const exceptions = useQuery({ queryKey: ["exceptions"], queryFn: api.exceptions });
-  const batches = useQuery({ queryKey: ["crop-batches"], queryFn: api.cropBatches });
-  if (approvals.error || exceptions.error || batches.error) return <ErrorState error={approvals.error ?? exceptions.error ?? batches.error} />;
-  if (!approvals.data || !exceptions.data || !batches.data) return <LoadingState label="Loading coordination tasks..." />;
-  const missing = batches.data.items.filter((batch) => !batch.latestObservationId || !batch.latestPredictionId);
+  const queryClient = useQueryClient();
+  const [selectedExceptionId, setSelectedExceptionId] = useState<string>();
+  const approvals = useQuery({ queryKey: ["approvals", "PENDING"], queryFn: () => api.approvals("PENDING"), refetchInterval: 5_000 });
+  const exceptions = useQuery({ queryKey: ["exceptions"], queryFn: api.exceptions, refetchInterval: 5_000 });
+  const batches = useQuery({ queryKey: ["crop-batches"], queryFn: api.cropBatches, refetchInterval: 15_000 });
+  const verification = useQuery({ queryKey: ["verification-tasks", "OPEN"], queryFn: () => api.verificationTasks("OPEN"), refetchInterval: 5_000 });
+  const exceptionDetail = useQuery({ queryKey: ["exception", selectedExceptionId], queryFn: () => api.exception(selectedExceptionId!), enabled: Boolean(selectedExceptionId), refetchInterval: 5_000 });
+  const decideVerification = useMutation({
+    mutationFn: ({ taskId, decision }: { taskId: string; decision: "VERIFY" | "REQUEST_CHANGES" }) => api.decideVerificationTask(taskId, decision),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["verification-tasks"] }),
+  });
+  if (approvals.error || exceptions.error || batches.error || verification.error) return <ErrorState error={approvals.error ?? exceptions.error ?? batches.error ?? verification.error} />;
+  if (!approvals.data || !exceptions.data || !batches.data || !verification.data) return <LoadingState label="Loading coordination tasks..." />;
   const openExceptions = exceptions.data.items.filter((item) => item.status !== "RESOLVED");
 
   return (
@@ -23,23 +31,24 @@ export default function CoordinatorHome() {
       <PageHeader eyebrow="Coordination tasks" title="Help the network keep moving" description="Only the missing information, approval decisions and active exceptions that need human attention." />
       <div className="metric-grid">
         <Metric label="Decisions waiting" value={approvals.data.items.length} detail="Assigned to you" icon={ClipboardCheck} />
-        <Metric label="Missing information" value={missing.length} detail="Crop records to verify" icon={Sprout} tone="amber" />
+        <Metric label="Verification queue" value={verification.data.items.length} detail="Crop updates to check" icon={Sprout} tone="amber" />
         <Metric label="Open exceptions" value={openExceptions.length} detail="Recovery needed" icon={AlertTriangle} tone="red" />
       </div>
       <div className="dashboard-grid">
         <ApprovalList />
         <Card>
-          <SectionTitle title="Missing crop information" detail={`${missing.length} records`} />
-          {!missing.length ? <EmptyState title="Crop information is complete" detail="No farmer follow-up is needed right now." /> : <div className="task-list">{missing.map((batch) => (
-            <Link href={`/crops/${batch.cropBatchId}`} className="task-row" key={batch.cropBatchId}><div><Badge tone="pending">Follow up</Badge><h3>{titleCase(batch.cropType)}</h3><p>{!batch.latestObservationId ? "Latest farmer observation is missing." : "Forecast needs to be generated."}</p></div><ArrowRight size={18} /></Link>
+          <SectionTitle title="Verification queue" detail={`${verification.data.items.length} open`} />
+          {!verification.data.items.length ? <EmptyState title="Crop updates are verified" detail="New farmer observations will appear here automatically." /> : <div className="task-list">{verification.data.items.map((task) => (
+            <article className="task-row" key={task.taskId}><div><Badge tone="pending">Verification</Badge><h3>{task.summary}</h3><Link className="text-link" href={`/crops/${task.cropBatchId}`}>Review crop evidence <ArrowRight size={15} /></Link></div><div className="inline-actions"><button className="button button-danger" disabled={decideVerification.isPending} onClick={() => decideVerification.mutate({ taskId: task.taskId, decision: "REQUEST_CHANGES" })}><X size={16} />Request changes</button><button className="button" disabled={decideVerification.isPending} onClick={() => decideVerification.mutate({ taskId: task.taskId, decision: "VERIFY" })}><Check size={16} />Verify</button></div></article>
           ))}</div>}
         </Card>
       </div>
       <Card className="section-gap">
         <SectionTitle title="Active exceptions" detail={`${openExceptions.length} open`} />
         {!openExceptions.length ? <EmptyState title="No active exceptions" detail="Delivery and supply problems will appear here." /> : <div className="exception-list">{openExceptions.map((exception) => (
-          <article className="exception-row" key={exception.exceptionId}><span className="exception-icon"><AlertTriangle /></span><div><Badge tone={exception.severity.toLowerCase()}>{exception.severity}</Badge><h3>{titleCase(exception.exceptionType)}</h3><p>{exception.description}</p><small>Reported {formatDate(exception.reportedAt)}</small></div><Badge>{exception.status}</Badge></article>
+          <button type="button" className="exception-row" onClick={() => setSelectedExceptionId(exception.exceptionId)} key={exception.exceptionId}><span className="exception-icon"><AlertTriangle /></span><div><Badge tone={exception.severity.toLowerCase()}>{exception.severity}</Badge><h3>{titleCase(exception.exceptionType)}</h3><p>{exception.description}</p><small>Reported {formatDate(exception.reportedAt)}</small></div><Badge>{exception.status}</Badge></button>
         ))}</div>}
+        {exceptionDetail.data?.recoveryProposal && <div className="notice section-gap"><strong>{titleCase(exceptionDetail.data.recoveryProposal.action)} proposal</strong><span>{exceptionDetail.data.recoveryProposal.summary}</span><small>{exceptionDetail.data.approvalSummary?.pending ?? 0} approval waiting</small></div>}
       </Card>
       <Card className="section-gap">
         <SectionTitle title="Farm verification" detail="Permitted farms" />

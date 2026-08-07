@@ -28,6 +28,9 @@ const ids = {
   farmerOneApproval: "21212121-2121-4121-8121-212121212122",
   farmerTwoApproval: "21212121-2121-4121-8121-212121212123",
   trace: "c0000000-0000-4000-8000-000000000001",
+  vehicle: "d0000000-0000-4000-8000-000000000001",
+  verificationOne: "f0000000-0000-4000-8000-000000000001",
+  verificationTwo: "f0000000-0000-4000-8000-000000000002",
 };
 
 const at = (value: string) => new Date(value);
@@ -39,6 +42,8 @@ async function main() {
     prisma.deliveryAcceptance.deleteMany(),
     prisma.deliveryUpdate.deleteMany(),
     prisma.deliveryMission.deleteMany(),
+    prisma.vehicle.deleteMany(),
+    prisma.verificationTask.deleteMany(),
     prisma.reservation.deleteMany(),
     prisma.approval.deleteMany(),
     prisma.allocationLine.deleteMany(),
@@ -74,16 +79,20 @@ async function main() {
       create: { id, authSubject, name, role, isSynthetic: true },
     });
   }
+  await prisma.actor.update({
+    where: { id: ids.buyer },
+    data: { defaultLatitude: 14.0101, defaultLongitude: -60.9875, serviceZone: "Castries" },
+  });
 
   await prisma.farm.upsert({
     where: { id: ids.farmOne },
-    update: { name: "Roseau Valley Farm", farmerId: ids.farmerOne, latitude: 13.953, longitude: -61.005 },
-    create: { id: ids.farmOne, name: "Roseau Valley Farm", farmerId: ids.farmerOne, latitude: 13.953, longitude: -61.005 },
+    update: { name: "Roseau Valley Farm", farmerId: ids.farmerOne, latitude: 13.953, longitude: -61.005, productionZone: "Roseau Valley" },
+    create: { id: ids.farmOne, name: "Roseau Valley Farm", farmerId: ids.farmerOne, latitude: 13.953, longitude: -61.005, productionZone: "Roseau Valley" },
   });
   await prisma.farm.upsert({
     where: { id: ids.farmTwo },
-    update: { name: "Mabouya Growers", farmerId: ids.farmerTwo, latitude: 13.941, longitude: -60.918 },
-    create: { id: ids.farmTwo, name: "Mabouya Growers", farmerId: ids.farmerTwo, latitude: 13.941, longitude: -60.918 },
+    update: { name: "Mabouya Growers", farmerId: ids.farmerTwo, latitude: 13.941, longitude: -60.918, productionZone: "Mabouya Valley" },
+    create: { id: ids.farmTwo, name: "Mabouya Growers", farmerId: ids.farmerTwo, latitude: 13.941, longitude: -60.918, productionZone: "Mabouya Valley" },
   });
 
   for (const { farmId, actorId, role } of [
@@ -141,6 +150,17 @@ async function main() {
       },
     });
   }
+
+  await prisma.verificationTask.createMany({
+    data: [
+      { id: ids.verificationOne, farmId: ids.farmOne, cropBatchId: ids.batchOne, subjectType: "CROP_OBSERVATION", subjectId: ids.observationOne, taskType: "VERIFY_OBSERVATION", status: "OPEN", summary: "Verify Ana's rain-damage and quantity update.", createdAt: at("2026-09-04T08:02:30Z") },
+      { id: ids.verificationTwo, farmId: ids.farmTwo, cropBatchId: ids.batchTwo, subjectType: "CROP_OBSERVATION", subjectId: ids.observationTwo, taskType: "VERIFY_OBSERVATION", status: "VERIFIED", summary: "Verify Marcus's safe cucumber quantity.", createdAt: at("2026-09-04T08:02:30Z"), resolvedBy: ids.coordinator, resolvedAt: at("2026-09-04T08:06:00Z"), note: "Quantity and crop stage confirmed." },
+    ],
+  });
+
+  await prisma.vehicle.create({
+    data: { id: ids.vehicle, transporterId: ids.transporter, label: "Daniel's refrigerated van", registrationNumber: "SLU-TRK-01", capacityKg: 350, status: "AVAILABLE" },
+  });
 
   const predictions = [
     { id: ids.predictionOne, requestId: "33333333-3333-4333-8333-333333333333", cropBatchId: ids.batchOne, q10: 14, q50: 18, q90: 22, readiness: 0.84, confidence: 0.78, warnings: ["Recent rain damage reported"] },

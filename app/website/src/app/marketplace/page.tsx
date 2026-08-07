@@ -6,40 +6,48 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
 import { Badge, Card, EmptyState, ErrorState, LoadingState, PageHeader, SectionTitle } from "@/components/ui";
+import { useSession } from "@/components/providers";
 import { api } from "@/lib/api";
-import { formatDate } from "@/lib/format";
-
-const deliveryLocation = { latitude: 14.0101, longitude: -60.9875 };
+import { dateTimeInputOffset, formatDate, formatPercent, titleCase } from "@/lib/format";
 
 export default function MarketplacePage() {
   const router = useRouter();
+  const { actor } = useSession();
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<string[]>([]);
   const [cropType, setCropType] = useState("CUCUMBER");
   const [quantity, setQuantity] = useState(12);
-  const [neededBy, setNeededBy] = useState("2026-09-08T15:00");
+  const [neededBy, setNeededBy] = useState(() => dateTimeInputOffset(4));
   const [maxPrice, setMaxPrice] = useState(8);
   const [message, setMessage] = useState<string | null>(null);
-  const listings = useQuery({ queryKey: ["listings", cropType], queryFn: () => api.listings(cropType) });
+  const listings = useQuery({ queryKey: ["listings", cropType], queryFn: () => api.listings(cropType), refetchInterval: 15_000 });
+  const focusedListingId = selected.at(-1);
+  const listingDetail = useQuery({ queryKey: ["listing", focusedListingId], queryFn: () => api.listing(focusedListingId!), enabled: Boolean(focusedListingId), refetchInterval: 15_000 });
 
   const demand = useMutation({
-    mutationFn: () => api.createDemand({
+    mutationFn: () => {
+      if (!actor?.deliveryLocation) throw new Error("Your buyer delivery profile is missing a location.");
+      return api.createDemand({
       cropType,
       quantity: { value: quantity, unit: "kg" },
       neededBy: new Date(neededBy).toISOString(),
-      deliveryLocation,
+      deliveryLocation: actor.deliveryLocation,
       maxUnitPrice: { amount: maxPrice, currency: "XCD" },
-    }),
+      });
+    },
     onSuccess: () => { setMessage("Demand saved. Harvest can now help find matching supply."); void queryClient.invalidateQueries({ queryKey: ["demands"] }); },
   });
   const order = useMutation({
-    mutationFn: () => api.createOrder({
+    mutationFn: () => {
+      if (!actor?.deliveryLocation) throw new Error("Your buyer delivery profile is missing a location.");
+      return api.createOrder({
       cropType,
       requestedQuantity: { value: quantity, unit: "kg" },
       neededBy: new Date(neededBy).toISOString(),
-      deliveryLocation,
+      deliveryLocation: actor.deliveryLocation,
       listingIds: selected,
-    }),
+      });
+    },
     onSuccess: (created) => { void queryClient.invalidateQueries(); router.push(`/orders/${created.orderId}`); },
   });
 
@@ -67,9 +75,21 @@ export default function MarketplacePage() {
               ))}
             </div>
           )}
+          {listingDetail.data && (
+            <Card className="section-gap">
+              <SectionTitle title={`${titleCase(listingDetail.data.cropType)} supply evidence`} detail={listingDetail.data.productionZone} />
+              <div className="info-list">
+                <div><Leaf /><span><strong>{titleCase(listingDetail.data.supplyEvidence.provenance)}</strong><small>Forecast provenance</small></span></div>
+                <div><Check /><span><strong>{titleCase(listingDetail.data.supplyEvidence.verificationStatus)}</strong><small>Coordinator verification</small></span></div>
+                {listingDetail.data.supplyEvidence.confidence !== undefined && <div><Check /><span><strong>{formatPercent(listingDetail.data.supplyEvidence.confidence)}</strong><small>Forecast confidence</small></span></div>}
+              </div>
+              {listingDetail.data.supplyEvidence.forecastGeneratedAt && <p>Updated {formatDate(listingDetail.data.supplyEvidence.forecastGeneratedAt)}</p>}
+              {listingDetail.data.supplyEvidence.warnings?.length ? <div className="notice"><strong>Please check</strong>{listingDetail.data.supplyEvidence.warnings.join("; ")}</div> : null}
+            </Card>
+          )}
         </div>
         <Card className="sticky-card">
-          <SectionTitle title="Your requirement" detail="Bay Gardens Hotel" />
+          <SectionTitle title="Your requirement" detail={`${actor?.name ?? "Buyer"} · ${actor?.serviceZone ?? "Delivery zone not set"}`} />
           <form className="form-grid" onSubmit={(event: FormEvent) => { event.preventDefault(); order.mutate(); }}>
             <div className="field"><label>Crop</label><input value={cropType} onChange={(event) => setCropType(event.target.value.toUpperCase())} /></div>
             <div className="field"><label>Quantity (kg)</label><input type="number" min="0.1" step="0.1" value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} /></div>
@@ -78,7 +98,7 @@ export default function MarketplacePage() {
             <div className="field"><label>Selected supply</label><input value={`${selectedSupply} kg`} disabled /></div>
             <div className="field-full order-summary"><span>Requested <strong>{quantity} kg</strong></span><span>Selected <strong>{selectedSupply} kg</strong></span></div>
             <button type="button" className="button button-secondary" disabled={demand.isPending} onClick={() => demand.mutate()}><Plus size={16} />{demand.isPending ? "Saving..." : "Save as demand"}</button>
-            <button className="button" disabled={order.isPending || !selected.length}><ShoppingCart size={16} />{order.isPending ? "Placing order..." : "Place order"}</button>
+            <button className="button" disabled={order.isPending || !selected.length || !actor?.deliveryLocation}><ShoppingCart size={16} />{order.isPending ? "Placing order..." : "Place order"}</button>
           </form>
           {(message || demand.error || order.error) && <p className={(demand.error || order.error) ? "form-error" : "form-success"}>{message ?? demand.error?.message ?? order.error?.message}</p>}
         </Card>

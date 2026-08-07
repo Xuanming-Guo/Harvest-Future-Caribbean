@@ -21,7 +21,7 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient({
-    defaultOptions: { queries: { staleTime: 5_000, retry: 1 } },
+    defaultOptions: { queries: { staleTime: 5_000, retry: 1, refetchOnWindowFocus: true } },
   }));
   const [actor, setActor] = useState<SessionActor | null>(null);
   const [ready, setReady] = useState(false);

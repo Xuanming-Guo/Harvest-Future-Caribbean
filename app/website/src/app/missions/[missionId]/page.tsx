@@ -11,17 +11,21 @@ import { Badge, Card, ErrorState, LoadingState, PageHeader, SectionTitle } from 
 import { api } from "@/lib/api";
 import { formatDate, titleCase } from "@/lib/format";
 
-const demoVehicleId = "d0000000-0000-4000-8000-000000000001";
-
 export default function MissionDetailPage() {
   const { missionId } = useParams<{ missionId: string }>();
   const { actor } = useSession();
   const queryClient = useQueryClient();
   const [delayNote, setDelayNote] = useState("");
+  const [vehicleId, setVehicleId] = useState("");
   const [message, setMessage] = useState<string | null>(null);
-  const mission = useQuery({ queryKey: ["mission", missionId], queryFn: () => api.mission(missionId) });
+  const mission = useQuery({ queryKey: ["mission", missionId], queryFn: () => api.mission(missionId), refetchInterval: 5_000 });
+  const updates = useQuery({ queryKey: ["mission-updates", missionId], queryFn: () => api.missionUpdates(missionId), refetchInterval: 5_000 });
+  const vehicles = useQuery({ queryKey: ["vehicles"], queryFn: api.vehicles, enabled: actor?.role === "TRANSPORTER", refetchInterval: 5_000 });
   const accept = useMutation({
-    mutationFn: () => api.acceptMission(missionId, demoVehicleId),
+    mutationFn: () => {
+      if (!vehicleId) throw new Error("Select an available vehicle first.");
+      return api.acceptMission(missionId, vehicleId);
+    },
     onSuccess: () => { setMessage("Delivery job accepted."); void queryClient.invalidateQueries(); },
   });
   const update = useMutation({
@@ -40,6 +44,11 @@ export default function MissionDetailPage() {
   if (!mission.data) return <LoadingState label="Loading delivery details..." />;
   const isTransporter = actor?.role === "TRANSPORTER";
   const back = isTransporter ? "/transporter" : actor?.role === "BUYER" ? "/buyer" : "/orders";
+  const currentStop = mission.data.currentStopSequence > 0 ? mission.data.stops[mission.data.currentStopSequence - 1] : undefined;
+  const currentPickupConfirmed = currentStop?.kind === "PICKUP" && updates.data?.items.some((item) => item.updateType === "PICKED_UP" && item.stopSequence === currentStop.sequence);
+  const mayArrive = ["ASSIGNED", "PICKUP_IN_PROGRESS", "IN_TRANSIT"].includes(mission.data.status) && mission.data.currentStopSequence < mission.data.stops.length && (currentStop?.kind !== "PICKUP" || currentPickupConfirmed);
+  const mayConfirmPickup = mission.data.status === "PICKUP_IN_PROGRESS" && currentStop?.kind === "PICKUP" && !currentPickupConfirmed;
+  const mayDeliver = mission.data.status === "IN_TRANSIT" && mission.data.currentStopSequence === mission.data.stops.length && currentStop?.kind === "DROPOFF";
 
   return (
     <>
@@ -56,13 +65,17 @@ export default function MissionDetailPage() {
           <SectionTitle title="Job details" detail={titleCase(mission.data.status)} />
           <div className="info-list"><div><PackageCheck /><span><strong>{mission.data.quantity.value} kg</strong><small>Produce quantity</small></span></div><div><Truck /><span><strong>{mission.data.vehicleId ? "Vehicle assigned" : "No vehicle yet"}</strong><small>Transport status</small></span></div></div>
           {isTransporter && <div className="mission-actions">
-            {mission.data.status === "AVAILABLE" && <button className="button" disabled={accept.isPending} onClick={() => accept.mutate()}><Check size={17} />Accept job</button>}
-            {mission.data.status === "ASSIGNED" && <button className="button" disabled={update.isPending} onClick={() => update.mutate("PICKED_UP")}><PackageCheck size={17} />Confirm pickup</button>}
-            {["PICKUP_IN_PROGRESS", "IN_TRANSIT"].includes(mission.data.status) && <button className="button" disabled={update.isPending} onClick={() => update.mutate("ARRIVED")}><MapPin size={17} />Arrived at stop</button>}
-            {["PICKUP_IN_PROGRESS", "IN_TRANSIT"].includes(mission.data.status) && <button className="button button-secondary" disabled={update.isPending} onClick={() => update.mutate("DELIVERED")}><Check size={17} />Mark delivered</button>}
+            {mission.data.status === "AVAILABLE" && <><div className="field"><label htmlFor="mission-vehicle">Vehicle</label><select id="mission-vehicle" value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}><option value="">Select a vehicle</option>{vehicles.data?.items.map((vehicle) => <option value={vehicle.vehicleId} disabled={vehicle.status !== "AVAILABLE"} key={vehicle.vehicleId}>{vehicle.label} · {vehicle.status}</option>)}</select></div><button className="button" disabled={accept.isPending || !vehicleId} onClick={() => accept.mutate()}><Check size={17} />Accept job</button></>}
+            {mayArrive && <button className="button" disabled={update.isPending} onClick={() => update.mutate("ARRIVED")}><MapPin size={17} />Arrived at next stop</button>}
+            {mayConfirmPickup && <button className="button" disabled={update.isPending} onClick={() => update.mutate("PICKED_UP")}><PackageCheck size={17} />Confirm pickup</button>}
+            {mayDeliver && <button className="button button-secondary" disabled={update.isPending} onClick={() => update.mutate("DELIVERED")}><Check size={17} />Mark delivered</button>}
           </div>}
         </Card>
       </div>
+      <Card className="section-gap">
+        <SectionTitle title="Delivery timeline" detail={`${updates.data?.items.length ?? 0} updates`} />
+        {!updates.data?.items.length ? <p>No progress updates have been recorded yet.</p> : <div className="task-list">{updates.data.items.map((item) => <article className="task-row" key={item.updateId}><div><Badge>{item.updateType}</Badge><h3>{titleCase(item.updateType)}</h3><p>{item.note ?? (item.stopSequence ? `Route stop ${item.stopSequence}` : "Mission progress recorded")}</p><small>{formatDate(item.recordedAt)}</small></div></article>)}</div>}
+      </Card>
       {isTransporter && mission.data.status !== "AVAILABLE" && mission.data.status !== "DELIVERED" && (
         <Card className="section-gap">
           <SectionTitle title="Report a delay or problem" detail="The coordinator will be notified" />

@@ -31,6 +31,16 @@ needed. The root page provides a development-only role sign-in backed by
 | Transporter | `/transporter`, `/missions/[missionId]` | accept mission, pickup/arrival/delivery update, report exception |
 | Coordinator | `/coordinator`, `/crops/[cropBatchId]`, `/orders` | permitted-farm verification, missing information, recovery decision, exception follow-up |
 
+Participant pages poll active orders, approvals, missions, exceptions and
+verification tasks every five seconds. Crop, demand, listing and opportunity
+views refresh every fifteen seconds, and all queries refresh when the browser
+regains focus. This is deliberately simple polling for the hackathon; the
+planned event stream remains part of the separate simulation/live-update work.
+
+Buyer delivery coordinates and delivery zone come from the signed-in profile,
+and transporters must select an available vehicle returned by the Product API.
+The browser contains no hardcoded operational identity, location, or vehicle.
+
 The client shell guards role routes for usability. Fastify independently
 enforces actor and resource permissions; hiding a link is never the security
 boundary.

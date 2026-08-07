@@ -14,3 +14,15 @@ export const formatPercent = (value: number) =>
 
 export const titleCase = (value: string) =>
   value.toLowerCase().replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+const twoDigits = (value: number) => String(value).padStart(2, "0");
+
+export function dateInputOffset(days: number) {
+  const value = new Date();
+  value.setDate(value.getDate() + days);
+  return `${value.getFullYear()}-${twoDigits(value.getMonth() + 1)}-${twoDigits(value.getDate())}`;
+}
+
+export function dateTimeInputOffset(days: number, hour = 15) {
+  return `${dateInputOffset(days)}T${twoDigits(hour)}:00`;
+}

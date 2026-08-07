@@ -103,6 +103,8 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .task-row:last-child { border-bottom: 0; }
 .task-row h3 { margin: 7px 0 4px; font-size: 15px; }
 .task-row p, .task-row small { margin: 0; color: var(--muted); font-size: 12px; }
+.approval-row { align-items: flex-start; flex-wrap: wrap; }
+.approval-row .inline-actions { width: 100%; justify-content: flex-end; }
 .order-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 16px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; }
 .order-row strong, .order-row small { display: block; }
 .order-row small { margin-top: 3px; color: var(--muted); font-size: 11px; }
@@ -150,6 +152,8 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .listing-meta b { display: block; color: var(--ink); font-size: 13px; }
 .sticky-card { position: sticky; top: 20px; }
 .order-summary { display: flex; justify-content: space-between; padding: 12px; border-radius: 10px; background: var(--mint); font-size: 12px; }
+.order-summary label { display: grid; gap: 4px; color: var(--muted); font-weight: 700; }
+.order-summary input { width: 110px; min-height: 36px; padding: 7px 9px; border: 1px solid #cfdcd3; border-radius: 8px; background: white; }
 
 .lifecycle { display: grid; grid-template-columns: repeat(6, 1fr); }
 .lifecycle > div { position: relative; display: grid; justify-items: center; gap: 7px; color: #9aac9f; text-align: center; }
@@ -180,7 +184,8 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .stops-list small { color: var(--muted); }
 .mission-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 18px; }
 
-.exception-row { display: grid; grid-template-columns: auto 1fr auto; align-items: start; gap: 13px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
+.exception-row { display: grid; width: 100%; grid-template-columns: auto 1fr auto; align-items: start; gap: 13px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; color: inherit; background: white; text-align: left; cursor: pointer; }
+.exception-row:hover { border-color: var(--leaf); }
 .exception-icon { color: var(--red); background: #fceeea; }
 .exception-row h3 { margin: 7px 0 3px; font-size: 15px; }
 .exception-row p, .exception-row small { margin: 0; color: var(--muted); font-size: 12px; }

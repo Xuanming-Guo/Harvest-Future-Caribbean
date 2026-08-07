@@ -7,14 +7,15 @@ import Link from "next/link";
 import { ApprovalList } from "@/components/approval-list";
 import { OrderList } from "@/components/order-list";
 import { useSession } from "@/components/providers";
-import { Metric, PageHeader } from "@/components/ui";
+import { Badge, Card, EmptyState, Metric, PageHeader, SectionTitle } from "@/components/ui";
 import { api } from "@/lib/api";
+import { formatDate, titleCase } from "@/lib/format";
 
 export default function BuyerHome() {
   const { actor } = useSession();
-  const orders = useQuery({ queryKey: ["orders"], queryFn: api.orders });
-  const demands = useQuery({ queryKey: ["demands"], queryFn: api.demands });
-  const missions = useQuery({ queryKey: ["missions"], queryFn: () => api.missions() });
+  const orders = useQuery({ queryKey: ["orders"], queryFn: api.orders, refetchInterval: 5_000 });
+  const demands = useQuery({ queryKey: ["demands"], queryFn: api.demands, refetchInterval: 15_000 });
+  const missions = useQuery({ queryKey: ["missions"], queryFn: () => api.missions(), refetchInterval: 5_000 });
   const orderItems = orders.data?.items ?? [];
 
   return (
@@ -30,6 +31,14 @@ export default function BuyerHome() {
         <OrderList limit={5} />
         <ApprovalList compact />
       </div>
+      <Card className="section-gap">
+        <SectionTitle title="Demand history" detail={`${demands.data?.items.length ?? 0} requests`} />
+        {!demands.data?.items.length ? <EmptyState title="No demand recorded" detail="Save a requirement from the marketplace to start sourcing." /> : (
+          <div className="order-list">{demands.data.items.map((item) => (
+            <div className="order-row" key={item.demandId}><div><strong>{titleCase(item.cropType)}</strong><small>Needed {formatDate(item.neededBy)}</small></div><span>{item.quantity.value} kg</span><Badge>{item.status}</Badge></div>
+          ))}</div>
+        )}
+      </Card>
       <Link href="/orders" className="text-link section-gap">View all orders <ArrowRight size={16} /></Link>
     </>
   );
