@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Harvest Product API
-  version: 0.2.0
+  version: 0.3.0
   description: >-
     Canonical operational API for real users, Harvest-mode simulated actors,
     website/mobile clients, and internal simulation ingestion. Operational
@@ -215,6 +215,38 @@ paths:
                 status: ACTIVE
                 createdAt: '2026-08-01T10:00:00Z'
         default: {$ref: '#/components/responses/Problem'}
+  /v1/listings/{listingId}:
+    get:
+      tags: [Marketplace]
+      operationId: getListing
+      summary: Read privacy-safe production evidence for one listing
+      parameters:
+        - $ref: '#/components/parameters/ListingId'
+      responses:
+        '200':
+          description: Listing detail with a general production zone and current supply evidence.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ListingDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/market-opportunities:
+    get:
+      tags: [Marketplace]
+      operationId: listMarketOpportunities
+      summary: Browse privacy-safe open demand relevant to visible crops
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+        - name: cropType
+          in: query
+          schema: {type: string}
+      responses:
+        '200':
+          description: Open buyer demand without buyer identity or exact delivery coordinates.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MarketOpportunityPage'}
+        default: {$ref: '#/components/responses/Problem'}
   /v1/buyer-demands:
     get:
       tags: [Marketplace]
@@ -338,7 +370,7 @@ paths:
           description: Order visible to the caller.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/Order'}
+              schema: {$ref: '#/components/schemas/OrderDetail'}
               example:
                 orderId: 20202020-2020-4020-8020-202020202020
                 buyerId: 19191919-1919-4919-8919-191919191919
@@ -348,6 +380,7 @@ paths:
                 neededBy: '2026-08-12T14:00:00Z'
                 lifecycleStatus: FULFILLED
                 atRisk: false
+                approvalSummary: {required: 3, approved: 3, pending: 0, rejected: 0}
                 createdAt: '2026-08-01T10:15:00Z'
                 updatedAt: '2026-08-12T13:45:00Z'
         default: {$ref: '#/components/responses/Problem'}
@@ -425,6 +458,7 @@ paths:
                   - missionId: 23232323-2323-4323-8323-232323232323
                     orderId: 20202020-2020-4020-8020-202020202020
                     status: AVAILABLE
+                    currentStopSequence: 0
                     quantity: {value: 120, unit: kg}
                     deadline: '2026-08-12T14:00:00Z'
                     stops:
@@ -449,6 +483,7 @@ paths:
                 missionId: 23232323-2323-4323-8323-232323232323
                 orderId: 20202020-2020-4020-8020-202020202020
                 status: ASSIGNED
+                currentStopSequence: 0
                 transporterId: 24242424-2424-4424-8424-242424242424
                 quantity: {value: 120, unit: kg}
                 deadline: '2026-08-12T14:00:00Z'
@@ -482,6 +517,7 @@ paths:
                 missionId: 23232323-2323-4323-8323-232323232323
                 orderId: 20202020-2020-4020-8020-202020202020
                 status: ASSIGNED
+                currentStopSequence: 0
                 transporterId: 24242424-2424-4424-8424-242424242424
                 vehicleId: 25252525-2525-4525-8525-252525252525
                 quantity: {value: 120, unit: kg}
@@ -491,6 +527,21 @@ paths:
                   - {sequence: 2, kind: DROPOFF, location: {latitude: 13.9094, longitude: -60.9789}}
         default: {$ref: '#/components/responses/Problem'}
   /v1/delivery-missions/{missionId}/updates:
+    get:
+      tags: [Delivery]
+      operationId: listDeliveryUpdates
+      summary: Read chronological observable updates for a visible mission
+      parameters:
+        - $ref: '#/components/parameters/MissionId'
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Chronological mission update history.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeliveryUpdatePage'}
+        default: {$ref: '#/components/responses/Problem'}
     post:
       tags: [Delivery]
       operationId: postDeliveryUpdate
@@ -521,6 +572,56 @@ paths:
                 recordedAt: '2026-08-12T12:30:00Z'
                 position: {latitude: 13.925, longitude: -60.97}
                 note: En route to buyer.
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/me/vehicles:
+    get:
+      tags: [Delivery]
+      operationId: listMyVehicles
+      summary: List vehicles owned by the signed-in transporter
+      responses:
+        '200':
+          description: Transporter-owned vehicles available for mission assignment.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VehiclePage'}
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/verification-tasks:
+    get:
+      tags: [Operations]
+      operationId: listVerificationTasks
+      summary: List crop verification work for permitted farms
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+        - name: status
+          in: query
+          schema: {$ref: '#/components/schemas/VerificationStatus'}
+      responses:
+        '200':
+          description: Verification tasks limited to the coordinator's permitted farms.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VerificationTaskPage'}
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/verification-tasks/{taskId}/decisions:
+    post:
+      tags: [Operations]
+      operationId: decideVerificationTask
+      summary: Verify an observation or request changes
+      parameters:
+        - $ref: '#/components/parameters/VerificationTaskId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/VerificationDecision'}
+      responses:
+        '200':
+          description: Final verification decision recorded.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VerificationTask'}
         default: {$ref: '#/components/responses/Problem'}
   /v1/exceptions:
     get:
@@ -576,6 +677,20 @@ paths:
                 provenance: OBSERVED
                 reportedAt: '2026-08-12T12:35:00Z'
         default: {$ref: '#/components/responses/Problem'}
+  /v1/exceptions/{exceptionId}:
+    get:
+      tags: [Delivery]
+      operationId: getException
+      summary: Read a visible exception and its concrete recovery proposal
+      parameters:
+        - $ref: '#/components/parameters/ExceptionId'
+      responses:
+        '200':
+          description: Exception detail including any stored recovery proposal.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ExceptionDetail'}
+        default: {$ref: '#/components/responses/Problem'}
   /v1/deliveries/{deliveryId}/acceptance:
     post:
       tags: [Delivery]
@@ -593,9 +708,13 @@ paths:
               outcome: ACCEPTED
               acceptedQuantity: {value: 120, unit: kg}
               rejectedQuantity: {value: 0, unit: kg}
+              lineOutcomes:
+                - cropBatchId: 11111111-1111-4111-8111-111111111111
+                  acceptedQuantity: {value: 120, unit: kg}
+                  rejectedQuantity: {value: 0, unit: kg}
               note: Produce received in good condition.
       responses:
-        '200':
+        '201':
           description: Outcome stored; delivery/order outcome events emitted atomically.
           content:
             application/json:
@@ -606,11 +725,16 @@ paths:
                 outcome: ACCEPTED
                 acceptedQuantity: {value: 120, unit: kg}
                 rejectedQuantity: {value: 0, unit: kg}
+                lineOutcomes:
+                  - cropBatchId: 11111111-1111-4111-8111-111111111111
+                    acceptedQuantity: {value: 120, unit: kg}
+                    rejectedQuantity: {value: 0, unit: kg}
                 acceptedBy: 19191919-1919-4919-8919-191919191919
                 acceptedAt: '2026-08-12T13:45:00Z'
         default: {$ref: '#/components/responses/Problem'}
   /v1/operations/snapshot:
     get:
+      x-harvest-status: planned
       tags: [Operations]
       operationId: getOperationsSnapshot
       summary: Read the role-filtered operational projection
@@ -635,6 +759,7 @@ paths:
         default: {$ref: '#/components/responses/Problem'}
   /v1/agent-traces/{traceId}:
     get:
+      x-harvest-status: planned
       tags: [Operations]
       operationId: getAgentTrace
       summary: Read a safe decision trace without private chain-of-thought
@@ -657,6 +782,7 @@ paths:
         default: {$ref: '#/components/responses/Problem'}
   /v1/events/stream:
     get:
+      x-harvest-status: planned
       tags: [Operations]
       operationId: streamEvents
       summary: Stream role-filtered domain events with replay
@@ -689,6 +815,7 @@ paths:
         default: {$ref: '#/components/responses/Problem'}
   /v1/simulation-runs:
     post:
+      x-harvest-status: planned
       tags: [Simulation]
       operationId: createSimulationRun
       summary: Create a reproducible baseline or Harvest run
@@ -722,6 +849,7 @@ paths:
         default: {$ref: '#/components/responses/Problem'}
   /v1/simulation-runs/{runId}:
     get:
+      x-harvest-status: planned
       tags: [Simulation]
       operationId: getSimulationRun
       summary: Read run status and observable clock
@@ -745,6 +873,7 @@ paths:
         default: {$ref: '#/components/responses/Problem'}
   /v1/simulation-runs/{runId}/commands:
     post:
+      x-harvest-status: planned
       tags: [Simulation]
       operationId: commandSimulationRun
       summary: Start, pause, resume, reset, change speed, rewind, or inject an observable scenario action
@@ -774,6 +903,7 @@ paths:
         default: {$ref: '#/components/responses/Problem'}
   /v1/simulation-runs/{runId}/world:
     get:
+      x-harvest-status: planned
       tags: [Simulation]
       operationId: getObservableWorld
       summary: Read only the observable world projection used by the 3D control room
@@ -796,6 +926,7 @@ paths:
         default: {$ref: '#/components/responses/Problem'}
   /v1/paired-runs:
     post:
+      x-harvest-status: planned
       tags: [Simulation]
       operationId: createPairedRun
       summary: Create baseline and Harvest runs with identical scenario and seed
@@ -825,6 +956,7 @@ paths:
         default: {$ref: '#/components/responses/Problem'}
   /v1/paired-runs/{pairId}:
     get:
+      x-harvest-status: planned
       tags: [Simulation]
       operationId: getPairedRun
       summary: Read paired-run status and aggregate benchmark result
@@ -849,6 +981,7 @@ paths:
         default: {$ref: '#/components/responses/Problem'}
   /internal/v1/simulation-events:
     post:
+      x-harvest-status: planned
       tags: [Internal]
       operationId: ingestSimulationEvent
       summary: Ingest one observable simulation event idempotently
@@ -887,6 +1020,7 @@ paths:
         default: {$ref: '#/components/responses/Problem'}
   /internal/v1/benchmark-results:
     post:
+      x-harvest-status: planned
       tags: [Internal]
       operationId: ingestBenchmarkResult
       summary: Ingest aggregate paired-run metrics
@@ -957,6 +1091,11 @@ components:
       in: path
       required: true
       schema: {type: string, format: uuid}
+    ListingId:
+      name: listingId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
     PredictionId:
       name: predictionId
       in: path
@@ -974,6 +1113,16 @@ components:
       schema: {type: string, format: uuid}
     DeliveryId:
       name: deliveryId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    ExceptionId:
+      name: exceptionId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    VerificationTaskId:
+      name: taskId
       in: path
       required: true
       schema: {type: string, format: uuid}
@@ -1043,6 +1192,7 @@ components:
         latestPredictionId: {type: string, format: uuid}
         availableToPromise: {$ref: './common.schema.json#/$defs/Quantity'}
         provenance: {$ref: './common.schema.json#/$defs/Provenance'}
+        verificationStatus: {$ref: '#/components/schemas/VerificationStatus'}
     CropBatchPage:
       type: object
       additionalProperties: false
@@ -1127,6 +1277,44 @@ components:
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/Listing'}}
         pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
+    SupplyEvidence:
+      type: object
+      additionalProperties: false
+      required: [provenance, verificationStatus]
+      properties:
+        provenance: {$ref: './common.schema.json#/$defs/Provenance'}
+        confidence: {type: number, minimum: 0, maximum: 1}
+        forecastGeneratedAt: {type: string, format: date-time}
+        harvestWindow: {$ref: './common.schema.json#/$defs/DateRange'}
+        verificationStatus: {$ref: '#/components/schemas/VerificationStatus'}
+        warnings: {type: array, items: {type: string}}
+    ListingDetail:
+      allOf:
+        - $ref: '#/components/schemas/Listing'
+        - type: object
+          required: [productionZone, supplyEvidence]
+          properties:
+            productionZone: {type: string, minLength: 1}
+            supplyEvidence: {$ref: '#/components/schemas/SupplyEvidence'}
+    MarketOpportunity:
+      type: object
+      additionalProperties: false
+      required: [opportunityId, cropType, quantity, neededBy, deliveryZone, createdAt]
+      properties:
+        opportunityId: {type: string, format: uuid}
+        cropType: {type: string, minLength: 1}
+        quantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        neededBy: {type: string, format: date-time}
+        deliveryZone: {type: string, minLength: 1}
+        maxUnitPrice: {$ref: './common.schema.json#/$defs/Money'}
+        createdAt: {type: string, format: date-time}
+    MarketOpportunityPage:
+      type: object
+      additionalProperties: false
+      required: [items, pageInfo]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/MarketOpportunity'}}
+        pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
     BuyerDemandCreate:
       type: object
       additionalProperties: false
@@ -1200,6 +1388,26 @@ components:
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/Order'}}
         pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
+    ApprovalSummary:
+      type: object
+      additionalProperties: false
+      required: [required, approved, pending, rejected]
+      properties:
+        required: {type: integer, minimum: 0}
+        approved: {type: integer, minimum: 0}
+        pending: {type: integer, minimum: 0}
+        rejected: {type: integer, minimum: 0}
+        myApprovalId: {type: string, format: uuid}
+        myApprovalStatus: {enum: [PENDING, APPROVED, REJECTED, CANCELLED]}
+    OrderDetail:
+      allOf:
+        - $ref: '#/components/schemas/Order'
+        - type: object
+          required: [approvalSummary]
+          properties:
+            approvalSummary: {$ref: '#/components/schemas/ApprovalSummary'}
+            deliveryMission: {$ref: '#/components/schemas/DeliveryMission'}
+            deliveryAcceptance: {$ref: '#/components/schemas/DeliveryAcceptance'}
     ApprovalDecision:
       type: object
       additionalProperties: false
@@ -1221,6 +1429,20 @@ components:
         decidedBy: {type: string, format: uuid}
         decidedAt: {type: string, format: date-time}
         reason: {type: string, maxLength: 1000}
+        context: {$ref: '#/components/schemas/ApprovalContext'}
+    ApprovalContext:
+      type: object
+      additionalProperties: false
+      required: [title, summary]
+      properties:
+        title: {type: string, minLength: 1}
+        summary: {type: string, minLength: 1}
+        orderId: {type: string, format: uuid}
+        cropType: {type: string}
+        quantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        neededBy: {type: string, format: date-time}
+        exceptionId: {type: string, format: uuid}
+        recoveryAction: {enum: [REALLOCATE, REROUTE, RESCHEDULE, SUBSTITUTE, CANCEL]}
     AllocationSummary:
       type: object
       additionalProperties: false
@@ -1258,7 +1480,7 @@ components:
     DeliveryMission:
       type: object
       additionalProperties: false
-      required: [missionId, orderId, status, quantity, deadline, stops]
+      required: [missionId, orderId, status, quantity, deadline, stops, currentStopSequence]
       properties:
         missionId: {type: string, format: uuid}
         orderId: {type: string, format: uuid}
@@ -1268,6 +1490,7 @@ components:
         quantity: {$ref: './common.schema.json#/$defs/Quantity'}
         deadline: {type: string, format: date-time}
         stops: {type: array, minItems: 2, items: {$ref: '#/components/schemas/DeliveryStop'}}
+        currentStopSequence: {type: integer, minimum: 0}
     MissionPage:
       type: object
       additionalProperties: false
@@ -1304,6 +1527,64 @@ components:
         position: {$ref: './common.schema.json#/$defs/GeoPoint'}
         quantity: {$ref: './common.schema.json#/$defs/Quantity'}
         note: {type: string, maxLength: 500}
+        stopSequence: {type: integer, minimum: 1}
+    DeliveryUpdatePage:
+      type: object
+      additionalProperties: false
+      required: [items, pageInfo]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/DeliveryUpdate'}}
+        pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
+    Vehicle:
+      type: object
+      additionalProperties: false
+      required: [vehicleId, label, status]
+      properties:
+        vehicleId: {type: string, format: uuid}
+        label: {type: string, minLength: 1}
+        registrationNumber: {type: string}
+        capacity: {$ref: './common.schema.json#/$defs/Quantity'}
+        status: {enum: [AVAILABLE, IN_USE, INACTIVE]}
+    VehiclePage:
+      type: object
+      additionalProperties: false
+      required: [items, pageInfo]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/Vehicle'}}
+        pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
+    VerificationStatus:
+      enum: [OPEN, VERIFIED, CHANGES_REQUESTED, UNVERIFIED]
+    VerificationTask:
+      type: object
+      additionalProperties: false
+      required: [taskId, farmId, cropBatchId, subjectType, subjectId, taskType, status, summary, createdAt]
+      properties:
+        taskId: {type: string, format: uuid}
+        farmId: {type: string, format: uuid}
+        cropBatchId: {type: string, format: uuid}
+        subjectType: {const: CROP_OBSERVATION}
+        subjectId: {type: string, format: uuid}
+        taskType: {const: VERIFY_OBSERVATION}
+        status: {$ref: '#/components/schemas/VerificationStatus'}
+        summary: {type: string, minLength: 1}
+        createdAt: {type: string, format: date-time}
+        resolvedBy: {type: string, format: uuid}
+        resolvedAt: {type: string, format: date-time}
+        note: {type: string, maxLength: 1000}
+    VerificationTaskPage:
+      type: object
+      additionalProperties: false
+      required: [items, pageInfo]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/VerificationTask'}}
+        pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
+    VerificationDecision:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision: {enum: [VERIFY, REQUEST_CHANGES]}
+        note: {type: string, maxLength: 1000}
     ExceptionCreate:
       type: object
       additionalProperties: false
@@ -1327,6 +1608,23 @@ components:
         status: {enum: [OPEN, RECOVERY_PENDING, RESOLVED]}
         provenance: {$ref: './common.schema.json#/$defs/Provenance'}
         reportedAt: {type: string, format: date-time}
+    RecoveryProposal:
+      type: object
+      additionalProperties: false
+      required: [action, summary, changes]
+      properties:
+        action: {enum: [REALLOCATE, REROUTE, RESCHEDULE, SUBSTITUTE, CANCEL]}
+        summary: {type: string, minLength: 1}
+        changes:
+          type: object
+          additionalProperties: true
+    ExceptionDetail:
+      allOf:
+        - $ref: '#/components/schemas/OperationalException'
+        - type: object
+          properties:
+            recoveryProposal: {$ref: '#/components/schemas/RecoveryProposal'}
+            approvalSummary: {$ref: '#/components/schemas/ApprovalSummary'}
     ExceptionPage:
       type: object
       additionalProperties: false
@@ -1337,16 +1635,20 @@ components:
     DeliveryAcceptanceCreate:
       type: object
       additionalProperties: false
-      required: [outcome, acceptedQuantity, rejectedQuantity]
+      required: [outcome, acceptedQuantity, rejectedQuantity, lineOutcomes]
       properties:
         outcome: {enum: [ACCEPTED, PARTIALLY_ACCEPTED, REJECTED]}
         acceptedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
         rejectedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
         note: {type: string, maxLength: 1000}
+        lineOutcomes:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/DeliveryLineOutcome'}
     DeliveryAcceptance:
       type: object
       additionalProperties: false
-      required: [deliveryId, orderId, outcome, acceptedQuantity, rejectedQuantity, acceptedBy, acceptedAt]
+      required: [deliveryId, orderId, outcome, acceptedQuantity, rejectedQuantity, lineOutcomes, acceptedBy, acceptedAt]
       properties:
         deliveryId: {type: string, format: uuid}
         orderId: {type: string, format: uuid}
@@ -1356,6 +1658,18 @@ components:
         note: {type: string, maxLength: 1000}
         acceptedBy: {type: string, format: uuid}
         acceptedAt: {type: string, format: date-time}
+        lineOutcomes:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/DeliveryLineOutcome'}
+    DeliveryLineOutcome:
+      type: object
+      additionalProperties: false
+      required: [cropBatchId, acceptedQuantity, rejectedQuantity]
+      properties:
+        cropBatchId: {type: string, format: uuid}
+        acceptedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        rejectedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
     OperationsSnapshot:
       type: object
       additionalProperties: false

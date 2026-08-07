@@ -12,8 +12,9 @@ code. Change the machine contract and this guide together first.
 
 Issue #8 implements the participant Product API used by the farmer, buyer,
 transporter and coordinator website on port `3000`. Its Fastify runtime serves
-the crop, forecast, listing, demand, order, actor-targeted approval, delivery
-mission, exception and delivery-acceptance operations described below.
+the crop, forecast, listing, privacy-safe opportunity, demand, order,
+actor-targeted approval, vehicle, verification, delivery mission, exception and
+delivery-acceptance operations described below.
 
 The operations snapshot, public SSE/trace viewer, simulation-run, observable
 world, paired-run and simulation-ingestion operations remain agreed **planned
@@ -143,7 +144,7 @@ scope, not only the role name.
   admin roles.
 - Request: optional `cropType`, status, cursor, and limit filters.
 - Response: a role-filtered page of observable crop batches with latest safe
-  prediction IDs, ATP, and provenance.
+  prediction IDs, ATP, provenance, and latest verification status.
 - Product state/event and simulation effect: none; this is a read projection.
 - Consumers: operations supply table, Model Lab selector, and future mobile
   crop lists.
@@ -155,8 +156,10 @@ scope, not only the role name.
   `notes` and `estimatedQuantity`. Identity/run context comes from auth.
 - Response: stored observation IDs/times, submitted safe fields, `traceId`.
 - Product state/event: append the observation and provenance, update the
-  batch's latest observation, start the forecast workflow, and atomically emit
-  `CROP_OBSERVATION_SUBMITTED`.
+  batch's latest observation, create one verification task, produce one
+  refreshed forecast, and emit `CROP_OBSERVATION_SUBMITTED`,
+  `VERIFICATION_TASK_CREATED`, and `FORECAST_PRODUCED`. Clients must not submit
+  a second `NEW_OBSERVATION` forecast request after this command succeeds.
 - Simulation effect: complete that actor's observation task and schedule any
   later workflow reaction. Never change hidden crop truth.
 - Consumers: farmer crop view, operations feed, crop map, Model Lab timeline.
@@ -227,6 +230,26 @@ scope, not only the role name.
 - Rules/failures: inactive/private supply is filtered; invalid cursors or
   limits return `400`.
 
+#### `GET /v1/listings/{listingId}`
+
+- Callers: buyer for active supply, owning farmer, permitted coordinator,
+  operations, or admin.
+- Response: the listing plus a general production zone and supply evidence:
+  forecast provenance, confidence, generation time, harvest window, warnings,
+  and coordinator verification status. Exact farm coordinates are never part
+  of this projection.
+- Product state/event and simulation effect: none.
+- Consumers: buyer marketplace detail and future mobile listing detail.
+
+#### `GET /v1/market-opportunities`
+
+- Callers: farmer for owned crop types, permitted coordinator, or admin.
+- Response: open/matching demand as crop, quantity, deadline, general delivery
+  zone, optional maximum price, and opportunity ID. Buyer identity and exact
+  delivery coordinates are deliberately omitted.
+- Product state/event and simulation effect: none.
+- Consumers: farmer home and future farmer mobile opportunity view.
+
 #### `POST /v1/listings`
 
 - Callers: farmer for an owned batch; coordinator with explicit authority.
@@ -285,8 +308,9 @@ scope, not only the role name.
   coordinator/operations/admin.
 - Request: order UUID.
 - Response: quantities, deadline, lifecycle status, `atRisk`, active exception
-  IDs, timestamps, and a safe allocation summary containing only batch IDs and
-  committed quantities. Private farm coordinates are not exposed here.
+  IDs, timestamps, safe allocation, approval totals and the caller's approval,
+  related delivery mission, and immutable delivery acceptance when recorded.
+  Private farm coordinates are not exposed here.
 - Product state/event: none.
 - Simulation effect: none.
 - Consumers: buyer/farmer order status and coordinator order detail.
@@ -299,8 +323,10 @@ scope, not only the role name.
 - Callers: the actor named in `requestedFromActorId`; coordinators see only
   approvals explicitly targeted to them.
 - Request: optional status, subject type, cursor, and limit filters.
-- Response: pending or decided approvals with request time; decision identity,
-  time, and reason appear only after a final human decision.
+- Response: pending or decided approvals with request time and role-safe
+  context. Farmers see only their committed line quantity; buyers see their
+  order total; coordinators see the concrete recovery summary. Decision
+  identity, time, and reason appear only after a final human decision.
 - Product state/event and simulation effect: none.
 - Consumers: focused farmer, buyer, and coordinator decision cards.
 
@@ -364,18 +390,52 @@ scope, not only the role name.
 - Rules/failures: competing acceptances produce one winner; later attempts
   return `409`; reject unavailable/unauthorised vehicles.
 
+#### `GET /v1/me/vehicles`
+
+- Callers: transporter.
+- Response: only vehicles owned by the signed-in transporter, including label,
+  optional registration/capacity, and `AVAILABLE`, `IN_USE`, or `INACTIVE`.
+- Product state/event and simulation effect: none. Mission acceptance changes
+  the selected vehicle to `IN_USE`; delivery or cancellation releases it.
+- Consumers: transporter job list and mission acceptance.
+
+#### `GET /v1/delivery-missions/{missionId}/updates`
+
+- Callers: the same actors allowed to read the mission.
+- Response: chronological progress updates with derived stop sequence.
+- Product state/event and simulation effect: none.
+- Consumers: participant delivery timelines.
+
 #### `POST /v1/delivery-missions/{missionId}/updates`
 
 - Callers: assigned transporter.
 - Request: `updateType`, `recordedAt`; optional `position`, `quantity`, `note`.
 - Response: update and mission IDs plus submitted safe fields.
-- Product state/event: append progress, advance allowed mission/order state,
-  and emit `DELIVERY_UPDATE_POSTED`.
+- Product state/event: append progress, enforce monotonic timestamps and the
+  arrival/pickup/drop-off sequence, advance mission/order state, and emit
+  `DELIVERY_UPDATE_POSTED`.
 - Simulation effect: advance observable vehicle position and future actor/task
   schedules. It cannot rewrite past positions.
 - Consumers: transporter progress and participant order tracking.
 - Rules/failures: update type must be valid for current mission state; time must
   be monotonic; position is required for `POSITION`.
+
+#### `GET /v1/verification-tasks`
+
+- Callers: coordinator for permitted farms or admin.
+- Response: explicit observation-verification tasks, optionally filtered by
+  status.
+- Product state/event and simulation effect: none.
+- Consumers: coordinator verification queue.
+
+#### `POST /v1/verification-tasks/{taskId}/decisions`
+
+- Callers: coordinator for the task's permitted farm or admin.
+- Request: `VERIFY` or `REQUEST_CHANGES` plus an optional note.
+- Product state/event: finalise the task and emit `VERIFICATION_DECIDED`.
+- Simulation effect: complete the observable verification action without
+  changing hidden crop truth.
+- Consumers: coordinator queue and crop/listing evidence.
 
 #### `POST /v1/exceptions`
 
@@ -400,23 +460,40 @@ scope, not only the role name.
 - Product state/event and simulation effect: none.
 - Consumers: the coordinator recovery workspace and related participant state.
 
+#### `GET /v1/exceptions/{exceptionId}`
+
+- Callers: affected participants and authorised coordinator/admin roles.
+- Response: exception detail plus a stored recovery action, plain-language
+  summary, concrete changes, and approval totals when a proposal exists.
+- Product state/event and simulation effect: none.
+- Initial delay recovery: a mission delay resolves the related order, marks it
+  at risk, and proposes extending that mission's deadline by two hours. Human
+  approval applies that exact deadline, resolves the exception, and clears the
+  risk overlay only when no other active exception remains.
+
 #### `POST /v1/deliveries/{deliveryId}/acceptance`
 
 - Callers: receiving buyer or explicitly authorised receiving coordinator.
-- Request: outcome, accepted quantity, rejected quantity, optional note.
+- Request: outcome, accepted quantity, rejected quantity, one accepted/rejected
+  outcome for every committed crop batch, and optional note.
 - Response: delivery/order IDs, outcome/quantities, accepter and time.
 - Product state/event: record immutable actual outcome and emit
   `DELIVERY_ACCEPTED`; then atomically derive one of `ORDER_FULFILLED`,
   `ORDER_PARTIALLY_FULFILLED`, or `ORDER_REJECTED` and release unused
   reservations.
 - Simulation effect: record actual farmer/transporter economics and model
-  evaluation data. Fulfilment satisfies demand and ends remaining order tasks;
+  evaluation data. Each crop line updates its latest prediction's accepted
+  actual quantity and absolute error. Fulfilment satisfies demand and ends remaining order tasks;
   partial/rejected outcomes schedule unmet-demand/import/substitution fallback.
 - Consumers: buyer receipt, farmer outcome/revenue, trust, benchmark, Model Lab.
 - Rules/failures: quantities must use one unit, be non-negative, sum to the
   delivered amount, and match outcome; produce rejection requires approval.
 
 ### Planned operational and live views (not served by Issue #8)
+
+Every operation in this section and the planned simulation/internal-ingestion
+sections is marked `x-harvest-status: planned` in OpenAPI. Product clients must
+not call these eleven operations until their separate runtime issues land.
 
 #### `GET /v1/operations/snapshot`
 
@@ -593,6 +670,7 @@ missing event or apply an event whose schema it cannot validate.
 | API command/event | Product API impact | Simulation impact | Interface impact |
 |---|---|---|---|
 | Crop observation submitted / `CROP_OBSERVATION_SUBMITTED` | Stores observation/provenance and starts forecast workflow | Completes actor update; hidden crop truth unchanged | Farmer crop view and operations feed update |
+| Verification task/decision / `VERIFICATION_TASK_CREATED`, `VERIFICATION_DECIDED` | Stores explicit coordinator work and its final status | Completes only the observable verification action | Coordinator queue and supply evidence update |
 | Forecast produced / `FORECAST_PRODUCED` | Stores model snapshot and deterministic safe-quantity inputs/ATP | Records prediction for predicted-versus-actual comparison | Farmer forecast, Model Lab, crop map update |
 | Listing published / `LISTING_PUBLISHED` | Adds safely orderable marketplace supply | Buyer actors may discover it during later scheduled actions | Marketplace and operations supply update |
 | Buyer demand/order created / `BUYER_DEMAND_CREATED`, `ORDER_REQUESTED` | Stores demand/order and starts matching | Marks demand pending and schedules eligible reactions | Buyer order and operations demand update |
