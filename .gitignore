@@ -29,6 +29,9 @@ test-results/
 web-build/
 *.tsbuildinfo
 app/shared/src/generated/
+# Cesium's runtime workers, shaders and imagery, copied out of node_modules by
+# app/control-room/scripts/copy-cesium.mjs. Roughly 40 MB of build artefact.
+app/control-room/public/cesium/
 
 # Python
 __pycache__/

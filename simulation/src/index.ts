@@ -9,7 +9,18 @@
  */
 
 export { SimulationEngine, runScenario } from './engine.js';
-export type { EngineOptions, PolicyName, RunMetrics, RunResult, RunStatus } from './engine.js';
+export type { EngineOptions, InjectedDisruption, PolicyName, RunMetrics, RunResult, RunStatus } from './engine.js';
+
+export { frameAt, interpolateAlongPath, missionPositionAt } from './replay.js';
+export type {
+  ControlRoomBatch,
+  ControlRoomDemand,
+  ControlRoomFrame,
+  ControlRoomMission,
+  ControlRoomScene,
+  ControlRoomTotals,
+  ReplayTimeline,
+} from './replay.js';
 
 export { EventQueue, Priority } from './core/queue.js';
 export type { ScheduledEvent } from './core/queue.js';

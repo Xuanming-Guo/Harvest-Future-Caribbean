@@ -34,6 +34,14 @@ import { requireScenario, haversineKm, ROAD_WINDING_FACTOR } from './scenario/sa
 import type { Scenario } from './scenario/types.js';
 import { assertNoTruthLeak, toObservableWorld, worldDigest, type ObservableWorldView } from './world/observable.js';
 import type {
+  ControlRoomBatch,
+  ControlRoomDemand,
+  ControlRoomFrame,
+  ControlRoomMission,
+  ControlRoomScene,
+  ReplayTimeline,
+} from './replay.js';
+import type {
   BuyerDemand,
   Commitment,
   DeliveryMission,
@@ -52,6 +60,38 @@ export interface EngineOptions {
   seed: number;
   /** Hard cap on events processed, so a scheduling bug fails fast instead of hanging. */
   maxEvents?: number;
+  /**
+   * Record an observable frame after every event, for the control room.
+   *
+   * Off by default. The benchmark runs thousands of scenarios and has no use
+   * for a few hundred frames of projection per run.
+   */
+  captureFrames?: boolean;
+  /**
+   * Extra disruptions injected into the scenario before it starts.
+   *
+   * This backs the control room's event-injection control. They are ordinary
+   * scheduled disruptions, so an injected road closure behaves exactly like one
+   * the scenario generated, and an injected run stays as reproducible as any
+   * other — the same injection plus the same seed gives the same world.
+   */
+  injectedDisruptions?: InjectedDisruption[];
+}
+
+/**
+ * A disruption requested from outside the scenario.
+ *
+ * Severity is deliberately not settable. It is hidden truth, and letting an
+ * interface choose it would let whoever is driving the demo dial the outcome.
+ * The engine derives it from a seeded stream instead.
+ */
+export interface InjectedDisruption {
+  type: 'WEATHER' | 'ROAD' | 'VEHICLE' | 'CROP' | 'DEMAND';
+  /** Milliseconds after the scenario start. */
+  offsetMs: number;
+  durationMs: number;
+  affectedEntityIds: string[];
+  publicDescription: string;
 }
 
 /** Mirrors `BenchmarkMetrics` in contracts/openapi.yaml, plus run diagnostics. */
@@ -96,6 +136,8 @@ export interface RunResult {
   /** Repeated on every result so no consumer can mistake this for measured impact. */
   evidenceLabel: string;
   provenanceNote: string;
+  /** Present only when `captureFrames` was set. */
+  timeline?: ReplayTimeline;
 }
 
 const EVIDENCE_LABEL =
@@ -131,6 +173,10 @@ export class SimulationEngine {
   /** How many times planning has been retried for a demand, to bound replanning. */
   private readonly planAttempts = new Map<string, number>();
   private observationRequestCount = 0;
+  private readonly captureFrames: boolean;
+  private readonly frames: ControlRoomFrame[] = [];
+  /** How many decisions had been recorded when the previous frame was taken. */
+  private decisionsAtLastFrame = 0;
 
   private clock: SimulationInstant;
   private readonly startsAt: SimulationInstant;
@@ -149,6 +195,7 @@ export class SimulationEngine {
     this.policy = options.policy === 'HARVEST' ? harvestPolicy : baselinePolicy;
     this.seed = options.seed;
     this.maxEvents = options.maxEvents ?? 250_000;
+    this.captureFrames = options.captureFrames ?? false;
 
     this.random = new RandomSource(options.seed);
     // Identifiers come from their own stream so that adding an entity does not
@@ -164,6 +211,28 @@ export class SimulationEngine {
     this.runId = this.ids.next();
 
     this.world = this.scenario.build({ random: this.random, ids: this.ids, startsAt: this.startsAt });
+
+    // Injected disruptions join the scenario's own before anything is
+    // scheduled, so they are indistinguishable from generated ones once the run
+    // begins. Severity comes from a seeded stream rather than the caller, to
+    // keep the outcome out of the hands of whoever is driving the demo.
+    if (options.injectedDisruptions?.length) {
+      const injectionStream = this.random.stream('injected:disruptions');
+      for (const injected of options.injectedDisruptions) {
+        const startsAt = this.startsAt + injected.offsetMs;
+        if (startsAt > this.endsAt) continue;
+        this.world.truth.disruptions.push({
+          disruptionId: this.ids.next(),
+          type: injected.type,
+          startsAt,
+          endsAt: Math.min(this.endsAt, startsAt + Math.max(HOUR_MS, injected.durationMs)),
+          affectedEntityIds: [...injected.affectedEntityIds],
+          severity: Number(injectionStream.float(0.4, 0.95).toFixed(3)),
+          publicDescription: injected.publicDescription,
+        });
+      }
+      this.world.truth.disruptions.sort((a, b) => a.startsAt - b.startsAt);
+    }
 
     for (const disruption of this.world.truth.disruptions) {
       this.disruptionRuntimes.set(disruption.disruptionId, { disruption, active: false });
@@ -246,6 +315,7 @@ export class SimulationEngine {
         // guards against a handler mutating the clock directly.
         this.clock = Math.max(this.clock, event.at);
         this.handle(event);
+        if (this.captureFrames) this.recordFrame(event.type);
       }
 
       // Settle anything still outstanding at the horizon.
@@ -901,6 +971,121 @@ export class SimulationEngine {
   }
 
   // ------------------------------------------------------------------
+  // Control-room replay
+  // ------------------------------------------------------------------
+
+  /**
+   * Records one observable frame.
+   *
+   * Every field is copied by name. Spreading the engine's own objects would be
+   * shorter and would publish hidden truth the first time somebody added a
+   * field to `HiddenCropTruth`, so the verbosity is the point.
+   */
+  private recordFrame(eventType: string): void {
+    const missions: ControlRoomMission[] = [...this.world.observed.missions.values()].map((mission) => ({
+      missionId: mission.missionId,
+      commitmentId: mission.commitmentId,
+      transporterId: mission.transporterId,
+      status: mission.status,
+      path: mission.path.map((point) => ({ latitude: point.latitude, longitude: point.longitude })),
+      plannedDepartureAt: mission.plannedDepartureAt,
+      plannedArrivalAt: mission.plannedArrivalAt,
+      actualArrivalAt: mission.actualArrivalAt,
+      loadedKg: Number(mission.loadedKg.toFixed(2)),
+    }));
+
+    const batches: ControlRoomBatch[] = [...this.world.observed.batches.values()].map((batch) => {
+      const latest = batch.observations.at(-1);
+      return {
+        batchId: batch.batchId,
+        farmId: batch.farmId,
+        crop: batch.crop,
+        lastReportedStage: batch.lastReportedStage,
+        lastObservedAt: batch.lastObservedAt,
+        observationCount: batch.observations.length,
+        latestEstimateKg: latest ? Number(latest.estimatedYieldKg.toFixed(2)) : null,
+        confirmedHarvestedKg: Number(batch.confirmedHarvestedKg.toFixed(2)),
+      };
+    });
+
+    const demands: ControlRoomDemand[] = [...this.world.observed.demands.values()].map((demand) => ({
+      demandId: demand.demandId,
+      buyerId: demand.buyerId,
+      crop: demand.crop,
+      quantityKg: demand.quantity.value,
+      neededBy: demand.neededBy,
+      status: demand.status,
+      acceptedKg: Number(demand.acceptedKg.toFixed(2)),
+      substitutedKg: Number(demand.substitutedKg.toFixed(2)),
+    }));
+
+    const newDecisions = this.decisions.slice(this.decisionsAtLastFrame);
+    this.decisionsAtLastFrame = this.decisions.length;
+
+    const acceptedKg = demands.reduce((total, demand) => total + demand.acceptedKg, 0);
+    const substitutedKg = demands.reduce((total, demand) => total + demand.substitutedKg, 0);
+
+    const projection = toObservableWorld(this.runId, this.clock, this.world);
+
+    this.frames.push({
+      atMs: this.clock,
+      at: formatInstant(this.clock),
+      eventType,
+      actors: projection.actors,
+      missions,
+      batches,
+      demands,
+      disruptions: projection.disruptions,
+      degradedRoadSegmentIds: [...this.world.observed.degradedRoadSegmentIds].sort(),
+      newDecisions,
+      totals: {
+        acceptedKg: Number(acceptedKg.toFixed(2)),
+        substitutedKg: Number(substitutedKg.toFixed(2)),
+        promisedKg: Number(this.totalPromisedKg.toFixed(2)),
+        demandsFullyMet: demands.filter((demand) => demand.status === 'FULFILLED').length,
+        demandsUnmet: demands.filter((demand) => demand.status === 'UNMET').length,
+        commitmentsApproved: this.commitmentsApproved,
+        observationRequests: this.observationRequestCount,
+      },
+    });
+  }
+
+  private buildScene(): ControlRoomScene {
+    return {
+      runId: this.runId,
+      scenarioId: this.scenario.scenarioId,
+      policy: this.policy.name,
+      seed: this.seed,
+      startsAt: formatInstant(this.startsAt),
+      endsAt: formatInstant(this.endsAt),
+      farms: [...this.world.farms.values()].map((farm) => ({
+        farmId: farm.farmId,
+        name: farm.name,
+        position: farm.position,
+      })),
+      buyers: [...this.world.buyers.values()].map((buyer) => ({
+        buyerId: buyer.buyerId,
+        name: buyer.name,
+        position: buyer.position,
+      })),
+      transporters: [...this.world.transporters.values()].map((transporter) => ({
+        transporterId: transporter.transporterId,
+        name: transporter.name,
+        homePosition: transporter.homePosition,
+        capacityKg: transporter.capacityKg,
+      })),
+      roads: [...this.world.roads.values()].map((road) => ({
+        roadSegmentId: road.roadSegmentId,
+        name: road.name,
+        from: road.from,
+        to: road.to,
+        distanceKm: road.distanceKm,
+      })),
+      evidenceLabel: EVIDENCE_LABEL,
+    };
+  }
+
+  // ------------------------------------------------------------------
   // Results
   // ------------------------------------------------------------------
 
@@ -949,6 +1134,7 @@ export class SimulationEngine {
       decisions: this.decisions,
       evidenceLabel: EVIDENCE_LABEL,
       provenanceNote: this.scenario.provenanceNote,
+      timeline: this.captureFrames ? { scene: this.buildScene(), frames: this.frames } : undefined,
     };
   }
 }
