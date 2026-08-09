@@ -20,6 +20,14 @@ AI agents and automated systems must never merge or close a pull request,
 submit a formal GitHub review, enable auto-merge, or delete a pull-request
 branch. Any merge must be deliberately initiated by an authorised human.
 
+**One exception.** An agent-authored pull request whose every changed file sits
+inside `simulation/` or `model/`, and which carries the `agent-merge` label, is
+merged automatically once CI and guardrails pass. Those directories have a
+single owner, so an unattended merge cannot disrupt a teammate. Everything else
+is still a human merge. See
+[AGENTS.md](AGENTS.md#exception-agent-auto-merge-inside-simulation-and-model)
+for the full condition list.
+
 ## Branch names
 
 Use lowercase words separated by hyphens:

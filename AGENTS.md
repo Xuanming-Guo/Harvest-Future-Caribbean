@@ -72,6 +72,8 @@ brainstorming and long-term ideas, so do not treat every item as current scope.
 
 ## Pull request control
 
+Unless the narrow exception below applies, the default rule stands:
+
 - AI agents may create branches and open or update pull requests, but must stop
   after doing so and leave the pull request open.
 - AI agents and automated systems must never push directly to `main`, merge a
@@ -79,11 +81,39 @@ brainstorming and long-term ideas, so do not treat every item as current scope.
   or delete a pull-request branch.
 - Only a human may formally review, approve, request changes on, merge, or close
   a pull request. Any authorised human collaborator may perform those actions.
-- Every merge must be deliberately initiated by a human. Auto-merge is always
-  forbidden.
+- Every merge must be deliberately initiated by a human.
 - Only a human deletes a branch after its pull request is merged or closed.
 - Human reviews are optional. AI agents may inspect, test, and report findings,
   but must not submit a formal GitHub review or approval.
+
+### Exception: agent auto-merge inside `simulation/` and `model/`
+
+Faisal owns `simulation/` and `model/` outright, so an unattended merge there
+cannot land under a teammate's feet mid-branch. Within those two directories
+only, an agent-authored pull request may merge itself.
+
+Every one of these conditions must hold, and
+[`.github/workflows/agent-auto-merge.yml`](.github/workflows/agent-auto-merge.yml)
+enforces all of them mechanically rather than trusting an agent to check:
+
+- Every changed file is inside `simulation/` or `model/`. A single file outside
+  that scope disqualifies the whole pull request.
+- The pull request carries the `agent-merge` label. Without it nothing happens.
+- The author is an agent account. A human's pull request stays a human's to merge.
+- CI and the guardrails check both passed on the merged commit.
+- No reviewer has an unresolved change request.
+- The base branch is `main` and the pull request is not a draft.
+
+The exception does not extend to anything else. Agents still never push to
+`main`, never close a pull request, never submit a formal review or approval,
+never delete a branch, and never enable GitHub's built-in auto-merge. Any pull
+request touching `app/`, `contracts/`, `docs/`, `.github/`, or a repository root
+file is a human merge, including a pull request that also touches
+`simulation/` or `model/`.
+
+Because the workflow runs from the definition on `main`, a pull request cannot
+loosen its own merge rules. Changes to the exception itself require a human
+merge.
 
 ## Definition of done
 
