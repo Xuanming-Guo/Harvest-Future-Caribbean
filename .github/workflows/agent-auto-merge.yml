@@ -1,0 +1,171 @@
+name: Agent auto-merge
+
+# Merges agent-authored pull requests WITHOUT human involvement, but only
+# inside simulation/ and model/.
+#
+# This is a deliberate, documented carve-out from the default rule in
+# AGENTS.md. It exists because those two areas have a single owner (Faisal),
+# so an unattended merge there cannot surprise a teammate mid-branch. Every
+# other path in the repository still requires a human merge.
+#
+# Design note: this runs on `workflow_run`, not `pull_request`. That means it
+# executes from the workflow definition on main, so a pull request cannot
+# modify its own merge rules in the same commit that gets merged. Editing this
+# file only takes effect after a human merges the change.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  actions: read
+
+jobs:
+  auto-merge:
+    name: Merge if scoped to simulation/ or model/
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Cheapest possible gate first: CI must be green and this must be a PR run.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+
+    steps:
+      - name: Resolve the pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          NUMBER=$(gh api "repos/$REPO/commits/$HEAD_SHA/pulls" \
+            --jq '[.[] | select(.state == "open")] | first | .number // empty')
+          if [[ -z "$NUMBER" ]]; then
+            echo "No open pull request for $HEAD_SHA. Nothing to do."
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
+          echo "eligible=true" >> "$GITHUB_OUTPUT"
+          echo "Resolved pull request #$NUMBER."
+
+      - name: Evaluate every merge condition
+        id: gate
+        if: steps.pr.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          PR=$(gh api "repos/$REPO/pulls/$NUMBER")
+          AUTHOR=$(jq -r '.user.login' <<< "$PR")
+          DRAFT=$(jq -r '.draft' <<< "$PR")
+          BASE=$(jq -r '.base.ref' <<< "$PR")
+          MERGEABLE=$(jq -r '.mergeable_state' <<< "$PR")
+          LABELS=$(jq -r '[.labels[].name] | join(",")' <<< "$PR")
+
+          BLOCKED=0
+          deny() { echo "::notice::Not merging: $1"; BLOCKED=1; }
+
+          # 1. Opt-in label. Absence of the label is a silent, normal no-op:
+          #    most pull requests should never come near this workflow.
+          if [[ ",$LABELS," != *",agent-merge,"* ]]; then
+            echo "No 'agent-merge' label. Leaving this pull request alone."
+            # 'skip', not 'false': 'false' means "opted in but a rail said no",
+            # which earns an explanatory comment. Not opting in earns silence.
+            echo "merge=skip" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 2. Agent-authored only. A human's pull request is a human's to merge.
+          #    Patterns are quoted because an unquoted '[' opens a bracket
+          #    expression in a case pattern, which would not match 'claude[bot]'.
+          case "$AUTHOR" in
+            'claude[bot]'|'github-actions[bot]') : ;;
+            *) deny "author '$AUTHOR' is not an agent account." ;;
+          esac
+
+          [[ "$DRAFT" == "false" ]] || deny "pull request is a draft."
+          [[ "$BASE" == "main" ]] || deny "base branch is '$BASE', not main."
+
+          # 3. THE key rail: every changed path must live in simulation/ or
+          #    model/. One file outside that scope disqualifies the whole
+          #    pull request. Fail closed if the file list cannot be read.
+          FILES=$(gh api --paginate "repos/$REPO/pulls/$NUMBER/files" --jq '.[].filename')
+          if [[ -z "$FILES" ]]; then
+            deny "could not determine changed files."
+          else
+            while IFS= read -r FILE; do
+              [[ -z "$FILE" ]] && continue
+              # Reject traversal before prefix-matching. The API returns
+              # normalised paths so this should be unreachable, but a scope
+              # gate that 'simulation/../app/...' walks straight out of is
+              # not a scope gate.
+              case "$FILE" in
+                *..*) deny "'$FILE' contains a path traversal segment." ; continue ;;
+              esac
+              case "$FILE" in
+                simulation/*|model/*) : ;;
+                *) deny "'$FILE' is outside simulation/ and model/." ;;
+              esac
+            done <<< "$FILES"
+          fi
+
+          # 4. No human has asked for changes and not been answered.
+          CHANGES_REQUESTED=$(gh api --paginate "repos/$REPO/pulls/$NUMBER/reviews" \
+            --jq '[.[] | select(.state == "CHANGES_REQUESTED")] | length')
+          [[ "$CHANGES_REQUESTED" == "0" ]] || deny "a reviewer requested changes."
+
+          # 5. Guardrails must have passed on this exact commit, not merely
+          #    have been skipped or never run.
+          GUARDRAILS=$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs" \
+            --jq '[.check_runs[] | select(.name | test("Repository rules"))] | first | .conclusion // "missing"')
+          [[ "$GUARDRAILS" == "success" ]] || deny "guardrails check is '$GUARDRAILS'."
+
+          # 6. GitHub itself must consider the branch cleanly mergeable.
+          case "$MERGEABLE" in
+            clean|unstable|has_hooks) : ;;
+            *) deny "GitHub reports mergeable_state '$MERGEABLE'." ;;
+          esac
+
+          if [[ "$BLOCKED" == "1" ]]; then
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "merge=true" >> "$GITHUB_OUTPUT"
+            echo "All conditions satisfied."
+          fi
+
+      - name: Merge
+        if: steps.gate.outputs.merge == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          # Squash keeps main's history readable. The branch is deliberately
+          # NOT deleted: AGENTS.md reserves branch deletion for a human, and
+          # nothing about this carve-out changes that.
+          gh pr merge "$NUMBER" --repo "$REPO" --squash
+          gh pr comment "$NUMBER" --repo "$REPO" --body \
+            "Merged automatically. Every changed file was inside \`simulation/\` or \`model/\`, CI and guardrails passed, and the \`agent-merge\` label was present. The branch has been left in place for a human to delete."
+          echo "Merged pull request #$NUMBER."
+
+      - name: Explain why it was not merged
+        if: steps.gate.outputs.merge == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          gh pr comment "$NUMBER" --repo "$REPO" --body \
+            "Automatic merge declined. See the [Agent auto-merge run](${{ github.event.workflow_run.html_url }}) for which condition failed. This pull request needs a human merge."

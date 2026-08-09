@@ -1,8 +1,13 @@
 Closes #
 
 > AI agents must leave this pull request open. Only a human may formally review,
-> merge, close, or delete its branch. Every merge must be manually initiated;
-> auto-merge is forbidden.
+> merge, close, or delete its branch. Every merge must be manually initiated,
+> and GitHub's built-in auto-merge is forbidden.
+>
+> One exception: an agent-authored pull request confined to `simulation/` or
+> `model/` and labelled `agent-merge` is merged by workflow once its checks
+> pass. See
+> [AGENTS.md](../AGENTS.md#exception-agent-auto-merge-inside-simulation-and-model).
 
 ## Summary
 

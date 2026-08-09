@@ -1,0 +1,143 @@
+name: Guardrails
+
+# Mechanically enforces the rules the team already wrote down in
+# CONTRIBUTING.md and AGENTS.md, so they survive contact with a deadline.
+#
+# Deliberate split:
+#   Hard failures  - cheap to fix and genuinely damaging if merged.
+#   Warnings       - worth flagging, annoying to block on mid-hackathon.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened]
+
+concurrency:
+  group: guardrails-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  guardrails:
+    name: Repository rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # CONTRIBUTING.md documents app/, simulation/, contracts/, docs/, demo/,
+      # fix/ and chore/. model/ and research/ are included because README.md
+      # lists model/ as a project area and research: is a documented commit
+      # prefix; both are natural branch scopes the branch list simply omits.
+      - name: Branch name follows convention
+        run: |
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+          PATTERN='^(app|simulation|model|contracts|docs|demo|fix|chore|research)/[0-9]+-[a-z0-9]+(-[a-z0-9]+)*$'
+          if [[ "$BRANCH" =~ $PATTERN ]]; then
+            echo "Branch '$BRANCH' matches the convention."
+          else
+            echo "::error::Branch '$BRANCH' does not match <area>/<issue-number>-<short-name>."
+            echo "::error::Allowed areas: app, simulation, model, contracts, docs, demo, fix, chore, research."
+            echo "::error::Example: simulation/7-event-engine"
+            exit 1
+          fi
+
+      - name: Pull request links its issue
+        run: |
+          BODY=$(cat <<'PR_BODY_EOF'
+          ${{ github.event.pull_request.body }}
+          PR_BODY_EOF
+          )
+          if grep -qiE '(closes|fixes|resolves)[[:space:]]+#[0-9]+' <<< "$BODY"; then
+            echo "Pull request links an issue."
+          else
+            echo "::error::CONTRIBUTING.md requires linking the issue with 'Closes #<number>'."
+            echo "::error::The template ships with a bare 'Closes #' - add the number."
+            exit 1
+          fi
+
+      # AGENTS.md: "Do not rewrite docs/context.md unless an issue explicitly
+      # requests it." The label is the explicit request.
+      - name: Guard docs/context.md
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          if git diff --name-only "$BASE" "$HEAD" | grep -qx 'docs/context.md'; then
+            if [[ "${{ contains(github.event.pull_request.labels.*.name, 'context-change') }}" == "true" ]]; then
+              echo "docs/context.md changed, and the 'context-change' label authorises it."
+            else
+              echo "::error::This pull request edits docs/context.md."
+              echo "::error::AGENTS.md reserves that file for issues that explicitly request it."
+              echo "::error::Add the 'context-change' label if the issue genuinely asks for this."
+              exit 1
+            fi
+          else
+            echo "docs/context.md untouched."
+          fi
+
+      - name: No committed secrets or environment files
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          ADDED=$(git diff --name-only --diff-filter=AM "$BASE" "$HEAD")
+          FAILED=0
+
+          # .env.example is the one committed env file the repo sanctions.
+          while IFS= read -r FILE; do
+            [[ -z "$FILE" ]] && continue
+            case "$FILE" in
+              .env.example) continue ;;
+              .env|.env.*|*/.env|*/.env.*)
+                echo "::error file=$FILE::Environment files must not be committed."
+                FAILED=1
+                ;;
+              *.pem|*.key|*.p12|*.pfx|id_rsa|id_ed25519)
+                echo "::error file=$FILE::Key material must not be committed."
+                FAILED=1
+                ;;
+            esac
+          done <<< "$ADDED"
+
+          # High-confidence credential shapes only. Generic entropy heuristics
+          # produce enough false positives to get a required check ignored.
+          PATTERNS='(ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|sk-ant-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----)'
+          if git diff "$BASE" "$HEAD" -- . ':(exclude).github/workflows/guardrails.yml' \
+            | grep -E '^\+' | grep -qE "$PATTERNS"; then
+            echo "::error::A line added by this pull request looks like a real credential."
+            FAILED=1
+          fi
+
+          exit $FAILED
+
+      # AGENTS.md forbids auto-merge outright: "Every merge must be
+      # deliberately initiated by a human. Auto-merge is always forbidden."
+      - name: Auto-merge is not enabled
+        run: |
+          if [[ "${{ github.event.pull_request.auto_merge != null }}" == "true" ]]; then
+            echo "::error::Auto-merge is enabled on this pull request."
+            echo "::error::AGENTS.md forbids it - every merge must be initiated by a human."
+            exit 1
+          fi
+          echo "Auto-merge is not enabled."
+
+      - name: Commit messages use a conventional prefix (warning)
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          PATTERN='^(feat|fix|docs|chore|research|refactor|test)(\([a-z0-9./-]+\))?!?: .+'
+          while IFS= read -r SUBJECT; do
+            [[ -z "$SUBJECT" ]] && continue
+            # Merge commits are generated by GitHub and never match.
+            [[ "$SUBJECT" == Merge* ]] && continue
+            if ! [[ "$SUBJECT" =~ $PATTERN ]]; then
+              echo "::warning::Commit subject does not use a conventional prefix: $SUBJECT"
+            fi
+          done < <(git log --format=%s "$BASE".."$HEAD")
+          echo "Commit prefix check complete."

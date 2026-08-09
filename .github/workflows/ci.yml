@@ -1,0 +1,92 @@
+name: CI
+
+# Runs the same checks as `npm run check`, split into named steps so a failure
+# points at the stage that broke rather than one opaque command.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Supersede in-flight runs for the same ref. A three-person hackathon should not
+# burn Actions minutes re-checking commits that are already obsolete.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  # These mirror .env.example, which is committed on purpose: they are
+  # throwaway local-only values for an ephemeral CI database, not secrets.
+  DATABASE_URL: postgresql://harvest:harvest-local-only@localhost:5432/harvest?schema=public
+  PRODUCT_API_PORT: "3001"
+  NEXT_PUBLIC_PRODUCT_API_URL: http://localhost:3001
+  DEV_JWT_SECRET: harvest-ci-development-secret
+  INTERNAL_SERVICE_TOKEN: harvest-ci-service-token
+  MODEL_ADAPTER: fixture
+  SIMULATION_ADAPTER: fixture
+
+jobs:
+  check:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        # Kept in step with compose.yaml so CI and local dev fail the same way.
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: harvest
+          POSTGRES_USER: harvest
+          POSTGRES_PASSWORD: harvest-local-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U harvest -d harvest"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Generated clients are gitignored, so every downstream step depends on
+      # this. Running it explicitly keeps the failure legible when a contract
+      # in contracts/ stops parsing.
+      - name: Generate typed clients from contracts
+        run: npm run contracts:generate
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Apply database migrations
+        run: npm run db:migrate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # The api workspace reseeds via its own pretest hook, so the labelled
+      # Saint Lucia scenario is rebuilt from scratch on every run.
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
