@@ -15,7 +15,7 @@ and better future forecasts.
 
 | Area | Purpose |
 | --- | --- |
-| [`app/`](app/) | Product API, website, mobile experiences, and shared client assets |
+| [`app/`](app/) | Product API, website, control room, mobile experiences, and shared client assets |
 | [`simulation/`](simulation/) | Paired baseline and Harvest-enabled food-system simulations |
 | [`model/`](model/) | Harvest-estimation features, training, evaluation, and inference |
 | [`contracts/`](contracts/) | Source of truth for APIs, events, and model interfaces |
@@ -39,9 +39,21 @@ See [`app/api/README.md`](app/api/README.md) and
 [`app/website/README.md`](app/website/README.md) for configuration and route
 details.
 
-The website on `3000` is only the real-user product interface. Port `3002` is
-reserved for a separate future simulation/control-room website; it is not
-started or scaffolded by the current application.
+The website on `3000` is only the real-user product interface. The separate
+simulation control room lives on port `3002` and is started on its own:
+
+```bash
+npm run control-room
+```
+
+It needs no database and no Product API — it runs the simulation in the browser
+and replays the result. See [`app/control-room/README.md`](app/control-room/README.md).
+
+To run a scenario headlessly instead, without any interface:
+
+```bash
+npm run sim -- --paired --seed 42
+```
 
 ## Architecture at a glance
 
