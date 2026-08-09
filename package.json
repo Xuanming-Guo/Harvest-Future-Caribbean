@@ -5,7 +5,8 @@
   "workspaces": [
     "app/api",
     "app/shared",
-    "app/website"
+    "app/website",
+    "simulation"
   ],
   "scripts": {
     "predev": "npm run db:up && npm run contracts:generate && npm run db:generate && npm run db:migrate && npm run db:seed",
@@ -21,9 +22,10 @@
     "contracts:generate": "npm run generate --workspace @harvest/shared",
     "prebuild": "npm run contracts:generate && npm run db:generate",
     "build": "npm run build --workspace @harvest/shared && npm run build --workspace @harvest/api && npm run build --workspace @harvest/website",
-    "lint": "npm run lint --workspace @harvest/api && npm run lint --workspace @harvest/website",
-    "typecheck": "npm run typecheck --workspace @harvest/shared && npm run typecheck --workspace @harvest/api && npm run typecheck --workspace @harvest/website",
-    "test": "npm run test --workspace @harvest/api && npm run test --workspace @harvest/website",
+    "lint": "npm run lint --workspace @harvest/api && npm run lint --workspace @harvest/website && npm run lint --workspace @harvest/simulation",
+    "typecheck": "npm run typecheck --workspace @harvest/shared && npm run typecheck --workspace @harvest/api && npm run typecheck --workspace @harvest/website && npm run typecheck --workspace @harvest/simulation",
+    "test": "npm run test --workspace @harvest/api && npm run test --workspace @harvest/website && npm run test --workspace @harvest/simulation",
+    "sim": "npm run run:scenario --workspace @harvest/simulation --",
     "test:e2e": "npm run test:e2e --workspace @harvest/website",
     "check": "npm run lint && npm run typecheck && npm test && npm run build"
   },

@@ -1,0 +1,316 @@
+/**
+ * `saint-lucia-demo-v1` — the hero scenario.
+ *
+ * Cucumber growers in the Mabouya valley supplying hotels and a supermarket
+ * around Castries and Rodney Bay, over a three-week window, with a rainy
+ * stretch that degrades the interior roads partway through.
+ *
+ * EVIDENCE STATUS: every number below is SYNTHETIC. The geography is real and
+ * the shape of the problem follows the project's research notes, but no yield,
+ * price, road speed or demand figure here is a measurement. Nothing produced by
+ * this scenario may be presented as observed impact from a deployed system;
+ * `docs/architecture.md` and the repository evidence policy both require that
+ * distinction to be explicit, and the run report repeats it.
+ *
+ * The scenario id matches the one used throughout `contracts/`.
+ */
+
+import { IdFactory } from '../core/ids.js';
+import { DAY_MS, HOUR_MS, formatDate } from '../core/time.js';
+import type { Scenario, ScenarioContext } from './types.js';
+import type {
+  Buyer,
+  Farm,
+  HiddenCropTruth,
+  ObservedCropBatch,
+  RoadSegment,
+  ScheduledDisruption,
+  Transporter,
+  World,
+} from '../world/types.js';
+
+const START_ISO = '2026-09-01T06:00:00Z';
+const DURATION_DAYS = 21;
+
+/** Real Saint Lucia locations; the actors placed at them are invented. */
+const FARM_SITES = [
+  { name: 'Mabouya Valley smallholding', latitude: 13.9503, longitude: -60.9312 },
+  { name: 'Dennery ridge plot', latitude: 13.9094, longitude: -60.8919 },
+  { name: 'Roseau valley plot', latitude: 13.9581, longitude: -61.0128 },
+  { name: 'Marquis basin plot', latitude: 14.0122, longitude: -60.9403 },
+  { name: 'Cul de Sac lowland plot', latitude: 13.9847, longitude: -60.9689 },
+] as const;
+
+const BUYER_SITES = [
+  { name: 'Rodney Bay resort kitchen', latitude: 14.0757, longitude: -60.9497, typicalOrderKg: 220, minimumAcceptableFraction: 0.9 },
+  { name: 'Castries supermarket depot', latitude: 14.0101, longitude: -60.9875, typicalOrderKg: 400, minimumAcceptableFraction: 0.8 },
+  { name: 'Soufriere hotel group', latitude: 13.8566, longitude: -61.0564, typicalOrderKg: 160, minimumAcceptableFraction: 0.85 },
+] as const;
+
+const TRANSPORTER_SITES = [
+  { name: 'Castries light truck', latitude: 14.0101, longitude: -60.9875, capacityKg: 600, cruiseSpeedKmh: 38 },
+  { name: 'Dennery shared van', latitude: 13.9094, longitude: -60.8919, capacityKg: 350, cruiseSpeedKmh: 32 },
+] as const;
+
+/**
+ * Great-circle distance in kilometres.
+ *
+ * Straight-line distance understates Saint Lucian road distance considerably —
+ * the interior is mountainous and the roads switchback — so callers apply a
+ * winding factor rather than trusting this directly.
+ */
+function haversineKm(a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }): number {
+  const EARTH_RADIUS_KM = 6371;
+  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+  const deltaLat = toRadians(b.latitude - a.latitude);
+  const deltaLon = toRadians(b.longitude - a.longitude);
+  const halfChord =
+    Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(toRadians(a.latitude)) * Math.cos(toRadians(b.latitude)) * Math.sin(deltaLon / 2) ** 2;
+  return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(halfChord)));
+}
+
+/** Saint Lucian roads wind; a 1.4 multiplier on straight-line distance is a synthetic stand-in. */
+const ROAD_WINDING_FACTOR = 1.4;
+
+function buildRoads(ids: IdFactory): Map<string, RoadSegment> {
+  const roads = new Map<string, RoadSegment>();
+
+  // One segment per farm-to-hub link. A full road graph is more than the hero
+  // scenario needs, and issue #5 owns the map rendering that would justify one.
+  const hub = { latitude: 14.0101, longitude: -60.9875 }; // Castries.
+
+  for (const site of FARM_SITES) {
+    const roadSegmentId = ids.next();
+    const straightLineKm = haversineKm(site, hub);
+    roads.set(roadSegmentId, {
+      roadSegmentId,
+      name: `${site.name} to Castries`,
+      from: { latitude: site.latitude, longitude: site.longitude },
+      to: hub,
+      distanceKm: Number((straightLineKm * ROAD_WINDING_FACTOR).toFixed(2)),
+      // Interior valley routes flood; the coastal Cul de Sac road holds up.
+      rainSensitivity: site.name.includes('Cul de Sac') ? 0.25 : 0.7,
+    });
+  }
+
+  return roads;
+}
+
+export const saintLuciaDemoV1: Scenario = {
+  scenarioId: 'saint-lucia-demo-v1',
+  description:
+    'Cucumber supply from five Mabouya-area smallholdings to three Castries-area buyers over three weeks, ' +
+    'with a rainy period that degrades interior roads and brings forward spoilage.',
+  startsAtIso: START_ISO,
+  durationDays: DURATION_DAYS,
+  provenanceNote:
+    'SYNTHETIC. Locations are real Saint Lucian places; every yield, price, demand, road speed and ' +
+    'spoilage figure is invented for demonstration and is not a measurement of any real farm or buyer.',
+
+  build(context: ScenarioContext): World {
+    const { ids, random, startsAt } = context;
+
+    // Named streams keep subsystems independent. Adding a farm must not perturb
+    // the weather sequence, or the paired runs stop being comparable.
+    const farmStream = random.stream('scenario:farms');
+    const cropStream = random.stream('scenario:crops');
+    const weatherStream = random.stream('scenario:weather');
+    const disruptionStream = random.stream('scenario:disruptions');
+
+    const roads = buildRoads(ids);
+    const roadIds = [...roads.keys()];
+
+    const farms = new Map<string, Farm>();
+    FARM_SITES.forEach((site, index) => {
+      const farmId = ids.next();
+      farms.set(farmId, {
+        farmId,
+        name: site.name,
+        position: { latitude: site.latitude, longitude: site.longitude },
+        roadSegmentId: roadIds[index] as string,
+        // Diligence spread is what makes reporting uneven, which is the whole
+        // reason Harvest needs to reason about uncertainty at all.
+        diligence: Number(farmStream.float(0.35, 0.95).toFixed(3)),
+      });
+    });
+
+    const buyers = new Map<string, Buyer>();
+    for (const site of BUYER_SITES) {
+      const buyerId = ids.next();
+      buyers.set(buyerId, {
+        buyerId,
+        name: site.name,
+        position: { latitude: site.latitude, longitude: site.longitude },
+        typicalOrderKg: site.typicalOrderKg,
+        minimumAcceptableFraction: site.minimumAcceptableFraction,
+      });
+    }
+
+    const transporters = new Map<string, Transporter>();
+    for (const site of TRANSPORTER_SITES) {
+      const transporterId = ids.next();
+      transporters.set(transporterId, {
+        transporterId,
+        name: site.name,
+        homePosition: { latitude: site.latitude, longitude: site.longitude },
+        capacityKg: site.capacityKg,
+        cruiseSpeedKmh: site.cruiseSpeedKmh,
+      });
+    }
+
+    // One or two cucumber batches per farm, planted before the run opens so
+    // some are already close to ready when the scenario starts.
+    const crops = new Map<string, HiddenCropTruth>();
+    const batches = new Map<string, ObservedCropBatch>();
+
+    for (const farm of farms.values()) {
+      const batchCount = cropStream.int(1, 2);
+      for (let index = 0; index < batchCount; index += 1) {
+        const batchId = ids.next();
+        const areaHectares = Number(cropStream.float(0.2, 0.8).toFixed(3));
+
+        // A batch is ONE MARKETABLE PICK-LOT, not a season's output.
+        //
+        // Cucumbers are picked repeatedly over several weeks; treating a whole
+        // season's ~18 t/ha as instantly available on the readiness date put
+        // roughly fifteen times more supply into the scenario than there was
+        // demand for it. In that world coordination cannot matter — any promise
+        // against a ready crop succeeds, and the benchmark measures nothing.
+        //
+        // Sizing a lot at ~1.2 t/ha leaves total supply modestly above total
+        // demand, which is the regime where matching supply to demand is
+        // actually the binding problem. The season-level figure belongs to the
+        // yield model in issue #7, not here.
+        const potentialYieldKg = Number((areaHectares * cropStream.normal(1_200, 260)).toFixed(2));
+
+        // Readiness is drawn *first*, inside the run window, and the planting
+        // date is then worked backwards from it.
+        //
+        // Doing it the intuitive way round — plant 25-45 days before the run
+        // and add a 50-65 day growing period — pushes most batches ready well
+        // after the three-week horizon. The run then technically completes
+        // while almost nothing is ever pickable, both policies fail for the
+        // same uninteresting reason, and the scenario exercises none of the
+        // intake-to-delivery workflow it exists to demonstrate.
+        //
+        // Staggering readiness across the window is also what makes the
+        // scenario a fair test: some batches are ready early, some late, so a
+        // policy has to match supply timing to demand timing rather than
+        // finding everything available at once.
+        const readyAt = startsAt + cropStream.int(1, DURATION_DAYS - 3) * DAY_MS + cropStream.int(0, 8) * HOUR_MS;
+        // Cucumbers run roughly 50-65 days from sowing.
+        const plantedAt = readyAt - cropStream.int(50, 65) * DAY_MS;
+
+        crops.set(batchId, {
+          batchId,
+          potentialYieldKg: Math.max(50, potentialYieldKg),
+          readyAt,
+          qualityFraction: Number(Math.min(1, Math.max(0.4, cropStream.normal(0.85, 0.08))).toFixed(4)),
+          // Cucumbers deteriorate fast once ready and unpicked.
+          dailySpoilageRate: Number(cropStream.float(0.06, 0.14).toFixed(4)),
+          stage: 'GROWING',
+          harvestedKg: 0,
+          lostKg: 0,
+        });
+
+        // What Harvest starts out believing. The grower's stated window is
+        // deliberately wide and offset from the truth: an accurate starting
+        // belief would hand the baseline a forecast it has no way to possess.
+        const statedCentre = readyAt + cropStream.int(-4, 4) * DAY_MS;
+        batches.set(batchId, {
+          batchId,
+          farmId: farm.farmId,
+          crop: 'cucumber',
+          plantedAt,
+          expectedReadyFrom: statedCentre - 3 * DAY_MS,
+          expectedReadyTo: statedCentre + 3 * DAY_MS,
+          areaHectares,
+          lastReportedStage: 'GROWING',
+          lastObservedAt: null,
+          observations: [],
+          confirmedHarvestedKg: 0,
+          provenance: 'SYNTHETIC',
+        });
+      }
+    }
+
+    // Daily rainfall. September is well into the Saint Lucian wet season, so
+    // the baseline is damp with a distinctly wet stretch in the second week.
+    const rainfallMmByDate = new Map<string, number>();
+    const wetSpellStartDay = weatherStream.int(7, 11);
+    const wetSpellLengthDays = weatherStream.int(3, 5);
+
+    for (let day = 0; day < DURATION_DAYS + 1; day += 1) {
+      const date = formatDate(startsAt + day * DAY_MS);
+      const inWetSpell = day >= wetSpellStartDay && day < wetSpellStartDay + wetSpellLengthDays;
+      const rainfallMm = inWetSpell
+        ? Math.max(0, weatherStream.normal(62, 18))
+        : Math.max(0, weatherStream.normal(9, 7));
+      rainfallMmByDate.set(date, Number(rainfallMm.toFixed(2)));
+    }
+
+    // The wet spell closes an interior road. It is scheduled now but hidden:
+    // it only becomes observable when it starts.
+    const disruptions: ScheduledDisruption[] = [];
+    const floodedRoad = disruptionStream.pick(roadIds.filter((id) => (roads.get(id) as RoadSegment).rainSensitivity > 0.5));
+    const floodStartsAt = startsAt + wetSpellStartDay * DAY_MS + disruptionStream.int(6, 14) * HOUR_MS;
+
+    disruptions.push({
+      disruptionId: ids.next(),
+      type: 'ROAD',
+      startsAt: floodStartsAt,
+      endsAt: floodStartsAt + disruptionStream.int(18, 40) * HOUR_MS,
+      affectedEntityIds: [floodedRoad as string],
+      severity: Number(disruptionStream.float(0.55, 0.95).toFixed(3)),
+      publicDescription: 'Heavy rain has made the valley road impassable to loaded vehicles.',
+    });
+
+    // A vehicle breakdown, so exception recovery has something to recover from
+    // that is not weather.
+    const transporterIds = [...transporters.keys()];
+    const breakdownStartsAt = startsAt + disruptionStream.int(3, 16) * DAY_MS + disruptionStream.int(5, 11) * HOUR_MS;
+    disruptions.push({
+      disruptionId: ids.next(),
+      type: 'VEHICLE',
+      startsAt: breakdownStartsAt,
+      endsAt: breakdownStartsAt + disruptionStream.int(6, 20) * HOUR_MS,
+      affectedEntityIds: [disruptionStream.pick(transporterIds) as string],
+      severity: Number(disruptionStream.float(0.4, 0.9).toFixed(3)),
+      publicDescription: 'Vehicle off the road with a mechanical fault.',
+    });
+
+    disruptions.sort((a, b) => a.startsAt - b.startsAt);
+
+    return {
+      farms,
+      buyers,
+      transporters,
+      roads,
+      truth: { crops, disruptions, rainfallMmByDate },
+      observed: {
+        batches,
+        demands: new Map(),
+        commitments: new Map(),
+        missions: new Map(),
+        disruptions: [],
+        degradedRoadSegmentIds: new Set(),
+      },
+    };
+  },
+};
+
+export const SCENARIOS: Record<string, Scenario> = {
+  [saintLuciaDemoV1.scenarioId]: saintLuciaDemoV1,
+};
+
+/** Looks up a scenario, listing what exists rather than returning undefined. */
+export function requireScenario(scenarioId: string): Scenario {
+  const scenario = SCENARIOS[scenarioId];
+  if (!scenario) {
+    throw new Error(`Unknown scenario '${scenarioId}'. Available: ${Object.keys(SCENARIOS).join(', ')}.`);
+  }
+  return scenario;
+}
+
+export { haversineKm, ROAD_WINDING_FACTOR, START_ISO, DURATION_DAYS };
