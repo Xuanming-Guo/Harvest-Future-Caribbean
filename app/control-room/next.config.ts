@@ -33,6 +33,27 @@ const nextConfig: NextConfig = {
       ".js": [".ts", ".tsx", ".js"],
     };
 
+    // Cesium's sources contain octal escape sequences inside string literals
+    // (its GLSL shaders, among others). The SWC minifier rewrites some of those
+    // strings as template literals, where octal escapes are a syntax error. The
+    // result is a chunk the browser refuses to parse:
+    //
+    //   SyntaxError: Octal escape sequences are not allowed in template strings
+    //   ChunkLoadError: Loading chunk 259 failed
+    //
+    // which surfaces as the globe never loading — the dynamic import simply
+    // never resolves, so the loading state sits there forever. It only bites
+    // production, because development builds are not minified, which makes it
+    // exactly the sort of bug that reaches a demo unnoticed.
+    //
+    // Minification is therefore off for this app. It costs bundle size on a
+    // page that already ships Cesium, and it is the smaller evil next to a
+    // globe that does not appear. The tidier long-term fix is to stop bundling
+    // Cesium altogether and load it from the copied /public/cesium build as an
+    // external script, which sidesteps the minifier entirely.
+    if (!config.optimization) config.optimization = {};
+    config.optimization.minimize = false;
+
     return config;
   },
 };
