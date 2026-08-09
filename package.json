@@ -6,6 +6,7 @@
     "app/api",
     "app/shared",
     "app/website",
+    "app/control-room",
     "simulation"
   ],
   "scripts": {
