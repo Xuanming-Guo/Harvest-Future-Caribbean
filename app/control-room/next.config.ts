@@ -17,6 +17,22 @@ const nextConfig: NextConfig = {
     // critical-dependency warnings that bury real ones.
     config.module = config.module ?? {};
     config.module.unknownContextCritical = false;
+
+    // @harvest/simulation is compiled with NodeNext, which requires its
+    // relative imports to carry a '.js' extension even though the files on
+    // disk are '.ts'. tsc and Vitest both understand that convention; Webpack
+    // does not, and fails with "Can't resolve './core/queue.js'".
+    //
+    // extensionAlias teaches it the same mapping. The alternative — dropping
+    // the extensions in the simulation package — would break that package's
+    // own NodeNext build, so the fix belongs here, at the consumer that has
+    // the unusual resolver.
+    config.resolve = config.resolve ?? {};
+    config.resolve.extensionAlias = {
+      ...config.resolve.extensionAlias,
+      ".js": [".ts", ".tsx", ".js"],
+    };
+
     return config;
   },
 };

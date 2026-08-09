@@ -16,6 +16,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DAY_MS, type ControlRoomFrame, type ReplayTimeline } from '@harvest/simulation';
 
+/** A shared empty array, so the no-timeline case keeps a stable identity. */
+const EMPTY_FRAMES: ControlRoomFrame[] = [];
+
 export const SPEED_OPTIONS = [1, 2, 5, 10, 30] as const;
 export type PlaybackSpeed = (typeof SPEED_OPTIONS)[number];
 
@@ -193,7 +196,11 @@ export type PlaybackHook = Omit<PlaybackState, 'frame'> & {
  * unconditionally before a run exists rather than guarding every call site.
  */
 export function usePlayback(timeline: ReplayTimeline | null): PlaybackHook {
-  const frames = timeline?.frames ?? [];
+  // Memoised because `?? []` allocates a fresh array whenever `timeline` is
+  // null, and `frames` is a dependency of the seek and step callbacks below.
+  // Without this every render would produce new callback identities, which the
+  // transport bar would then see as changed props on every animation frame.
+  const frames = useMemo(() => timeline?.frames ?? EMPTY_FRAMES, [timeline]);
   const startMs = frames.length > 0 ? (frames[0] as ControlRoomFrame).atMs : 0;
   const endMs = frames.length > 0 ? (frames[frames.length - 1] as ControlRoomFrame).atMs : 0;
 
