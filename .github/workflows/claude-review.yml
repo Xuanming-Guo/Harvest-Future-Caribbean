@@ -30,12 +30,29 @@ jobs:
     if: github.event.pull_request.draft == false
 
     steps:
+      # The review is a useful extra, not a merge gate. If the key is missing
+      # the job says so once and succeeds. A red X for an absent optional
+      # secret just teaches people that a red X means nothing.
+      - name: Check the API key is configured
+        id: key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [[ -z "$ANTHROPIC_API_KEY" ]]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No ANTHROPIC_API_KEY secret is configured, so the automated review is being skipped. Add one with: gh secret set ANTHROPIC_API_KEY --repo ${{ github.repository }}"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Check out repository
+        if: steps.key.outputs.present == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Review against Harvest architecture rules
+        if: steps.key.outputs.present == 'true'
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
