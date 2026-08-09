@@ -151,8 +151,16 @@ adapter provides deterministic fixture predictions and can later be replaced
 by the Python model service through configuration.
 
 `npm run dev` starts PostgreSQL, the Product API on `3001`, and the participant
-website on `3000`. Port `3002` is reserved for the future simulation website.
-Issue #8 does not implement its package, runtime routes, models or navigation.
+website on `3000`.
+
+The simulation control room runs separately on `3002` via `npm run control-room`.
+It does not touch PostgreSQL or the Product API: it executes the simulation
+engine in the browser and replays the recorded frames, because a full run costs
+a few milliseconds and a recorded timeline can be scrubbed backwards where a
+live engine cannot. `app/control-room/src/lib/run.ts` is the seam at which that
+becomes a call to the simulation service in
+[`contracts/simulation/openapi.yaml`](../contracts/simulation/openapi.yaml)
+once that service exists.
 
 The browser never treats local storage as operational state. Website caches and
 navigation state are disposable; PostgreSQL plus the append-only event log are
