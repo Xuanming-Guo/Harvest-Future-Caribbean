@@ -52,6 +52,23 @@ const ESRI_WORLD_IMAGERY =
   "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer";
 
 /**
+ * Esri's tile endpoint, addressed directly.
+ *
+ * Note the `{z}/{y}/{x}` ordering: Esri serves `tile/{level}/{row}/{col}`,
+ * which is row before column, the reverse of the `{z}/{x}/{y}` most slippy-map
+ * services use. Getting this backwards silently fetches a valid tile from the
+ * wrong place, which renders as plausible-looking but wrong terrain rather
+ * than as an error.
+ */
+const ESRI_TILE_TEMPLATE = `${ESRI_WORLD_IMAGERY}/tile/{z}/{y}/{x}`;
+
+/**
+ * Esri publishes 24 levels, but levels past ~19 are not populated everywhere
+ * and a request for one returns an empty dark tile rather than a 404.
+ */
+const ESRI_MAXIMUM_LEVEL = 19;
+
+/**
  * Builds the base imagery layer, best available first.
  *
  * Ordered ion (if a token exists) → Esri satellite → OpenStreetMap. Each step
@@ -72,10 +89,22 @@ async function createBaseLayer(
   }
 
   try {
-    const provider = await Cesium.ArcGisMapServerImageryProvider.fromUrl(ESRI_WORLD_IMAGERY, {
-      // Nothing in this interface queries the imagery for features, and
-      // leaving it on makes every click issue an identify request.
-      enablePickFeatures: false,
+    // Addressed as a plain tile template rather than through
+    // `ArcGisMapServerImageryProvider.fromUrl`.
+    //
+    // That provider derives its tiling scheme and level range from the
+    // service's own metadata, and here it got them wrong: it requested
+    // `tile/23/0/0` — the maximum level at the corner of the world — and
+    // stretched that one dark ocean tile across the entire globe. The result
+    // looked exactly like a globe that had failed to load any imagery at all,
+    // when in fact every request was returning HTTP 200. Pinning the tiling
+    // scheme and the level range makes the behaviour deterministic and
+    // independent of whatever the service reports about itself.
+    const provider = new Cesium.UrlTemplateImageryProvider({
+      url: ESRI_TILE_TEMPLATE,
+      tilingScheme: new Cesium.WebMercatorTilingScheme(),
+      maximumLevel: ESRI_MAXIMUM_LEVEL,
+      credit: new Cesium.Credit("Imagery: Esri World Imagery", false),
     });
     return new Cesium.ImageryLayer(provider);
   } catch {
@@ -104,9 +133,12 @@ function applyPhotorealisticScene(Cesium: CesiumModule, viewer: Viewer): void {
 
   globe.enableLighting = true;
   globe.showGroundAtmosphere = true;
-  // Sharper tiles at altitude. The default of 2 is tuned for huge terrain
-  // datasets; this scene is one small island.
-  globe.maximumScreenSpaceError = 1.5;
+  // Left at Cesium's default. Lowering it to 1.5 for sharper tiles multiplied
+  // the number of tiles the opening view needs, and on a cold cache that
+  // pushed the first paint past ten seconds — during which the globe is an
+  // unlit black sphere. Sharpness is not worth a demo that looks broken for
+  // its first ten seconds.
+  globe.maximumScreenSpaceError = 2;
 
   // Optional in the scene's type: absent in 2D and Columbus View, which this
   // viewer never enters, but worth guarding rather than asserting.
@@ -115,6 +147,40 @@ function applyPhotorealisticScene(Cesium: CesiumModule, viewer: Viewer): void {
 
   viewer.clock.shouldAnimate = false;
   viewer.clock.currentTime = Cesium.JulianDate.fromIso8601("2026-09-01T14:30:00Z");
+}
+
+/** Give up waiting for imagery after this long and show the globe regardless. */
+const TILE_WAIT_TIMEOUT_MS = 12_000;
+
+/**
+ * Resolves once the globe has no outstanding tiles, or the timeout expires.
+ *
+ * The timeout is not optional. If the tile service is unreachable the queue
+ * never drains, and without a ceiling the control room would sit on its
+ * loading message indefinitely — strictly worse than showing a bare globe with
+ * the markers and timeline working over it.
+ */
+function waitForTiles(viewer: Viewer): Promise<void> {
+  return new Promise((resolve) => {
+    if (viewer.isDestroyed() || viewer.scene.globe.tilesLoaded) {
+      resolve();
+      return;
+    }
+
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      remove();
+      resolve();
+    };
+
+    const remove = viewer.scene.globe.tileLoadProgressEvent.addEventListener((queued: number) => {
+      if (queued === 0) finish();
+    });
+    const timer = window.setTimeout(finish, TILE_WAIT_TIMEOUT_MS);
+  });
 }
 
 function midpoint(a: GeoPoint, b: GeoPoint): GeoPoint {
@@ -238,6 +304,15 @@ export default function CesiumGlobe(props: CesiumGlobeProps): React.JSX.Element 
       // Open on the island rather than Cesium's default whole-earth view, so
       // the first frame already looks like the finished product.
       await flyToRegion(viewer, null, { immediate: true });
+
+      // Hold the loading overlay until imagery has actually arrived.
+      //
+      // Revealing the canvas as soon as the viewer exists shows an unlit black
+      // sphere for as long as the first tiles take to fetch, which on a cold
+      // cache is several seconds and reads unmistakably as "broken" rather
+      // than "loading". This cost me a long debugging detour: every screenshot
+      // I took of the "black globe" was in fact taken mid-load.
+      await waitForTiles(viewer);
       if (!cancelled) setReady(true);
     }
 
