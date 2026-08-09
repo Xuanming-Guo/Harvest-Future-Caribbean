@@ -27,6 +27,10 @@ import { missionPositionAt } from "@harvest/simulation";
 /** The live Cesium module, as returned by `await import('cesium')`. */
 export type CesiumModule = typeof import("cesium");
 
+// Imported after the CesiumModule declaration because structures.ts imports
+// that type back from here.
+import { syncStructureFrame, syncStructureScene } from "./structures";
+
 // ---------------------------------------------------------------------------
 // Colour vocabulary — mirrors the `--status-*` custom properties in
 // globals.css exactly. Cesium entities are plain JS objects with no CSS
@@ -240,6 +244,11 @@ export function syncScene(Cesium: CesiumModule, viewer: Viewer, scene: ControlRo
       },
     });
   }
+
+  // Buildings, fields and check-in rings. Added after the markers so that the
+  // markers, which carry the labels and selection, remain the topmost thing a
+  // click can land on.
+  syncStructureScene(Cesium, viewer, scene);
 }
 
 // ---------------------------------------------------------------------------
@@ -262,6 +271,7 @@ export function syncFrame(
   syncRoads(Cesium, viewer, scene, frame);
   syncMissions(Cesium, viewer, frame, atMs, selectedId);
   syncDisruptions(Cesium, viewer, scene, frame, selectedId);
+  syncStructureFrame(Cesium, viewer, scene, frame, atMs);
 }
 
 function syncFarms(
