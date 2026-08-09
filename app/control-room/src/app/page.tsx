@@ -102,7 +102,15 @@ export default function ControlRoomPage() {
     return marks;
   }, [timeline]);
 
-  if (built.error || !timeline || !built.data) {
+  // `state.frame` is nullable until a run exists, so this guard is what makes
+  // it safe to hand a frame to every panel below without each one re-checking.
+  // Bound to a local *before* the guard. Narrowing `state.frame` in place does
+  // not survive the object spread below: the spread reads the declared property
+  // type rather than the narrowed one, so `frame` would come back nullable. A
+  // plain const narrows reliably and keeps the spread honest.
+  const frame = state.frame;
+
+  if (built.error || !timeline || !built.data || frame === null) {
     // Fail visibly. A control room that renders a plausible-looking but empty
     // world is worse than one that says it could not build the run.
     return (
@@ -115,13 +123,16 @@ export default function ControlRoomPage() {
   }
 
   const { scene } = timeline;
+  // Re-formed with the narrowed frame so the transport bar receives the
+  // non-nullable PlaybackState its props declare.
+  const playbackState = { ...state, frame };
 
   return (
     <main className="control-room">
       <div className="globe-layer">
         <CesiumGlobe
           scene={scene}
-          frame={state.frame}
+          frame={frame}
           atMs={state.atMs}
           selectedId={selectedId}
           onSelect={handleSelect}
@@ -141,7 +152,7 @@ export default function ControlRoomPage() {
         </div>
 
         <div className="chrome-left" style={{ display: "grid", gridTemplateRows: "auto auto 1fr", gap: 16, minHeight: 0 }}>
-          <MetricsPanel frame={state.frame} policy={policy} />
+          <MetricsPanel frame={frame} policy={policy} />
           <InjectionPanel
             scene={scene}
             injections={injections}
@@ -165,19 +176,19 @@ export default function ControlRoomPage() {
         </div>
 
         <div className="chrome-right" style={{ display: "grid", gridTemplateRows: "1fr 1fr", gap: 16, minHeight: 0 }}>
-          <Inspector scene={scene} frame={state.frame} selectedId={selectedId} onClose={() => setSelectedId(null)} />
+          <Inspector scene={scene} frame={frame} selectedId={selectedId} onClose={() => setSelectedId(null)} />
           <section className="panel">
             <header className="panel-header">
               <span className="panel-title">What is happening</span>
             </header>
             <div className="panel-body">
-              <EventFeed frames={framesSoFar} onSelect={handleSelect} />
+              <EventFeed scene={scene} frames={framesSoFar} onSelect={handleSelect} />
             </div>
           </section>
         </div>
 
         <div className="chrome-footer">
-          <PlaybackControls state={state} controls={controls} disruptionMarkers={disruptionMarkers} />
+          <PlaybackControls state={playbackState} controls={controls} disruptionMarkers={disruptionMarkers} />
         </div>
       </div>
     </main>

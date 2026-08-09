@@ -137,7 +137,17 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
-function zeroState(): PlaybackState & { frame: null } {
+/**
+ * The state before any run exists.
+ *
+ * `Omit<PlaybackState, 'frame'>` rather than intersecting `PlaybackState`
+ * directly: `PlaybackState & { frame: null }` resolves `frame` to
+ * `ControlRoomFrame & null`, which is `never`, and a `never` member makes
+ * TypeScript reject every other property in the literal with a misleading
+ * error. Omitting the field first and re-adding it is the intersection that
+ * was actually meant.
+ */
+function zeroState(): Omit<PlaybackState, 'frame'> & { frame: null } {
   return {
     atMs: 0,
     frame: null,
@@ -162,15 +172,27 @@ const noopControls: PlaybackControlsApi = {
 };
 
 /**
+ * What `usePlayback` returns.
+ *
+ * `frame` is nullable here even though `PlaybackState.frame` is not, because
+ * the hook has to be callable before a run exists. Making that explicit forces
+ * the caller to handle the empty case; the previous version asserted the null
+ * away with a cast, which moved a real possibility out of the type system and
+ * into a runtime crash waiting for the first render.
+ */
+export type PlaybackHook = Omit<PlaybackState, 'frame'> & {
+  frame: ControlRoomFrame | null;
+  controls: PlaybackControlsApi;
+};
+
+/**
  * Turns a recorded timeline into a playhead: play/pause/speed/reset/scrub.
  *
  * `timeline === null` (data not built yet) is handled by returning a safe
  * zeroed, paused state and no-op controls, so consumers can call the hook
  * unconditionally before a run exists rather than guarding every call site.
  */
-export function usePlayback(
-  timeline: ReplayTimeline | null,
-): PlaybackState & { controls: PlaybackControlsApi } {
+export function usePlayback(timeline: ReplayTimeline | null): PlaybackHook {
   const frames = timeline?.frames ?? [];
   const startMs = frames.length > 0 ? (frames[0] as ControlRoomFrame).atMs : 0;
   const endMs = frames.length > 0 ? (frames[frames.length - 1] as ControlRoomFrame).atMs : 0;
@@ -295,7 +317,7 @@ export function usePlayback(
   );
 
   if (!timeline || frames.length === 0) {
-    return { ...zeroState(), controls: noopControls } as PlaybackState & { controls: PlaybackControlsApi };
+    return { ...zeroState(), controls: noopControls };
   }
 
   const frameIndex = frameIndexAt(frames, atMs);
