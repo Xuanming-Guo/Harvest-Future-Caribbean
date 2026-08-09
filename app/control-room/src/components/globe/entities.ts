@@ -167,6 +167,10 @@ export function syncScene(Cesium: CesiumModule, viewer: Viewer, scene: ControlRo
         outlineColor: Cesium.Color.fromCssColorString("#0d1f1a"),
         outlineWidth: 2,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        // Sit on the terrain surface. Positions carry no elevation of their
+        // own, so with real relief an unclamped marker is buried inside the
+        // hill it belongs to.
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
       },
       label: {
         text: farm.name,
@@ -178,6 +182,10 @@ export function syncScene(Cesium: CesiumModule, viewer: Viewer, scene: ControlRo
         verticalOrigin: Cesium.VerticalOrigin.TOP,
         pixelOffset: new Cesium.Cartesian2(0, 10),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        // Sit on the terrain surface. Positions carry no elevation of their
+        // own, so with real relief an unclamped marker is buried inside the
+        // hill it belongs to.
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
       },
     });
   }
@@ -192,6 +200,10 @@ export function syncScene(Cesium: CesiumModule, viewer: Viewer, scene: ControlRo
         width: BUYER_ICON_PIXELS,
         height: BUYER_ICON_PIXELS,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        // Sit on the terrain surface. Positions carry no elevation of their
+        // own, so with real relief an unclamped marker is buried inside the
+        // hill it belongs to.
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
       },
       label: {
         text: buyer.name,
@@ -203,6 +215,10 @@ export function syncScene(Cesium: CesiumModule, viewer: Viewer, scene: ControlRo
         verticalOrigin: Cesium.VerticalOrigin.TOP,
         pixelOffset: new Cesium.Cartesian2(0, 16),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        // Sit on the terrain surface. Positions carry no elevation of their
+        // own, so with real relief an unclamped marker is buried inside the
+        // hill it belongs to.
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
       },
     });
   }
@@ -337,6 +353,7 @@ function syncMissions(
           outlineColor: Cesium.Color.fromCssColorString("#0d1f1a"),
           outlineWidth: 2,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
         },
       });
     }
@@ -408,6 +425,7 @@ function syncDisruptions(
           width: 28,
           height: 28,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
         },
       });
       disruptionEntityIds.add(disruption.eventId);

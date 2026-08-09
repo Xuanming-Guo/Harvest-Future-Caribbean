@@ -23,6 +23,7 @@ import { missionPositionAt } from "@harvest/simulation";
 
 import { flyToRegion } from "./camera";
 import { syncFrame, syncScene, type CesiumModule } from "./entities";
+import { createTerrariumTerrainProvider } from "./terrain";
 
 declare global {
   interface Window {
@@ -288,6 +289,18 @@ export default function CesiumGlobe(props: CesiumGlobeProps): React.JSX.Element 
       cesiumRef.current = Cesium;
 
       applyPhotorealisticScene(Cesium, viewer);
+
+      // Real elevation. Attached after construction rather than passed as a
+      // viewer option so a failure here degrades to a smooth globe instead of
+      // preventing the viewer from existing at all.
+      try {
+        viewer.scene.setTerrain(new Cesium.Terrain(Promise.resolve(createTerrariumTerrainProvider(Cesium))));
+        // Without depth testing, markers and routes draw through hills they
+        // are genuinely behind, which reads worse than having no relief.
+        viewer.scene.globe.depthTestAgainstTerrain = true;
+      } catch {
+        // Keep the ellipsoid; the control room is still usable without relief.
+      }
 
       handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
       handler.setInputAction((movement: { position: Cartesian2 }) => {
