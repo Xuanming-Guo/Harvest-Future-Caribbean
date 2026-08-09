@@ -40,6 +40,83 @@ export interface CesiumGlobeProps {
   focusRegion: string | null;
 }
 
+/**
+ * Esri's World Imagery: global satellite photography, no account, no key.
+ *
+ * This is the difference between the globe reading as a real place and reading
+ * as a road atlas. OpenStreetMap tiles are a *cartographic* rendering — roads,
+ * labels, flat green landcover — so at the altitudes this demo flies to, the
+ * island looked drawn rather than photographed.
+ */
+const ESRI_WORLD_IMAGERY =
+  "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer";
+
+/**
+ * Builds the base imagery layer, best available first.
+ *
+ * Ordered ion (if a token exists) → Esri satellite → OpenStreetMap. Each step
+ * is wrapped because imagery is fetched over the network at construction time,
+ * and a demo that shows a blank blue sphere when a third-party tile service is
+ * having a bad morning is worse than one that quietly falls back to a map.
+ */
+async function createBaseLayer(
+  Cesium: CesiumModule,
+  ionToken: string | undefined,
+): Promise<InstanceType<CesiumModule["ImageryLayer"]>> {
+  if (typeof ionToken === "string" && ionToken.length > 0) {
+    try {
+      return Cesium.ImageryLayer.fromProviderAsync(Cesium.createWorldImageryAsync(), {});
+    } catch {
+      // Fall through: a bad or expired token must not be fatal.
+    }
+  }
+
+  try {
+    const provider = await Cesium.ArcGisMapServerImageryProvider.fromUrl(ESRI_WORLD_IMAGERY, {
+      // Nothing in this interface queries the imagery for features, and
+      // leaving it on makes every click issue an identify request.
+      enablePickFeatures: false,
+    });
+    return new Cesium.ImageryLayer(provider);
+  } catch {
+    return new Cesium.ImageryLayer(
+      new Cesium.OpenStreetMapImageryProvider({ url: "https://tile.openstreetmap.org/" }),
+    );
+  }
+}
+
+/**
+ * Scene settings that sell the globe as a globe.
+ *
+ * Sun lighting, ground and sky atmosphere, and distance fog are what separate a
+ * textured sphere from something that reads as photographed from orbit. They
+ * cost nothing at this scene complexity — a few hundred entities.
+ *
+ * The clock is pinned to late morning over the Caribbean rather than following
+ * either wall-clock or simulation time. With lighting enabled the terminator is
+ * real: at the wrong hour the island is simply dark, and a control room that is
+ * unreadable half the day is a bad control room. Simulation time would be worse
+ * still, plunging the map into night in the middle of a run.
+ */
+function applyPhotorealisticScene(Cesium: CesiumModule, viewer: Viewer): void {
+  const { scene } = viewer;
+  const { globe } = scene;
+
+  globe.enableLighting = true;
+  globe.showGroundAtmosphere = true;
+  // Sharper tiles at altitude. The default of 2 is tuned for huge terrain
+  // datasets; this scene is one small island.
+  globe.maximumScreenSpaceError = 1.5;
+
+  // Optional in the scene's type: absent in 2D and Columbus View, which this
+  // viewer never enters, but worth guarding rather than asserting.
+  if (scene.skyAtmosphere) scene.skyAtmosphere.show = true;
+  scene.fog.enabled = true;
+
+  viewer.clock.shouldAnimate = false;
+  viewer.clock.currentTime = Cesium.JulianDate.fromIso8601("2026-09-01T14:30:00Z");
+}
+
 function midpoint(a: GeoPoint, b: GeoPoint): GeoPoint {
   return { latitude: (a.latitude + b.latitude) / 2, longitude: (a.longitude + b.longitude) / 2 };
 }
@@ -108,22 +185,22 @@ export default function CesiumGlobe(props: CesiumGlobeProps): React.JSX.Element 
       const Cesium = await import("cesium");
       if (cancelled || !containerRef.current) return;
 
-      // No ion token is provisioned for this demo, and none is required:
-      // OpenStreetMap tiles need no key. A token is honoured if the
-      // deployment happens to provide one, but its absence must never blank
-      // the screen.
+      // No ion token is provisioned for this demo, and none is required. A
+      // token is honoured if the deployment happens to provide one, but its
+      // absence must never blank the screen.
       const ionToken = process.env.NEXT_PUBLIC_CESIUM_ION_TOKEN;
       if (typeof ionToken === "string" && ionToken.length > 0) {
         Cesium.Ion.defaultAccessToken = ionToken;
       }
 
+      const baseLayer = await createBaseLayer(Cesium, ionToken);
+      if (cancelled || !containerRef.current) return;
+
       const viewer = new Cesium.Viewer(containerRef.current, {
         // `imageryProvider` was removed from this Cesium version's
         // ConstructorOptions in favour of `baseLayer` (valid precisely when
         // `baseLayerPicker` is false, which it is here).
-        baseLayer: new Cesium.ImageryLayer(
-          new Cesium.OpenStreetMapImageryProvider({ url: "https://tile.openstreetmap.org/" }),
-        ),
+        baseLayer,
         animation: false,
         timeline: false,
         baseLayerPicker: false,
@@ -143,6 +220,8 @@ export default function CesiumGlobe(props: CesiumGlobeProps): React.JSX.Element 
 
       viewerRef.current = viewer;
       cesiumRef.current = Cesium;
+
+      applyPhotorealisticScene(Cesium, viewer);
 
       handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
       handler.setInputAction((movement: { position: Cartesian2 }) => {

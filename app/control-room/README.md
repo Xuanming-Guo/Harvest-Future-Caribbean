@@ -48,11 +48,26 @@ CesiumJS renders a real terrain globe. Moving between regions flies out to
 globe scale, rotates the earth, and descends into the destination, which is
 what `flyToRegion` in `src/components/globe/camera.ts` sequences.
 
-**No Cesium ion token is required.** The default imagery is OpenStreetMap,
-which needs no account and no credential. If a `NEXT_PUBLIC_CESIUM_ION_TOKEN`
-is present the higher-resolution ion imagery is used instead. A demo that dies
-without a third-party credential is a bad demo, so the token is strictly an
-upgrade and never a dependency.
+**No Cesium ion token is required.** The default imagery is Esri's World
+Imagery — real satellite photography, no account and no credential. Imagery
+falls back in order: ion (only if `NEXT_PUBLIC_CESIUM_ION_TOKEN` is set) →
+Esri satellite → OpenStreetMap. Each step is guarded, because a demo that
+shows a blank blue sphere when a third-party tile service is having a bad
+morning is worse than one that quietly falls back to a map. The token is
+strictly an upgrade, never a dependency.
+
+Sun lighting, ground and sky atmosphere, and distance fog are enabled: they are
+what separate a textured sphere from something that reads as photographed from
+orbit, and they cost nothing at a few hundred entities. The scene clock is
+pinned to late morning over the Caribbean rather than following wall-clock or
+simulation time. With lighting on, the terminator is real — at the wrong hour
+the island is simply dark, and a control room that is unreadable half the day
+is a bad control room. Following simulation time would be worse still, dropping
+the map into night mid-run.
+
+Terrain is currently the smooth ellipsoid. Cesium's global elevation dataset is
+an ion asset, so real relief would require a token; the oblique camera pitch
+carries most of the three-dimensionality without it.
 
 Cesium loads its workers, shaders and widget assets at runtime by URL rather
 than through the bundler. `scripts/copy-cesium.mjs` copies them from

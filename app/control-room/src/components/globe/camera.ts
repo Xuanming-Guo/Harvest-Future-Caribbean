@@ -24,8 +24,22 @@ export interface RegionTarget {
 }
 
 /** Saint Lucia overview: `target: null` returns here rather than to nowhere. */
-const ISLAND_OVERVIEW: RegionTarget = { latitude: 13.91, longitude: -60.98 };
-const ISLAND_OVERVIEW_HEIGHT_M = 55_000;
+/**
+ * The island overview.
+ *
+ * Centred on the mid-latitude of the *actors*, not of the island. The
+ * scenario's northernmost buyer sits at 14.076 (Rodney Bay) and its
+ * southernmost at 13.857 (Soufriere), so centring on the island's own midpoint
+ * pushed Rodney Bay off the top edge — the opening shot of the demo was missing
+ * a buyer.
+ *
+ * The height is generous for the same reason: the chrome panels overlay roughly
+ * 660 px of the viewport's width, so the usable window onto the globe is a good
+ * deal narrower than the canvas, and a framing that looks correct against the
+ * full canvas clips against the visible part of it.
+ */
+const ISLAND_OVERVIEW: RegionTarget = { latitude: 13.97, longitude: -60.97 };
+const ISLAND_OVERVIEW_HEIGHT_M = 78_000;
 
 /** High enough that the globe's curvature and limb are visible — this is the
  * "fly out" leg of the journey, not just a tall zoom. */
