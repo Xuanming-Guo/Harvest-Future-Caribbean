@@ -65,9 +65,29 @@ the island is simply dark, and a control room that is unreadable half the day
 is a bad control room. Following simulation time would be worse still, dropping
 the map into night mid-run.
 
-Terrain is currently the smooth ellipsoid. Cesium's global elevation dataset is
-an ion asset, so real relief would require a token; the oblique camera pitch
-carries most of the three-dimensionality without it.
+### Terrain
+
+The globe carries **real elevation**, so zooming in shows the topography the
+scenario's logistics actually contend with — Mount Gimie, the Pitons rising out
+of the sea, and the steep valleys whose roads wash out in heavy rain.
+
+The data is AWS's openly published Terrarium elevation tileset: CORS-enabled,
+no key, no account. Cesium has no built-in provider for it, so
+`src/components/globe/terrain.ts` implements one. Cesium's own global terrain
+is an ion asset and would need a token; that remains an optional upgrade, never
+a dependency. If the elevation service is unreachable, individual tiles fall
+back to sea level rather than rejecting, because a rejected tile makes Cesium
+stop refining that branch of the quadtree and leaves a permanent hole.
+
+Markers clamp to the terrain surface, so nothing is buried inside a hillside.
+
+**Photogrammetry mesh — the full Google Earth look with buildings — is not
+available here.** Google's Photorealistic 3D Tiles work natively in Cesium but
+need a Maps Platform key with billing and cover roughly 2,500 mostly North
+American, European and Japanese cities; Saint Lucia is not among them. Cesium
+OSM Buildings gives extruded footprints rather than photogrammetry, and OSM
+building coverage on the island is sparse. For this island relief is the visual
+win, not buildings.
 
 Cesium loads its workers, shaders and widget assets at runtime by URL rather
 than through the bundler. `scripts/copy-cesium.mjs` copies them from
@@ -81,6 +101,14 @@ directory is roughly 40 MB of build artefact and is gitignored.
 - **A red dashed road** is currently degraded or closed.
 - **The scrub bar** carries red ticks where disruptions became visible, so the
   timeline doubles as a summary of when things went wrong.
+
+## If the globe looks black
+
+Chrome throttles `requestAnimationFrame` almost to a stop in a background tab,
+and Cesium renders from that loop. In a hidden or minimised window the globe
+sits black and never loads its tiles, no matter what the code does. **Check it
+in a visible, focused window before concluding anything is broken.** This cost
+a long debugging detour once already.
 - **The event feed** is written in plain English. The daily world tick is
   filtered out; if every routine heartbeat appeared, the events that matter
   would be buried, which is the "understandable without reading raw logs"
