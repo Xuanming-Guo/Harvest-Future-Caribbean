@@ -94,6 +94,30 @@ than through the bundler. `scripts/copy-cesium.mjs` copies them from
 `node_modules` into `public/cesium` on `predev`, `prebuild` and `pretest`. That
 directory is roughly 40 MB of build artefact and is gitignored.
 
+## Structures on the map
+
+Below about 30 km the globe grows buildings: a barn and a crop field at each
+farm, a store at each buyer, and trucks that drive the delivery routes. Above
+that the markers take over, because a barn is a fraction of a pixel at the
+island overview and drawing it there is noise.
+
+Every shape is built procedurally from Cesium primitives rather than imported
+as a glTF model. That keeps third-party binaries out of the repository, avoids
+licence obligations, and — the reason that actually matters — lets a crop
+field's colour come from the theme, so it can shift through the status ramp as
+the crop ripens and rots. A textured model would need a separate texture per
+state.
+
+Fields and check-in rings are **draped onto the terrain** rather than extruded.
+An extruded polygon is planar: on a valley side it floats at one end and buries
+itself at the other. Classifying against terrain paints it onto the hillside
+instead.
+
+There are no walking figures, deliberately. A person is about 1.8 m; at the
+island overview that is far below one pixel and even at region zoom it is a
+couple of pixels of noise. Grower activity shows as the check-in ring and as
+the crop changing state.
+
 ## Reading the interface
 
 - **Crop colour** follows reported stage, not truth: teal is growing, green is
