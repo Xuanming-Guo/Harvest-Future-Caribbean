@@ -50,6 +50,7 @@ async function main() {
     prisma.allocation.deleteMany(),
     prisma.operationalException.deleteMany(),
     prisma.idempotencyRecord.deleteMany(),
+    prisma.cropObservationIntake.deleteMany(),
     prisma.traceStep.deleteMany(),
     prisma.domainEvent.deleteMany(),
     prisma.agentTrace.deleteMany(),
@@ -227,7 +228,7 @@ async function main() {
 
   await prisma.order.upsert({
     where: { id: ids.order },
-    update: { lifecycleStatus: "AWAITING_APPROVAL", atRisk: false, activeExceptionIds: [] },
+    update: { lifecycleStatus: "AWAITING_APPROVAL", atRisk: false, activeExceptionIds: [], traceId: ids.trace },
     create: {
       id: ids.order,
       buyerId: ids.buyer,
@@ -241,6 +242,7 @@ async function main() {
       lifecycleStatus: "AWAITING_APPROVAL",
       atRisk: false,
       activeExceptionIds: [],
+      traceId: ids.trace,
       createdAt: at("2026-09-04T08:12:00Z"),
     },
   });
@@ -267,12 +269,14 @@ async function main() {
 
   await prisma.agentTrace.upsert({
     where: { id: ids.trace },
-    update: { status: "AWAITING_APPROVAL" },
+    update: { status: "AWAITING_APPROVAL", workflowType: "ORDER_FULFILMENT", stage: "ALLOCATION_PROPOSED" },
     create: {
       id: ids.trace,
       subjectType: "ORDER",
       subjectId: ids.order,
       status: "AWAITING_APPROVAL",
+      workflowType: "ORDER_FULFILMENT",
+      stage: "ALLOCATION_PROPOSED",
       summary: "Combined two conservative cucumber commitments to cover the hotel order without exceeding available-to-promise supply.",
     },
   });

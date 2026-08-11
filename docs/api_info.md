@@ -14,12 +14,14 @@ Issue #8 implements the participant Product API used by the farmer, buyer,
 transporter and coordinator website on port `3000`. Its Fastify runtime serves
 the crop, forecast, listing, privacy-safe opportunity, demand, order,
 actor-targeted approval, vehicle, verification, delivery mission, exception and
-delivery-acceptance operations described below.
+delivery-acceptance operations described below. Issue #6 adds the in-process
+agent coordinator, editable observation intake, and safe trace read operation.
 
-The operations snapshot, public SSE/trace viewer, simulation-run, observable
+The operations snapshot, public SSE, polished trace viewer, simulation-run, observable
 world, paired-run and simulation-ingestion operations remain agreed **planned
-contracts only**. Issue #8 does not serve them, persist their run models, or
-expose them in the product website. They will be implemented with the separate
+contracts only**. The Product API now serves role-filtered trace data, but does
+not expose an agent laboratory in the participant website. The remaining
+planned operations will be implemented with the separate
 simulation engine and simulation/control-room frontend, whose development port
 is reserved as `3002`. Retaining a path in OpenAPI does not imply that its
 runtime exists today.
@@ -149,12 +151,31 @@ scope, not only the role name.
 - Consumers: operations supply table, Model Lab selector, and future mobile
   crop lists.
 
+#### `POST /v1/crop-observation-intakes`
+
+- Callers: farmer for an owned batch; coordinator for an authorised farm.
+- Request: batch and observation time, source type (`TEXT`, supplied
+  `VOICE_TRANSCRIPT`, or `COORDINATOR_NOTE`), source text, and observable
+  provenance. Issue #6 does not capture or transcribe audio.
+- Response: persisted draft ID, optional suggested stage/quantity/notes,
+  per-field and overall confidence, warnings, prompt/adapter provenance,
+  `DRAFT` status, and trace ID.
+- Product state/event: store a non-binding draft and emit
+  `CROP_OBSERVATION_INTAKE_DRAFTED`. Do not update the batch, forecast, ATP,
+  listing, order, or simulation truth.
+- Consumers: the farmer crop form and future mobile form.
+- Rules/failures: source text is limited to 4,000 characters. The caller must
+  review and explicitly submit the structured observation separately.
+
 #### `POST /v1/crop-observations`
 
 - Callers: farmer for an owned batch; coordinator for an authorised farm.
 - Request: `cropBatchId`, `observedAt`, `cropStage`, `provenance`; optional
-  `notes` and `estimatedQuantity`. Identity/run context comes from auth.
-- Response: stored observation IDs/times, submitted safe fields, `traceId`.
+  `notes`, `estimatedQuantity`, and accessible same-batch `intakeId`.
+  Identity/run context comes from auth. Submitted human-reviewed fields are
+  authoritative; the draft values are never copied behind the caller's back.
+- Response: stored observation IDs/times, submitted safe fields, `traceId`,
+  and confirmed intake ID when one was used.
 - Product state/event: append the observation and provenance, update the
   batch's latest observation, create one verification task, produce one
   refreshed forecast, and emit `CROP_OBSERVATION_SUBMITTED`,
@@ -309,7 +330,7 @@ scope, not only the role name.
 - Request: order UUID.
 - Response: quantities, deadline, lifecycle status, `atRisk`, active exception
   IDs, timestamps, safe allocation, approval totals and the caller's approval,
-  related delivery mission, and immutable delivery acceptance when recorded.
+  trace ID, related delivery mission, and immutable delivery acceptance when recorded.
   Private farm coordinates are not exposed here.
 - Product state/event: none.
 - Simulation effect: none.
@@ -325,7 +346,8 @@ scope, not only the role name.
 - Request: optional status, subject type, cursor, and limit filters.
 - Response: pending or decided approvals with request time and role-safe
   context. Farmers see only their committed line quantity; buyers see their
-  order total; coordinators see the concrete recovery summary. Decision
+  order total; each sees the estimated price for those visible lines;
+  coordinators see the concrete recovery summary. Decision
   identity, time, and reason appear only after a final human decision.
 - Product state/event and simulation effect: none.
 - Consumers: focused farmer, buyer, and coordinator decision cards.
@@ -340,7 +362,10 @@ scope, not only the role name.
   targeted approval for its buyer and one for every participating farmer. No
   reservation, commitment, or mission exists until all remain valid and every
   required actor approves. The final approval atomically creates reservations
-  and the mission and emits `ALLOCATION_APPROVED`. Any rejection marks the
+  and the mission and emits `APPROVAL_DECIDED` and `ALLOCATION_APPROVED`. If
+  aggregate ATP or listing supply changed, invalidate the proposal with
+  `ALLOCATION_INVALIDATED`, return the order to `REQUESTED`, and create no
+  partial reservation. Any rejection marks the
   allocation/order rejected and cancels the other pending approvals without
   committing inventory. Recovery approval applies its validated operational
   changes and emits `RECOVERY_APPROVED`.
@@ -358,7 +383,8 @@ scope, not only the role name.
   related order; coordinators remain limited to relevant orders.
 - Request: optional status, cursor, limit.
 - Response: visible mission page with route stops, quantity, deadline,
-  assignment/status, and `pageInfo`.
+  assignment/status, pickup batch quantities, estimated distance/duration/
+  arrival, and `pageInfo`.
 - Product state/event: none.
 - Simulation effect: none until a simulated transporter takes its scheduled
   browse/accept action.
@@ -444,7 +470,9 @@ scope, not only the role name.
 - Request: type, severity, affected entity IDs, description, provenance.
 - Response: exception ID, status, report time, and submitted safe fields.
 - Product state/event: store exception, set `atRisk` overlay on affected active
-  orders, start recovery analysis, emit `EXCEPTION_REPORTED`.
+  orders, start recovery analysis, emit `EXCEPTION_REPORTED`, and for a mission
+  delay emit `RECOVERY_PROPOSED` with an exact two-hour deadline change that is
+  not applied until approval.
 - Simulation effect: apply/expose the corresponding observable disruption and
   pause affected future schedules where appropriate. Hidden cause/outcome stays
   internal until observable.
@@ -489,11 +517,24 @@ scope, not only the role name.
 - Rules/failures: quantities must use one unit, be non-negative, sum to the
   delivered amount, and match outcome; produce rejection requires approval.
 
+#### `GET /v1/agent-traces/{traceId}`
+
+- Callers: actors affected by the trace and authorised operations roles.
+- Request: trace UUID.
+- Response: workflow/stage/status, safe summary, timestamps, and ordered
+  evidence/tool/decision/approval/state steps with optional agent, tool,
+  provenance, prompt version, fixture/provider adapter, duration, and confidence.
+- Product state/event and simulation effect: none.
+- Consumers: linked operational evidence and the future control-room viewer.
+- Rules/failures: access follows the trace subject. Never return source text,
+  assembled prompts, credentials, private chain-of-thought, hidden truth, or
+  evidence the caller cannot access.
+
 ### Planned operational and live views (not served by Issue #8)
 
 Every operation in this section and the planned simulation/internal-ingestion
 sections is marked `x-harvest-status: planned` in OpenAPI. Product clients must
-not call these eleven operations until their separate runtime issues land.
+not call these ten operations until their separate runtime issues land.
 
 #### `GET /v1/operations/snapshot`
 
@@ -505,18 +546,6 @@ not call these eleven operations until their separate runtime issues land.
 - Simulation effect: none.
 - Consumers: operations dashboard and initial control-room projection.
 - Rules/failures: snapshot and later SSE stream must use the same run/scope.
-
-#### `GET /v1/agent-traces/{traceId}`
-
-- Callers: actors affected by the trace and authorised operations roles.
-- Request: trace UUID.
-- Response: safe summary, subject, status, evidence/tool/decision/approval/state
-  steps, and confidence where relevant.
-- Product state/event: none.
-- Simulation effect: none.
-- Consumers: trace viewer and linked operations/control-room evidence.
-- Rules/failures: never return private chain-of-thought, secrets, hidden truth,
-  or evidence the caller cannot access.
 
 #### `GET /v1/events/stream`
 
@@ -669,17 +698,21 @@ missing event or apply an event whose schema it cannot validate.
 
 | API command/event | Product API impact | Simulation impact | Interface impact |
 |---|---|---|---|
+| Crop observation draft / `CROP_OBSERVATION_INTAKE_DRAFTED` | Stores an editable draft and safe trace; no crop state changes | None until the actor submits an observation | Farmer form is prefilled for review |
 | Crop observation submitted / `CROP_OBSERVATION_SUBMITTED` | Stores observation/provenance and starts forecast workflow | Completes actor update; hidden crop truth unchanged | Farmer crop view and operations feed update |
 | Verification task/decision / `VERIFICATION_TASK_CREATED`, `VERIFICATION_DECIDED` | Stores explicit coordinator work and its final status | Completes only the observable verification action | Coordinator queue and supply evidence update |
 | Forecast produced / `FORECAST_PRODUCED` | Stores model snapshot and deterministic safe-quantity inputs/ATP | Records prediction for predicted-versus-actual comparison | Farmer forecast, Model Lab, crop map update |
 | Listing published / `LISTING_PUBLISHED` | Adds safely orderable marketplace supply | Buyer actors may discover it during later scheduled actions | Marketplace and operations supply update |
 | Buyer demand/order created / `BUYER_DEMAND_CREATED`, `ORDER_REQUESTED` | Stores demand/order and starts matching | Marks demand pending and schedules eligible reactions | Buyer order and operations demand update |
 | Allocation proposed / `ALLOCATION_PROPOSED` | Stores non-binding multi-farm proposal; no reservation | Schedules farmer/buyer approval actions | Approval cards and order timeline update |
+| Approval / `APPROVAL_DECIDED` | Stores only the named human's decision | Completes only that actor's decision task | Approval totals and timeline update |
+| Invalidated allocation / `ALLOCATION_INVALIDATED` | Marks stale proposal and leaves order open without partial reservation | Cancels proposal tasks and leaves demand pending | Order returns to waiting for supply |
 | Allocation approved / `ALLOCATION_APPROVED` | Transactionally creates reservations/commitment | Schedules harvest/pickup obligations; reduces planned uncommitted supply, not hidden biological yield | Inventory, order, pending-delivery views update |
 | Delivery mission created / `DELIVERY_MISSION_CREATED` | Stores route, stops, quantities, deadline | Adds mission to transporter schedules | Job list and control-room route appear |
 | Mission accepted / `DELIVERY_MISSION_ACCEPTED` | Assigns transporter/vehicle and state | Prevents conflicting work and schedules pickups | Blue active route and tracking update |
 | Delivery update / `DELIVERY_UPDATE_POSTED` | Appends pickup/position/delay/progress | Advances vehicle position and actor schedules | Map, timeline, ETA update |
 | Exception / `EXCEPTION_REPORTED` | Opens exception, overlays `atRisk`, starts recovery | Applies/exposes observable disruption and pauses affected future schedules as appropriate | Red exception and recovery UI update |
+| Recovery proposal / `RECOVERY_PROPOSED` | Stores a concrete action and requests human approval; applies nothing | Schedules coordinator decision only | Recovery card shows exact proposed change |
 | Recovery / `RECOVERY_APPROVED` | Updates validated reservations/farms/route/timing | Deterministically reroutes, reschedules, or adds an actor | New route, ETA, allocation, notification |
 | Delivery accepted / `DELIVERY_ACCEPTED` | Stores accepted/rejected actual outcome | Records actual economics and evaluation data | Outcome, trust, revenue, benchmark update |
 | Order fulfilled / `ORDER_FULFILLED` | Finalises order and releases unused reservations | Satisfies buyer demand, ends remaining tasks, records local procurement/fulfilment | Fulfilled order and dashboard totals update |

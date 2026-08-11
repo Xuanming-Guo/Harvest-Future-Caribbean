@@ -30,3 +30,17 @@ test("guards a product route from the wrong role", async ({ page }) => {
   await expect(page).toHaveURL(/\/transporter$/);
   await expect(page.getByRole("heading", { name: "Move local food with confidence" })).toBeVisible();
 });
+
+test("prepares an editable crop draft and requires the farmer to save it", async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: /Ana Joseph/ }).click();
+  await page.locator(".crop-card").first().click();
+  await page.getByLabel("Describe your update").fill("Approximately 20 kg of cucumbers are harvest ready, with some rain damage.");
+  await page.getByRole("button", { name: "Prepare editable draft" }).click();
+  await expect(page.getByText(/Draft prepared with/)).toBeVisible();
+  await expect(page.getByLabel("Crop stage")).toHaveValue("HARVEST_READY");
+  await expect(page.getByLabel("Estimated crop (kg)")).toHaveValue("20");
+  await expect(page.getByText("Nothing is saved until you review it and select Save crop update.")).toBeVisible();
+  await page.getByRole("button", { name: "Save crop update" }).click();
+  await expect(page.getByText(/Crop update saved/)).toBeVisible();
+});

@@ -67,6 +67,12 @@ the corresponding event transactionally. Every POST requires
 contract-valid prediction evidence. A later model issue can replace it with an
 HTTP adapter without changing website or mobile payloads.
 
+Agent text assistance is separately provider-neutral. Leave
+`AGENT_LLM_PROVIDER`, `AGENT_LLM_MODEL`, `AGENT_LLM_BASE_URL`, and
+`AGENT_LLM_API_KEY` blank to use the deterministic fixture. No live provider
+SDK is installed. Provider selection and adapter instructions are in
+[`../../docs/agent_workflows.md`](../../docs/agent_workflows.md).
+
 Issue #8 does not serve simulation runs, observable world projections, paired
 runs, an operations snapshot, or a browser event stream. Those OpenAPI paths
 remain planned contracts for the separate simulation/control-room issue; they
@@ -84,6 +90,6 @@ coordinator verification tasks, aggregated order details, chronological
 mission updates, concrete exception recovery proposals, and per-crop delivery
 outcomes. These projections are shared by the website and future mobile app.
 
-The eleven simulation/control-room and internal-ingestion operations remain in
+The ten simulation/control-room and internal-ingestion operations remain in
 OpenAPI with `x-harvest-status: planned`; Fastify intentionally does not serve
 them yet.

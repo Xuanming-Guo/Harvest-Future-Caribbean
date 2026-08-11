@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Harvest Product API
-  version: 0.3.0
+  version: 0.4.0
   description: >-
     Canonical operational API for real users, Harvest-mode simulated actors,
     website/mobile clients, and internal simulation ingestion. Operational
@@ -28,6 +28,31 @@ security:
   - bearerJwt: []
   - internalServiceToken: []
 paths:
+  /v1/crop-observation-intakes:
+    post:
+      tags: [Crop]
+      operationId: createCropObservationIntake
+      summary: Extract a non-binding crop observation draft for human review
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CropObservationIntakeCreate'}
+            example:
+              cropBatchId: 11111111-1111-4111-8111-111111111111
+              observedAt: '2026-09-04T08:00:00Z'
+              sourceType: TEXT
+              sourceText: Approximately 20 kg of cucumbers, with some rain damage.
+              provenance: OBSERVED
+      responses:
+        '201':
+          description: Editable draft created; no crop state or inventory changed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CropObservationIntake'}
+        default: {$ref: '#/components/responses/Problem'}
   /v1/crop-observations:
     post:
       tags: [Crop]
@@ -759,7 +784,6 @@ paths:
         default: {$ref: '#/components/responses/Problem'}
   /v1/agent-traces/{traceId}:
     get:
-      x-harvest-status: planned
       tags: [Operations]
       operationId: getAgentTrace
       summary: Read a safe decision trace without private chain-of-thought
@@ -775,8 +799,12 @@ paths:
                 traceId: 13131313-1313-4313-8313-131313131313
                 subjectType: ORDER
                 subjectId: 20202020-2020-4020-8020-202020202020
+                workflowType: ORDER_FULFILMENT
+                stage: DELIVERY_OUTCOME_RECORDED
                 status: COMPLETED
                 summary: Proposed a two-farm allocation within safe quantities.
+                createdAt: '2026-08-01T10:15:00Z'
+                updatedAt: '2026-08-01T12:00:00Z'
                 steps:
                   - {recordedAt: '2026-08-01T10:16:00Z', kind: DECISION, summary: Selected eligible local supply., confidence: 0.82}
         default: {$ref: '#/components/responses/Problem'}
@@ -1154,6 +1182,55 @@ components:
             code: VALIDATION_FAILED
             detail: quantity.unit must be kg
   schemas:
+    CropObservationIntakeCreate:
+      type: object
+      additionalProperties: false
+      required: [cropBatchId, observedAt, sourceType, sourceText, provenance]
+      properties:
+        cropBatchId: {type: string, format: uuid}
+        observedAt: {type: string, format: date-time}
+        sourceType: {enum: [TEXT, VOICE_TRANSCRIPT, COORDINATOR_NOTE]}
+        sourceText: {type: string, minLength: 1, maxLength: 4000}
+        provenance: {$ref: './common.schema.json#/$defs/Provenance'}
+    CropObservationDraft:
+      type: object
+      additionalProperties: false
+      required: [suggestedCropStage, fieldConfidence, confidence, warnings]
+      properties:
+        suggestedCropStage:
+          anyOf:
+            - {enum: [GROWING, FLOWERING, FRUITING, HARVEST_READY, HARVESTED]}
+            - {type: 'null'}
+        suggestedEstimatedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        suggestedNotes: {type: string, maxLength: 4000}
+        fieldConfidence:
+          type: object
+          additionalProperties: false
+          required: [cropStage, estimatedQuantity, notes]
+          properties:
+            cropStage: {type: number, minimum: 0, maximum: 1}
+            estimatedQuantity: {type: number, minimum: 0, maximum: 1}
+            notes: {type: number, minimum: 0, maximum: 1}
+        confidence: {type: number, minimum: 0, maximum: 1}
+        warnings: {type: array, items: {type: string}}
+    CropObservationIntake:
+      type: object
+      additionalProperties: false
+      required: [intakeId, cropBatchId, observedAt, sourceType, status, draft, promptId, adapter, provenance, traceId, createdAt]
+      properties:
+        intakeId: {type: string, format: uuid}
+        cropBatchId: {type: string, format: uuid}
+        observedAt: {type: string, format: date-time}
+        sourceType: {enum: [TEXT, VOICE_TRANSCRIPT, COORDINATOR_NOTE]}
+        status: {enum: [DRAFT, CONFIRMED]}
+        draft: {$ref: '#/components/schemas/CropObservationDraft'}
+        promptId: {type: string}
+        adapter: {type: string}
+        provenance: {$ref: './common.schema.json#/$defs/Provenance'}
+        traceId: {type: string, format: uuid}
+        createdAt: {type: string, format: date-time}
+        confirmedObservationId: {type: string, format: uuid}
+        confirmedAt: {type: string, format: date-time}
     CropObservationCreate:
       type: object
       additionalProperties: false
@@ -1165,6 +1242,7 @@ components:
         notes: {type: string, maxLength: 2000}
         estimatedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
         provenance: {$ref: './common.schema.json#/$defs/Provenance'}
+        intakeId: {type: string, format: uuid}
     CropObservation:
       type: object
       additionalProperties: false
@@ -1179,6 +1257,7 @@ components:
         estimatedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
         provenance: {$ref: './common.schema.json#/$defs/Provenance'}
         traceId: {type: string, format: uuid}
+        intakeId: {type: string, format: uuid}
     CropBatch:
       type: object
       additionalProperties: false
@@ -1376,6 +1455,7 @@ components:
           type: array
           uniqueItems: true
           items: {type: string, format: uuid}
+        traceId: {type: string, format: uuid}
         allocation: {$ref: '#/components/schemas/AllocationSummary'}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
@@ -1476,6 +1556,9 @@ components:
       properties:
         sequence: {type: integer, minimum: 1}
         kind: {enum: [PICKUP, DROPOFF]}
+        farmId: {type: string, format: uuid}
+        cropBatchIds: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
+        quantity: {$ref: './common.schema.json#/$defs/Quantity'}
         location: {$ref: './common.schema.json#/$defs/GeoPoint'}
     DeliveryMission:
       type: object
@@ -1491,6 +1574,9 @@ components:
         deadline: {type: string, format: date-time}
         stops: {type: array, minItems: 2, items: {$ref: '#/components/schemas/DeliveryStop'}}
         currentStopSequence: {type: integer, minimum: 0}
+        estimatedDistanceKm: {type: number, minimum: 0}
+        estimatedDurationMinutes: {type: integer, minimum: 0}
+        estimatedArrival: {type: string, format: date-time}
     MissionPage:
       type: object
       additionalProperties: false
@@ -1608,6 +1694,7 @@ components:
         status: {enum: [OPEN, RECOVERY_PENDING, RESOLVED]}
         provenance: {$ref: './common.schema.json#/$defs/Provenance'}
         reportedAt: {type: string, format: date-time}
+        traceId: {type: string, format: uuid}
     RecoveryProposal:
       type: object
       additionalProperties: false
@@ -1691,16 +1778,27 @@ components:
         kind: {enum: [INPUT, EVIDENCE, TOOL_CALL, DECISION, APPROVAL, STATE_CHANGE, OUTCOME]}
         summary: {type: string, minLength: 1, maxLength: 1000}
         confidence: {type: number, minimum: 0, maximum: 1}
+        agentName: {type: string, minLength: 1}
+        toolName: {type: string, minLength: 1}
+        provenance: {$ref: './common.schema.json#/$defs/Provenance'}
+        promptId: {type: string, minLength: 1}
+        adapter: {type: string, minLength: 1}
+        durationMs: {type: integer, minimum: 0}
     AgentTrace:
       type: object
       additionalProperties: false
-      required: [traceId, subjectType, subjectId, status, summary, steps]
+      required: [traceId, subjectType, subjectId, workflowType, stage, status, summary, createdAt, updatedAt, steps]
       properties:
         traceId: {type: string, format: uuid}
         subjectType: {enum: [CROP_BATCH, ORDER, DELIVERY, EXCEPTION]}
         subjectId: {type: string, format: uuid}
-        status: {enum: [RUNNING, AWAITING_APPROVAL, COMPLETED, FAILED]}
+        workflowType: {enum: [GENERAL, CROP_INTELLIGENCE, ORDER_FULFILMENT, EXCEPTION_RECOVERY]}
+        stage: {type: string, minLength: 1}
+        status: {enum: [RUNNING, WAITING, AWAITING_HUMAN, AWAITING_APPROVAL, COMPLETED, FAILED]}
         summary: {type: string, minLength: 1, maxLength: 2000}
+        parentTraceId: {type: string, format: uuid}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
         steps: {type: array, items: {$ref: '#/components/schemas/TraceStep'}}
     SimulationRunCreate:
       type: object

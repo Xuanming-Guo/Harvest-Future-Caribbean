@@ -3,6 +3,7 @@ import type {
   Approval,
   BuyerDemand,
   CropBatch,
+  CropObservationIntake,
   DeliveryAcceptance,
   DeliveryMission,
   DeliveryUpdate,
@@ -29,6 +30,31 @@ export function cropBatchDto(row: CropBatch, verificationStatus = "UNVERIFIED") 
     availableToPromise: quantity(row.availableToPromise),
     provenance: row.provenance,
     verificationStatus,
+  };
+}
+
+export function cropObservationIntakeDto(row: CropObservationIntake) {
+  return {
+    intakeId: row.id,
+    cropBatchId: row.cropBatchId,
+    observedAt: row.observedAt.toISOString(),
+    sourceType: row.sourceType,
+    status: row.status,
+    draft: {
+      suggestedCropStage: row.suggestedCropStage,
+      ...(row.suggestedQuantity !== null ? { suggestedEstimatedQuantity: quantity(row.suggestedQuantity) } : {}),
+      ...(row.suggestedNotes ? { suggestedNotes: row.suggestedNotes } : {}),
+      fieldConfidence: row.fieldConfidence,
+      confidence: row.confidence,
+      warnings: row.warnings,
+    },
+    promptId: row.promptId,
+    adapter: row.adapter,
+    provenance: row.provenance,
+    traceId: row.traceId,
+    createdAt: row.createdAt.toISOString(),
+    ...(row.confirmedObservationId ? { confirmedObservationId: row.confirmedObservationId } : {}),
+    ...(row.confirmedAt ? { confirmedAt: row.confirmedAt.toISOString() } : {}),
   };
 }
 
@@ -74,6 +100,7 @@ export function orderDto(row: Order) {
     lifecycleStatus: row.lifecycleStatus,
     atRisk: row.atRisk,
     activeExceptionIds: row.activeExceptionIds as string[],
+    ...(row.traceId ? { traceId: row.traceId } : {}),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -105,6 +132,9 @@ export function missionDto(row: DeliveryMission) {
     deadline: row.deadline.toISOString(),
     stops: row.stops,
     currentStopSequence: row.currentStopSequence,
+    ...(row.estimatedDistanceKm !== null ? { estimatedDistanceKm: row.estimatedDistanceKm } : {}),
+    ...(row.estimatedDurationMinutes !== null ? { estimatedDurationMinutes: row.estimatedDurationMinutes } : {}),
+    ...(row.estimatedArrival ? { estimatedArrival: row.estimatedArrival.toISOString() } : {}),
   };
 }
 
@@ -132,6 +162,7 @@ export function exceptionDto(row: OperationalException) {
     status: row.status,
     provenance: row.provenance,
     reportedAt: row.reportedAt.toISOString(),
+    ...(row.traceId ? { traceId: row.traceId } : {}),
   };
 }
 
@@ -226,12 +257,23 @@ export function traceDto(trace: AgentTrace, steps: TraceStep[]) {
     subjectType: trace.subjectType,
     subjectId: trace.subjectId,
     status: trace.status,
+    workflowType: trace.workflowType,
+    stage: trace.stage,
     summary: trace.summary,
+    ...(trace.parentTraceId ? { parentTraceId: trace.parentTraceId } : {}),
+    createdAt: trace.createdAt.toISOString(),
+    updatedAt: trace.updatedAt.toISOString(),
     steps: steps.map((step) => ({
       recordedAt: step.recordedAt.toISOString(),
       kind: step.kind,
       summary: step.summary,
       ...(step.confidence !== null ? { confidence: step.confidence } : {}),
+      ...(step.agentName ? { agentName: step.agentName } : {}),
+      ...(step.toolName ? { toolName: step.toolName } : {}),
+      ...(step.provenance ? { provenance: step.provenance } : {}),
+      ...(step.promptId ? { promptId: step.promptId } : {}),
+      ...(step.adapter ? { adapter: step.adapter } : {}),
+      ...(step.durationMs !== null ? { durationMs: step.durationMs } : {}),
     })),
   };
 }

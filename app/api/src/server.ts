@@ -5,6 +5,8 @@ import { Prisma, Provenance } from "@prisma/client";
 import Fastify from "fastify";
 
 import { canAccessBatch, canAccessOrder, visibleBatchIds, visibleExceptionRows, visibleFarmIds, visibleOrderIds } from "./access.js";
+import { createAgentCoordinator } from "./agents/coordinator.js";
+import type { ObservationSourceType } from "./agents/prompts.js";
 import { registerAuthentication, requireRole, signDevelopmentToken, type AuthActor } from "./auth.js";
 import { config } from "./config.js";
 import { prisma } from "./db.js";
@@ -13,6 +15,7 @@ import { assertObjectBody, httpError, idempotent, readLocation, readQuantity, se
 import {
   approvalDto,
   cropBatchDto,
+  cropObservationIntakeDto,
   deliveryAcceptanceDto,
   deliveryUpdateDto,
   demandDto,
@@ -24,10 +27,10 @@ import {
   pageInfo,
   predictionDto,
   quantity,
+  traceDto,
   vehicleDto,
   verificationTaskDto,
 } from "./serializers.js";
-import { approveAllocation, produceFixturePrediction, proposeAllocation, rejectApproval } from "./workflows.js";
 
 type JsonObject = Record<string, unknown>;
 type GeoPoint = { latitude: number; longitude: number };
@@ -90,24 +93,31 @@ async function approvalContext(row: { subjectType: string; subjectId: string; re
   const order = await prisma.order.findUnique({ where: { id: allocation.orderId } });
   if (!order) return undefined;
   const lines = await prisma.allocationLine.findMany({ where: { allocationId: allocation.id } });
+  const listings = await prisma.listing.findMany({ where: { id: { in: lines.map((line) => line.listingId) } } });
+  const listingById = new Map(listings.map((listing) => [listing.id, listing]));
   const requestedActor = await prisma.actor.findUnique({ where: { id: row.requestedFromActorId } });
-  let amount = order.requestedQuantity;
+  let visibleLines = lines;
   if (requestedActor?.role === "FARMER") {
     const farmIds = (await prisma.farm.findMany({ where: { farmerId: requestedActor.id }, select: { id: true } })).map((farm) => farm.id);
     const batchIds = (await prisma.cropBatch.findMany({ where: { farmId: { in: farmIds } }, select: { id: true } })).map((batch) => batch.id);
-    amount = lines.filter((line) => batchIds.includes(line.cropBatchId)).reduce((sum, line) => sum + line.quantity, 0);
+    visibleLines = lines.filter((line) => batchIds.includes(line.cropBatchId));
   }
+  const amount = visibleLines.reduce((sum, line) => sum + line.quantity, 0);
+  const estimatedPrice = visibleLines.reduce((sum, line) => sum + line.quantity * (listingById.get(line.listingId)?.unitPrice ?? 0), 0);
+  const currency = listingById.get(visibleLines[0]?.listingId)?.currency ?? "XCD";
   return {
     title: `${order.cropType.toLowerCase()} supply commitment`,
     summary: `Confirm ${amount} kg for delivery by ${order.neededBy.toISOString()}.`,
     orderId: order.id,
     cropType: order.cropType,
     quantity: quantity(amount),
+    estimatedPrice: { amount: Number(estimatedPrice.toFixed(2)), currency },
     neededBy: order.neededBy.toISOString(),
   };
 }
 
 export async function buildServer() {
+  const agentCoordinator = createAgentCoordinator();
   const server = Fastify({ logger: true, bodyLimit: 1_000_000 });
   await server.register(cors, {
     origin: config.websiteOrigin,
@@ -117,7 +127,7 @@ export async function buildServer() {
   await registerAuthentication(server);
   server.setErrorHandler((error, _request, reply) => sendProblem(reply, error));
 
-  server.get("/health", async () => ({ status: "ok", service: "harvest-product-api", contractVersion: "0.3.0", adapters: { model: config.modelAdapter } }));
+  server.get("/health", async () => ({ status: "ok", service: "harvest-product-api", contractVersion: "0.4.0", adapters: { model: config.modelAdapter, agentText: agentCoordinator.textAdapterName } }));
 
   server.post("/dev/session", async (request, reply) => {
     if (!config.enableDevAuth) throw httpError(404, "NOT_FOUND", "Development authentication is disabled.");
@@ -162,24 +172,121 @@ export async function buildServer() {
     return cropBatchDto(row, statuses.get(row.id));
   });
 
-  server.post("/v1/crop-observations", async (request, reply) => idempotent(request, reply, 201, async () => {
+  server.post("/v1/crop-observation-intakes", async (request, reply) => idempotent(request, reply, 201, async () => {
     const actor = requireRole(request, ["FARMER", "COORDINATOR", "ADMIN"]);
-    const body = assertObjectBody(request.body, ["cropBatchId", "observedAt", "cropStage", "notes", "estimatedQuantity", "provenance"], ["cropBatchId", "observedAt", "cropStage", "provenance"]);
+    const body = assertObjectBody(
+      request.body,
+      ["cropBatchId", "observedAt", "sourceType", "sourceText", "provenance"],
+      ["cropBatchId", "observedAt", "sourceType", "sourceText", "provenance"],
+    );
     const cropBatchId = asString(body.cropBatchId, "cropBatchId");
     if (!(await canAccessBatch(actor, cropBatchId))) throw httpError(404, "CROP_BATCH_NOT_FOUND", "Crop batch was not found.");
+    const batch = await prisma.cropBatch.findUnique({ where: { id: cropBatchId } });
+    if (!batch) throw httpError(404, "CROP_BATCH_NOT_FOUND", "Crop batch was not found.");
+    const sourceType = asString(body.sourceType, "sourceType") as ObservationSourceType;
+    if (!["TEXT", "VOICE_TRANSCRIPT", "COORDINATOR_NOTE"].includes(sourceType)) throw httpError(422, "INVALID_SOURCE_TYPE", "sourceType must be TEXT, VOICE_TRANSCRIPT, or COORDINATOR_NOTE.");
+    const sourceText = asString(body.sourceText, "sourceText");
+    if (sourceText.length > 4_000) throw httpError(422, "SOURCE_TEXT_TOO_LONG", "sourceText must be at most 4,000 characters.");
+    const provenance = asString(body.provenance, "provenance") as Provenance;
+    if (!Object.values(Provenance).includes(provenance) || provenance === Provenance.MODEL_PREDICTED) throw httpError(422, "INVALID_PROVENANCE", "Observation intake requires observable provenance.");
+    const observedAt = asDate(body.observedAt, "observedAt");
+    const startedAt = Date.now();
+    const draft = await agentCoordinator.draftCropObservation({
+      actorRole: actor.role,
+      cropBatchId,
+      cropType: batch.cropType,
+      currentBatchStatus: batch.status,
+      observedAt: observedAt.toISOString(),
+      timezone: "America/St_Lucia",
+      sourceType,
+      sourceText,
+    });
+    const intakeId = randomUUID();
+    const traceId = randomUUID();
+    const createdAt = new Date();
+    const row = await prisma.$transaction(async (tx) => {
+      await tx.agentTrace.create({
+        data: { id: traceId, subjectType: "CROP_BATCH", subjectId: cropBatchId, workflowType: "CROP_INTELLIGENCE", stage: "DRAFT_READY", status: "AWAITING_HUMAN", summary: "Extracted a non-binding crop update draft for human review." },
+      });
+      const intake = await tx.cropObservationIntake.create({
+        data: {
+          id: intakeId,
+          cropBatchId,
+          actorId: actor.id,
+          observedAt,
+          sourceType,
+          sourceText,
+          status: "DRAFT",
+          suggestedCropStage: draft.suggestedCropStage,
+          suggestedQuantity: draft.suggestedQuantityKg,
+          suggestedNotes: draft.suggestedNotes,
+          confidence: draft.confidence,
+          fieldConfidence: draft.fieldConfidence,
+          warnings: draft.warnings,
+          promptId: draft.promptId,
+          adapter: draft.adapter,
+          provenance,
+          traceId,
+          createdAt,
+        },
+      });
+      await tx.traceStep.create({
+        data: {
+          traceId,
+          recordedAt: createdAt,
+          kind: "TOOL_CALL",
+          agentName: "Intake Agent",
+          toolName: "extract-crop-observation",
+          provenance: Provenance.INFERRED,
+          promptId: draft.promptId,
+          adapter: draft.adapter,
+          durationMs: Date.now() - startedAt,
+          confidence: draft.confidence,
+          summary: `Prepared an editable draft with ${draft.warnings.length} warning${draft.warnings.length === 1 ? "" : "s"}; no operational crop state changed.`,
+        },
+      });
+      await recordEvent(tx, {
+        eventType: "CROP_OBSERVATION_INTAKE_DRAFTED",
+        actorId: actor.id,
+        entityId: intakeId,
+        traceId,
+        provenance: Provenance.INFERRED,
+        payload: { intakeId, cropBatchId, sourceType, status: "DRAFT", promptId: draft.promptId, adapter: draft.adapter },
+      });
+      return intake;
+    });
+    return cropObservationIntakeDto(row);
+  }));
+
+  server.post("/v1/crop-observations", async (request, reply) => idempotent(request, reply, 201, async () => {
+    const actor = requireRole(request, ["FARMER", "COORDINATOR", "ADMIN"]);
+    const body = assertObjectBody(request.body, ["cropBatchId", "observedAt", "cropStage", "notes", "estimatedQuantity", "provenance", "intakeId"], ["cropBatchId", "observedAt", "cropStage", "provenance"]);
+    const cropBatchId = asString(body.cropBatchId, "cropBatchId");
+    if (!(await canAccessBatch(actor, cropBatchId))) throw httpError(404, "CROP_BATCH_NOT_FOUND", "Crop batch was not found.");
+    const intakeId = body.intakeId === undefined ? undefined : asString(body.intakeId, "intakeId");
+    const intake = intakeId ? await prisma.cropObservationIntake.findUnique({ where: { id: intakeId } }) : null;
+    if (intakeId && (!intake || intake.cropBatchId !== cropBatchId || intake.status !== "DRAFT" || (actor.role === "FARMER" && intake.actorId !== actor.id))) {
+      throw httpError(409, "INTAKE_NOT_CONFIRMABLE", "The observation intake is unavailable, already confirmed, or belongs to another crop batch.");
+    }
     const provenance = asString(body.provenance, "provenance") as Provenance;
     if (!Object.values(Provenance).includes(provenance) || provenance === Provenance.MODEL_PREDICTED) throw httpError(422, "INVALID_PROVENANCE", "Crop observations require an observable input provenance.");
     const observationId = randomUUID();
-    const traceId = randomUUID();
+    const traceId = intake?.traceId ?? randomUUID();
     const observedAt = asDate(body.observedAt, "observedAt");
     const recordedAt = new Date();
     const estimatedQuantity = body.estimatedQuantity === undefined ? null : readQuantity(body.estimatedQuantity, "estimatedQuantity");
-    await prisma.$transaction(async (tx) => {
-      await tx.agentTrace.create({ data: { id: traceId, subjectType: "CROP_BATCH", subjectId: cropBatchId, status: "RUNNING", summary: "Validated a crop observation and requested an updated conservative forecast." } });
-      await tx.traceStep.create({ data: { traceId, recordedAt, kind: "INPUT", summary: `Recorded ${asString(body.cropStage, "cropStage")} observation${estimatedQuantity !== null ? ` with ${estimatedQuantity} kg estimate` : ""}.` } });
+    const observationEvent = await prisma.$transaction(async (tx) => {
+      if (intake) {
+        await tx.cropObservationIntake.update({ where: { id: intake.id }, data: { status: "CONFIRMED", confirmedObservationId: observationId, confirmedAt: recordedAt } });
+        await tx.agentTrace.update({ where: { id: traceId }, data: { status: "RUNNING", stage: "OBSERVATION_CONFIRMED", summary: "A human reviewed the draft and submitted the authoritative crop observation." } });
+      } else {
+        await tx.agentTrace.create({ data: { id: traceId, subjectType: "CROP_BATCH", subjectId: cropBatchId, workflowType: "CROP_INTELLIGENCE", stage: "OBSERVATION_CONFIRMED", status: "RUNNING", summary: "Validated a crop observation and requested an updated conservative forecast." } });
+      }
+      await tx.traceStep.create({ data: { traceId, recordedAt, kind: "INPUT", agentName: "Intake Agent", toolName: "confirm-human-observation", provenance, summary: `Human confirmed ${asString(body.cropStage, "cropStage")} observation${estimatedQuantity !== null ? ` with ${estimatedQuantity} kg estimate` : ""}.` } });
       await tx.cropObservation.create({ data: { id: observationId, cropBatchId, actorId: actor.id, observedAt, recordedAt, cropStage: asString(body.cropStage, "cropStage"), notes: typeof body.notes === "string" ? body.notes : null, estimatedQuantity, provenance, traceId } });
       await tx.cropBatch.update({ where: { id: cropBatchId }, data: { latestObservationId: observationId, provenance } });
-      const observationEvent = await recordEvent(tx, { eventType: "CROP_OBSERVATION_SUBMITTED", actorId: actor.id, entityId: cropBatchId, traceId, provenance, payload: { observationId, cropBatchId, observedAt: observedAt.toISOString(), cropStage: body.cropStage as string } });
+      const intakeEvent = intake ? await tx.domainEvent.findFirst({ where: { eventType: "CROP_OBSERVATION_INTAKE_DRAFTED", entityId: intake.id }, orderBy: { occurredAt: "desc" } }) : null;
+      const createdEvent = await recordEvent(tx, { eventType: "CROP_OBSERVATION_SUBMITTED", actorId: actor.id, entityId: cropBatchId, traceId, correlationId: intakeEvent?.correlationId, causationId: intakeEvent?.id, provenance, payload: { observationId, cropBatchId, observedAt: observedAt.toISOString(), cropStage: body.cropStage as string, ...(intake ? { intakeId: intake.id } : {}) } });
       const batch = await tx.cropBatch.findUniqueOrThrow({ where: { id: cropBatchId } });
       const taskId = randomUUID();
       await tx.verificationTask.create({
@@ -199,14 +306,15 @@ export async function buildServer() {
         actorId: actor.id,
         entityId: taskId,
         traceId,
-        correlationId: observationEvent.correlationId,
-        causationId: observationEvent.id,
+        correlationId: createdEvent.correlationId,
+        causationId: createdEvent.id,
         provenance,
         payload: { taskId, cropBatchId, observationId, status: "OPEN" },
       });
+      return createdEvent;
     });
-    await produceFixturePrediction(cropBatchId, actor.id, traceId);
-    return { observationId, cropBatchId, observedAt: observedAt.toISOString(), recordedAt: recordedAt.toISOString(), cropStage: body.cropStage, ...(typeof body.notes === "string" ? { notes: body.notes } : {}), ...(estimatedQuantity !== null ? { estimatedQuantity: quantity(estimatedQuantity) } : {}), provenance, traceId };
+    await agentCoordinator.refreshCropIntelligence(cropBatchId, actor.id, traceId, { correlationId: observationEvent.correlationId, causationId: observationEvent.id });
+    return { observationId, cropBatchId, observedAt: observedAt.toISOString(), recordedAt: recordedAt.toISOString(), cropStage: body.cropStage, ...(typeof body.notes === "string" ? { notes: body.notes } : {}), ...(estimatedQuantity !== null ? { estimatedQuantity: quantity(estimatedQuantity) } : {}), provenance, traceId, ...(intake ? { intakeId: intake.id } : {}) };
   }));
 
   server.post("/v1/crop-batches/:cropBatchId/forecast-requests", async (request, reply) => idempotent(request, reply, 202, async () => {
@@ -218,7 +326,7 @@ export async function buildServer() {
     const trace = await prisma.agentTrace.findFirst({ where: { subjectType: "CROP_BATCH", subjectId: cropBatchId } });
     const traceId = trace?.id ?? randomUUID();
     if (!trace) await prisma.agentTrace.create({ data: { id: traceId, subjectType: "CROP_BATCH", subjectId: cropBatchId, status: "RUNNING", summary: "Requested a refreshed crop forecast." } });
-    const result = await produceFixturePrediction(cropBatchId, actor.id, traceId);
+    const result = await agentCoordinator.refreshCropIntelligence(cropBatchId, actor.id, traceId);
     return { forecastRequestId: result.requestId, cropBatchId, status: "COMPLETED", requestedAt: new Date().toISOString() };
   }));
 
@@ -371,13 +479,13 @@ export async function buildServer() {
     const traceId = randomUUID();
     const requestedQuantity = readQuantity(body.requestedQuantity, "requestedQuantity");
     const row = await prisma.$transaction(async (tx) => {
-      const order = await tx.order.create({ data: { id: orderId, buyerId: actor.id, cropType: asString(body.cropType, "cropType").toUpperCase(), requestedQuantity, acceptedQuantity: 0, neededBy: asDate(body.neededBy, "neededBy"), latitude: location.latitude, longitude: location.longitude, listingIds, lifecycleStatus: "REQUESTED", atRisk: false, activeExceptionIds: [] } });
-      await tx.agentTrace.create({ data: { id: traceId, subjectType: "ORDER", subjectId: orderId, status: "RUNNING", summary: "Validating safe supply for a buyer order." } });
-      await tx.traceStep.create({ data: { traceId, recordedAt: new Date(), kind: "INPUT", summary: `Buyer requested ${requestedQuantity} kg of ${order.cropType}.` } });
+      const order = await tx.order.create({ data: { id: orderId, buyerId: actor.id, cropType: asString(body.cropType, "cropType").toUpperCase(), requestedQuantity, acceptedQuantity: 0, neededBy: asDate(body.neededBy, "neededBy"), latitude: location.latitude, longitude: location.longitude, listingIds, lifecycleStatus: "REQUESTED", atRisk: false, activeExceptionIds: [], traceId } });
+      await tx.agentTrace.create({ data: { id: traceId, subjectType: "ORDER", subjectId: orderId, workflowType: "ORDER_FULFILMENT", stage: "ORDER_REQUESTED", status: "RUNNING", summary: "Validating safe supply for a buyer order." } });
+      await tx.traceStep.create({ data: { traceId, recordedAt: new Date(), kind: "INPUT", agentName: "Market Balance Agent", toolName: "read-order-request", provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, summary: `Buyer requested ${requestedQuantity} kg of ${order.cropType}.` } });
       await recordEvent(tx, { eventType: "ORDER_REQUESTED", actorId: actor.id, entityId: orderId, traceId, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, payload: { orderId, cropType: order.cropType, requestedQuantity: quantity(requestedQuantity), status: "REQUESTED" } });
       return order;
     });
-    await proposeAllocation(orderId, actor.id, traceId);
+    await agentCoordinator.matchOrder(orderId, actor.id, traceId);
     return orderDto(row);
   }));
 
@@ -402,6 +510,20 @@ export async function buildServer() {
     };
   });
 
+  server.get("/v1/agent-traces/:traceId", async (request) => {
+    const actor = requireRole(request, [...productRoles]);
+    const { traceId } = request.params as { traceId: string };
+    const trace = await prisma.agentTrace.findUnique({ where: { id: traceId } });
+    if (!trace) throw httpError(404, "TRACE_NOT_FOUND", "Agent trace was not found.");
+    let visible = actor.role === "ADMIN" || actor.role === "OPERATIONS";
+    if (!visible && trace.subjectType === "CROP_BATCH") visible = await canAccessBatch(actor, trace.subjectId);
+    if (!visible && trace.subjectType === "ORDER") visible = await canAccessOrder(actor, trace.subjectId);
+    if (!visible && trace.subjectType === "EXCEPTION") visible = (await visibleExceptionRows(actor)).some((row) => row.id === trace.subjectId);
+    if (!visible) throw httpError(404, "TRACE_NOT_FOUND", "Agent trace was not found.");
+    const steps = await prisma.traceStep.findMany({ where: { traceId }, orderBy: [{ recordedAt: "asc" }, { id: "asc" }] });
+    return traceDto(trace, steps);
+  });
+
   server.get("/v1/approvals", async (request) => {
     const actor = requireRole(request, ["FARMER", "BUYER", "COORDINATOR", "ADMIN"]);
     const query = request.query as JsonObject;
@@ -415,7 +537,8 @@ export async function buildServer() {
     const body = assertObjectBody(request.body, ["decision", "reason"], ["decision"]);
     const decision = asString(body.decision, "decision");
     const reason = typeof body.reason === "string" ? body.reason : undefined;
-    const row = decision === "APPROVE" ? await approveAllocation(approvalId, actor.id, reason) : decision === "REJECT" ? await rejectApproval(approvalId, actor.id, reason) : (() => { throw httpError(400, "VALIDATION_FAILED", "decision must be APPROVE or REJECT."); })();
+    if (decision !== "APPROVE" && decision !== "REJECT") throw httpError(400, "VALIDATION_FAILED", "decision must be APPROVE or REJECT.");
+    const row = await agentCoordinator.decideApproval(approvalId, actor.id, decision, reason);
     return approvalDto(row, await approvalContext(row));
   }));
 
@@ -474,7 +597,7 @@ export async function buildServer() {
       const mission = await tx.deliveryMission.findUniqueOrThrow({ where: { id: missionId } });
       await tx.order.update({ where: { id: current.orderId }, data: { lifecycleStatus: "IN_DELIVERY" } });
       const stops = current.stops as Array<{ location: GeoPoint }>;
-      await recordEvent(tx, { eventType: "DELIVERY_MISSION_ACCEPTED", actorId: actor.id, entityId: missionId, traceId: trace?.id ?? randomUUID(), provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, payload: { missionId, orderId: current.orderId, status: "ASSIGNED", transporterId: actor.id, stops: stops.map((stop) => stop.location) } });
+      await recordEvent(tx, { eventType: "DELIVERY_MISSION_ACCEPTED", actorId: actor.id, entityId: missionId, traceId: trace?.id ?? randomUUID(), provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, payload: { missionId, orderId: current.orderId, status: "ASSIGNED", transporterId: actor.id, stops } });
       return mission;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     return missionDto(row);
@@ -616,8 +739,24 @@ export async function buildServer() {
     const exceptionType = asString(body.exceptionType, "exceptionType");
     const delayedMission = exceptionType === "DELAY" ? affectedMissions[0] : undefined;
     const proposedDeadline = delayedMission ? new Date(delayedMission.deadline.getTime() + 2 * 60 * 60 * 1000) : undefined;
+    const delayedOrder = delayedMission ? await prisma.order.findUnique({ where: { id: delayedMission.orderId } }) : null;
+    const parentTrace = delayedOrder ? await prisma.agentTrace.findFirst({ where: { subjectType: "ORDER", subjectId: delayedOrder.id } }) : null;
     const coordinator = delayedMission ? (actor.role === "COORDINATOR" ? actor : await prisma.actor.findFirst({ where: { role: "COORDINATOR" } })) : null;
     if (delayedMission && !coordinator) throw httpError(409, "COORDINATOR_UNAVAILABLE", "No coordinator is available for the recovery decision.");
+    const recoveryExplanation = delayedMission && proposedDeadline && delayedOrder
+      ? await agentCoordinator.explainDelayRecovery({
+          exceptionType: "DELAY",
+          severity: asString(body.severity, "severity"),
+          reportedAt: new Date().toISOString(),
+          description: asString(body.description, "description"),
+          missionId: delayedMission.id,
+          missionStatus: delayedMission.status,
+          routeSummary: `${(delayedMission.stops as unknown[]).length} planned stops`,
+          orderQuantityKg: delayedOrder.requestedQuantity,
+          previousDeadline: delayedMission.deadline.toISOString(),
+          proposedDeadline: proposedDeadline.toISOString(),
+        })
+      : null;
     const exceptionId = randomUUID();
     const approvalId = delayedMission ? randomUUID() : null;
     const traceId = randomUUID();
@@ -633,10 +772,16 @@ export async function buildServer() {
           status: delayedMission ? "RECOVERY_PENDING" : "OPEN",
           provenance,
           reportedAt,
+          traceId,
           ...(delayedMission && proposedDeadline ? {
             recoveryAction: "RESCHEDULE",
-            recoverySummary: `Extend mission ${delayedMission.id.slice(0, 8)} by two hours to recover from the delay.`,
-            recoveryChanges: { missionId: delayedMission.id, previousDeadline: delayedMission.deadline.toISOString(), proposedDeadline: proposedDeadline.toISOString() },
+            recoverySummary: recoveryExplanation?.summary ?? `Extend mission ${delayedMission.id.slice(0, 8)} by two hours to recover from the delay.`,
+            recoveryChanges: {
+              missionId: delayedMission.id,
+              previousDeadline: delayedMission.deadline.toISOString(),
+              proposedDeadline: proposedDeadline.toISOString(),
+              ...(recoveryExplanation ? { evidence: recoveryExplanation.evidence, risks: recoveryExplanation.risks, requiresClarification: recoveryExplanation.requiresClarification } : {}),
+            },
           } : {}),
         },
       });
@@ -645,8 +790,15 @@ export async function buildServer() {
         if (order) await tx.order.update({ where: { id: orderId }, data: { atRisk: true, activeExceptionIds: [...new Set([...(order.activeExceptionIds as string[]), exceptionId])] } });
       }
       if (approvalId && coordinator) await tx.approval.create({ data: { id: approvalId, subjectType: "RECOVERY", subjectId: exceptionId, requestedFromActorId: coordinator.id, status: "PENDING", requestedAt: reportedAt } });
-      await tx.agentTrace.create({ data: { id: traceId, subjectType: "EXCEPTION", subjectId: exceptionId, status: delayedMission ? "AWAITING_APPROVAL" : "RUNNING", summary: delayedMission ? "Proposed a two-hour reschedule and paused for coordinator approval." : "Recorded an exception for coordinator review." } });
-      await recordEvent(tx, { eventType: "EXCEPTION_REPORTED", actorId: actor.id, entityId: exceptionId, traceId, provenance, payload: { exceptionId, exceptionType: exception.exceptionType, severity: exception.severity, affectedEntityIds } });
+      await tx.agentTrace.create({ data: { id: traceId, subjectType: "EXCEPTION", subjectId: exceptionId, parentTraceId: parentTrace?.id, workflowType: "EXCEPTION_RECOVERY", stage: delayedMission ? "RECOVERY_PROPOSED" : "MANUAL_RECOVERY", status: delayedMission ? "AWAITING_APPROVAL" : "WAITING", summary: delayedMission ? "Proposed a deterministic two-hour reschedule and paused for coordinator approval." : "Recorded an unsupported exception type for manual coordinator review." } });
+      await tx.traceStep.create({ data: { traceId, recordedAt: reportedAt, kind: "INPUT", agentName: "Exception Agent", toolName: "validate-exception", provenance, summary: `Recorded a ${exception.severity.toLowerCase()} ${exception.exceptionType.toLowerCase()} exception affecting ${affectedEntityIds.length} visible record${affectedEntityIds.length === 1 ? "" : "s"}.` } });
+      const exceptionEvent = await recordEvent(tx, { eventType: "EXCEPTION_REPORTED", actorId: actor.id, entityId: exceptionId, traceId, provenance, payload: { exceptionId, exceptionType: exception.exceptionType, severity: exception.severity, affectedEntityIds } });
+      if (delayedMission && proposedDeadline && recoveryExplanation) {
+        await tx.traceStep.create({ data: { traceId, recordedAt: reportedAt, kind: "DECISION", agentName: "Exception Agent", toolName: "calculate-delay-recovery", provenance: Provenance.INFERRED, summary: `Deterministic policy proposed changing the deadline from ${delayedMission.deadline.toISOString()} to ${proposedDeadline.toISOString()}.` } });
+        await tx.traceStep.create({ data: { traceId, recordedAt: reportedAt, kind: "TOOL_CALL", agentName: "Exception Agent", toolName: "explain-delay-recovery", provenance: Provenance.INFERRED, promptId: recoveryExplanation.promptId, adapter: recoveryExplanation.adapter, summary: "Prepared a participant-facing explanation of the fixed recovery proposal; the text adapter could not change or approve it." } });
+        await tx.traceStep.create({ data: { traceId, recordedAt: reportedAt, kind: "APPROVAL", agentName: "Exception Agent", toolName: "request-human-approval", provenance: Provenance.INFERRED, summary: "Paused before applying the deadline change for explicit coordinator approval." } });
+        await recordEvent(tx, { eventType: "RECOVERY_PROPOSED", actorId: actor.id, entityId: exceptionId, traceId, correlationId: exceptionEvent.correlationId, causationId: exceptionEvent.id, provenance: Provenance.INFERRED, payload: { exceptionId, approvalId, actionType: "RESCHEDULE", missionId: delayedMission.id, previousDeadline: delayedMission.deadline.toISOString(), proposedDeadline: proposedDeadline.toISOString() } });
+      }
       return exception;
     });
     return exceptionDto(row);
@@ -693,6 +845,7 @@ export async function buildServer() {
     if (Math.abs(lineOutcomes.reduce((sum, line) => sum + line.accepted, 0) - accepted) > 0.0001 || Math.abs(lineOutcomes.reduce((sum, line) => sum + line.rejected, 0) - rejected) > 0.0001) throw httpError(422, "DELIVERY_TOTAL_MISMATCH", "Line outcomes must equal the delivery acceptance totals.");
     const serializedLineOutcomes = lineOutcomes.map((line) => ({ cropBatchId: line.cropBatchId, acceptedQuantity: quantity(line.accepted), rejectedQuantity: quantity(line.rejected) }));
     const trace = await prisma.agentTrace.findFirst({ where: { subjectType: "ORDER", subjectId: order.id } });
+    const priorEvent = await prisma.domainEvent.findFirst({ where: { traceId: trace?.id, entityId: { in: [order.id, mission.id] } }, orderBy: { occurredAt: "desc" } });
     const acceptance = await prisma.$transaction(async (tx) => {
       const created = await tx.deliveryAcceptance.create({ data: { id: acceptanceId, orderId: order.id, outcome, acceptedQuantity: accepted, rejectedQuantity: rejected, lineOutcomes: serializedLineOutcomes, note: typeof body.note === "string" ? body.note : null, acceptedBy: actor.id, acceptedAt } });
       await tx.order.update({ where: { id: order.id }, data: { lifecycleStatus, acceptedQuantity: accepted, atRisk: false, activeExceptionIds: [] } });
@@ -707,7 +860,11 @@ export async function buildServer() {
           }
         }
       }
-      const deliveryEvent = await recordEvent(tx, { eventType: "DELIVERY_ACCEPTED", actorId: actor.id, entityId: acceptanceId, traceId: trace?.id ?? randomUUID(), provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, payload: { deliveryId: acceptanceId, orderId: order.id, acceptedQuantity: quantity(accepted), rejectedQuantity: quantity(rejected), outcome, lineOutcomes: serializedLineOutcomes } });
+      if (trace) {
+        await tx.agentTrace.update({ where: { id: trace.id }, data: { status: "COMPLETED", stage: "DELIVERY_OUTCOME_RECORDED", summary: `Delivery finished with ${accepted} kg accepted and ${rejected} kg rejected.` } });
+        await tx.traceStep.create({ data: { traceId: trace.id, recordedAt: acceptedAt, kind: "STATE_CHANGE", agentName: "Traceability Agent", toolName: "record-delivery-outcome", provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, summary: `Recorded ${outcome.toLowerCase().replaceAll("_", " ")}: ${accepted} kg accepted and ${rejected} kg rejected; reservations were released and model outcomes updated.` } });
+      }
+      const deliveryEvent = await recordEvent(tx, { eventType: "DELIVERY_ACCEPTED", actorId: actor.id, entityId: acceptanceId, traceId: trace?.id ?? randomUUID(), correlationId: priorEvent?.correlationId, causationId: priorEvent?.id, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, payload: { deliveryId: acceptanceId, orderId: order.id, acceptedQuantity: quantity(accepted), rejectedQuantity: quantity(rejected), outcome, lineOutcomes: serializedLineOutcomes } });
       await recordEvent(tx, { eventType: `ORDER_${lifecycleStatus}`, actorId: actor.id, entityId: order.id, traceId: trace?.id ?? randomUUID(), correlationId: deliveryEvent.correlationId, causationId: deliveryEvent.id, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, payload: { orderId: order.id, status: lifecycleStatus, acceptedQuantity: quantity(accepted), releasedReservationQuantity: quantity(Math.max(0, order.requestedQuantity - accepted)) } });
       return created;
     });

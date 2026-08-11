@@ -90,6 +90,32 @@ model CropObservation {
   @@map("crop_observations")
 }
 
+model CropObservationIntake {
+  id                     String     @id @db.Uuid
+  cropBatchId            String     @map("crop_batch_id") @db.Uuid
+  actorId                 String     @map("actor_id") @db.Uuid
+  observedAt              DateTime   @map("observed_at") @db.Timestamptz(3)
+  sourceType              String     @map("source_type")
+  sourceText              String     @map("source_text")
+  status                  String
+  suggestedCropStage      String?    @map("suggested_crop_stage")
+  suggestedQuantity       Float?     @map("suggested_quantity")
+  suggestedNotes          String?    @map("suggested_notes")
+  confidence              Float
+  fieldConfidence         Json       @map("field_confidence")
+  warnings                Json
+  promptId                String     @map("prompt_id")
+  adapter                  String
+  provenance              Provenance
+  traceId                  String     @map("trace_id") @db.Uuid
+  confirmedObservationId  String?    @map("confirmed_observation_id") @db.Uuid
+  createdAt                DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  confirmedAt              DateTime?  @map("confirmed_at") @db.Timestamptz(3)
+
+  @@index([cropBatchId, createdAt])
+  @@map("crop_observation_intakes")
+}
+
 model VerificationTask {
   id          String   @id @db.Uuid
   farmId      String   @map("farm_id") @db.Uuid
@@ -176,6 +202,7 @@ model Order {
   lifecycleStatus    String   @map("lifecycle_status")
   atRisk             Boolean  @default(false) @map("at_risk")
   activeExceptionIds Json     @map("active_exception_ids")
+  traceId            String?  @map("trace_id") @db.Uuid
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -236,6 +263,9 @@ model DeliveryMission {
   deadline      DateTime @db.Timestamptz(3)
   stops         Json
   currentStopSequence Int @default(0) @map("current_stop_sequence")
+  estimatedDistanceKm Float? @map("estimated_distance_km")
+  estimatedDurationMinutes Int? @map("estimated_duration_minutes")
+  estimatedArrival DateTime? @map("estimated_arrival") @db.Timestamptz(3)
 
   @@map("delivery_missions")
 }
@@ -265,6 +295,7 @@ model OperationalException {
   recoveryAction    String?    @map("recovery_action")
   recoverySummary   String?    @map("recovery_summary")
   recoveryChanges   Json?      @map("recovery_changes")
+  traceId           String?    @map("trace_id") @db.Uuid
 
   @@map("operational_exceptions")
 }
@@ -303,6 +334,11 @@ model AgentTrace {
   subjectId   String   @map("subject_id") @db.Uuid
   status      String
   summary     String
+  workflowType String  @default("GENERAL") @map("workflow_type")
+  stage       String   @default("RECORDED")
+  parentTraceId String? @map("parent_trace_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("agent_traces")
 }
@@ -314,6 +350,12 @@ model TraceStep {
   kind       String
   summary    String
   confidence Float?
+  agentName  String?  @map("agent_name")
+  toolName   String?  @map("tool_name")
+  provenance Provenance?
+  promptId   String?  @map("prompt_id")
+  adapter    String?
+  durationMs Int?     @map("duration_ms")
 
   @@map("trace_steps")
 }

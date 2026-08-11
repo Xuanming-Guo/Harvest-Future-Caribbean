@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CalendarDays, RefreshCw, Save, Store } from "lucide-react";
+import { ArrowLeft, CalendarDays, RefreshCw, Save, Sparkles, Store } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useState } from "react";
@@ -18,6 +18,9 @@ export default function CropDetailPage() {
   const [stage, setStage] = useState("HARVEST_READY");
   const [quantity, setQuantity] = useState(20);
   const [notes, setNotes] = useState("");
+  const [description, setDescription] = useState("");
+  const [intakeId, setIntakeId] = useState<string | null>(null);
+  const [draftNotice, setDraftNotice] = useState<string | null>(null);
   const [listingQuantity, setListingQuantity] = useState(10);
   const [price, setPrice] = useState(7.5);
   const [availableFrom, setAvailableFrom] = useState(() => dateInputOffset(1));
@@ -39,10 +42,31 @@ export default function CropDetailPage() {
       estimatedQuantity: { value: quantity, unit: "kg" },
       notes: notes || undefined,
       provenance: "OBSERVED",
+      intakeId: intakeId ?? undefined,
     }),
     onSuccess: () => {
       setMessage("Crop update saved. Harvest created one refreshed forecast and a coordinator verification task.");
+      setIntakeId(null);
+      setDraftNotice(null);
       void queryClient.invalidateQueries({ queryKey: ["crop-batch", cropBatchId] });
+    },
+  });
+  const intake = useMutation({
+    mutationFn: () => api.createObservationIntake({
+      cropBatchId,
+      observedAt: new Date().toISOString(),
+      sourceType: "TEXT",
+      sourceText: description,
+      provenance: "OBSERVED",
+    }),
+    onSuccess: (result) => {
+      if (result.draft.suggestedCropStage) setStage(result.draft.suggestedCropStage);
+      if (result.draft.suggestedEstimatedQuantity) setQuantity(result.draft.suggestedEstimatedQuantity.value);
+      if (result.draft.suggestedNotes) setNotes(result.draft.suggestedNotes);
+      setIntakeId(result.intakeId);
+      const confidence = Math.round(result.draft.confidence * 100);
+      setDraftNotice(`Draft prepared with ${confidence}% extraction confidence.${result.draft.warnings.length ? ` Review: ${result.draft.warnings.join(" ")}` : " Review every field before saving."}`);
+      setMessage(null);
     },
   });
   const refresh = useMutation({
@@ -93,6 +117,12 @@ export default function CropDetailPage() {
         {canEdit ? (
           <Card>
             <SectionTitle title="Share a crop update" detail="Takes less than a minute" />
+            <div className="form-grid agent-draft">
+              <div className="field field-full"><label htmlFor="description">Describe your update</label><textarea id="description" rows={3} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="For example: About 20 kg of cucumbers are ready, but some have rain damage." /></div>
+              <button type="button" className="button button-secondary field-full" disabled={intake.isPending || !description.trim()} onClick={() => intake.mutate()}><Sparkles size={16} />{intake.isPending ? "Preparing draft..." : "Prepare editable draft"}</button>
+              <p className="field-full muted-copy">Harvest only fills the form below. Nothing is saved until you review it and select Save crop update.</p>
+              {draftNotice && <div className="notice field-full"><strong>Human review required</strong>{draftNotice}</div>}
+            </div>
             <form className="form-grid" onSubmit={(event: FormEvent) => { event.preventDefault(); observation.mutate(); }}>
               <div className="field"><label htmlFor="stage">Crop stage</label><select id="stage" value={stage} onChange={(event) => setStage(event.target.value)}><option>GROWING</option><option>FLOWERING</option><option>FRUITING</option><option>HARVEST_READY</option><option>HARVESTED</option></select></div>
               <div className="field"><label htmlFor="estimate">Estimated crop (kg)</label><input id="estimate" type="number" min="0" step="0.5" value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} /></div>
@@ -116,7 +146,7 @@ export default function CropDetailPage() {
           </form>
         </Card>
       )}
-      {(message || observation.error || refresh.error || listing.error) && <p className={(observation.error || refresh.error || listing.error) ? "form-error" : "form-success"}>{message ?? observation.error?.message ?? refresh.error?.message ?? listing.error?.message}</p>}
+      {(message || intake.error || observation.error || refresh.error || listing.error) && <p className={(intake.error || observation.error || refresh.error || listing.error) ? "form-error" : "form-success"}>{message ?? intake.error?.message ?? observation.error?.message ?? refresh.error?.message ?? listing.error?.message}</p>}
     </>
   );
 }
