@@ -127,6 +127,13 @@ produce rejection, and inter-island commitments.
 Agent traces expose concise summaries, evidence, tool calls, confidence,
 approvals, and state changes—not private chain-of-thought.
 
+The hackathon coordinator is an in-process typed service inside the Product
+API. Human pauses are stored as normal approvals and domain records; there is
+no second agent database, background queue, or agent framework. Only
+unstructured crop-draft extraction and deterministic recovery explanation use
+the provider-neutral text adapter. See
+[`agent_workflows.md`](agent_workflows.md) for exact prompts and configuration.
+
 ## Data and evidence
 
 Every important input must state whether it is:

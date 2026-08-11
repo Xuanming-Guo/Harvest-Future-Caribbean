@@ -22,6 +22,7 @@
     "eventType": {
       "type": "string",
       "enum": [
+        "CROP_OBSERVATION_INTAKE_DRAFTED",
         "CROP_OBSERVATION_SUBMITTED",
         "VERIFICATION_TASK_CREATED",
         "VERIFICATION_DECIDED",
@@ -30,11 +31,14 @@
         "BUYER_DEMAND_CREATED",
         "ORDER_REQUESTED",
         "ALLOCATION_PROPOSED",
+        "APPROVAL_DECIDED",
+        "ALLOCATION_INVALIDATED",
         "ALLOCATION_APPROVED",
         "DELIVERY_MISSION_CREATED",
         "DELIVERY_MISSION_ACCEPTED",
         "DELIVERY_UPDATE_POSTED",
         "EXCEPTION_REPORTED",
+        "RECOVERY_PROPOSED",
         "RECOVERY_APPROVED",
         "DELIVERY_ACCEPTED",
         "ORDER_FULFILLED",
@@ -74,6 +78,7 @@
     "provenance": { "$ref": "../common.schema.json#/$defs/Provenance" },
     "payload": {
       "oneOf": [
+        { "$ref": "#/$defs/CropObservationIntakePayload" },
         { "$ref": "#/$defs/CropObservationSubmittedPayload" },
         { "$ref": "#/$defs/VerificationPayload" },
         { "$ref": "#/$defs/ForecastProducedPayload" },
@@ -81,6 +86,8 @@
         { "$ref": "#/$defs/BuyerDemandCreatedPayload" },
         { "$ref": "#/$defs/OrderRequestedPayload" },
         { "$ref": "#/$defs/AllocationPayload" },
+        { "$ref": "#/$defs/ApprovalDecisionPayload" },
+        { "$ref": "#/$defs/AllocationInvalidatedPayload" },
         { "$ref": "#/$defs/DeliveryMissionPayload" },
         { "$ref": "#/$defs/DeliveryUpdatePayload" },
         { "$ref": "#/$defs/ExceptionPayload" },
@@ -95,6 +102,10 @@
     }
   },
   "allOf": [
+    {
+      "if": { "properties": { "eventType": { "const": "CROP_OBSERVATION_INTAKE_DRAFTED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/CropObservationIntakePayload" } } }
+    },
     {
       "if": { "properties": { "eventType": { "const": "CROP_OBSERVATION_SUBMITTED" } } },
       "then": { "properties": { "payload": { "$ref": "#/$defs/CropObservationSubmittedPayload" } } }
@@ -122,6 +133,14 @@
     {
       "if": { "properties": { "eventType": { "enum": ["ALLOCATION_PROPOSED", "ALLOCATION_APPROVED"] } } },
       "then": { "properties": { "payload": { "$ref": "#/$defs/AllocationPayload" } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "APPROVAL_DECIDED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/ApprovalDecisionPayload" } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "ALLOCATION_INVALIDATED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/AllocationInvalidatedPayload" } } }
     },
     {
       "if": { "properties": { "eventType": { "const": "DELIVERY_MISSION_CREATED" } } },
@@ -158,7 +177,7 @@
       "then": { "properties": { "payload": { "$ref": "#/$defs/ExceptionPayload" } } }
     },
     {
-      "if": { "properties": { "eventType": { "const": "RECOVERY_APPROVED" } } },
+      "if": { "properties": { "eventType": { "enum": ["RECOVERY_PROPOSED", "RECOVERY_APPROVED"] } } },
       "then": { "properties": { "payload": { "$ref": "#/$defs/RecoveryPayload" } } }
     },
     {
@@ -199,6 +218,19 @@
     }
   ],
   "$defs": {
+    "CropObservationIntakePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intakeId", "cropBatchId", "sourceType", "status", "promptId", "adapter"],
+      "properties": {
+        "intakeId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "cropBatchId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "sourceType": { "enum": ["TEXT", "VOICE_TRANSCRIPT", "COORDINATOR_NOTE"] },
+        "status": { "const": "DRAFT" },
+        "promptId": { "const": "crop-observation-extraction-v1" },
+        "adapter": { "type": "string", "minLength": 1 }
+      }
+    },
     "CropObservationSubmittedPayload": {
       "type": "object",
       "additionalProperties": false,
@@ -207,7 +239,8 @@
         "observationId": { "$ref": "../common.schema.json#/$defs/Uuid" },
         "cropBatchId": { "$ref": "../common.schema.json#/$defs/Uuid" },
         "observedAt": { "$ref": "../common.schema.json#/$defs/UtcDateTime" },
-        "cropStage": { "type": "string", "minLength": 1 }
+        "cropStage": { "type": "string", "minLength": 1 },
+        "intakeId": { "$ref": "../common.schema.json#/$defs/Uuid" }
       }
     },
     "VerificationPayload": {
@@ -230,6 +263,7 @@
         "predictionId": { "$ref": "../common.schema.json#/$defs/Uuid" },
         "cropBatchId": { "$ref": "../common.schema.json#/$defs/Uuid" },
         "q10MarketableYield": { "$ref": "../common.schema.json#/$defs/Quantity" },
+        "committedQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
         "availableToPromise": { "$ref": "../common.schema.json#/$defs/Quantity" }
       }
     },
@@ -288,6 +322,28 @@
         }
       }
     },
+    "ApprovalDecisionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approvalId", "subjectType", "subjectId", "decision"],
+      "properties": {
+        "approvalId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "subjectType": { "enum": ["ALLOCATION", "RECOVERY"] },
+        "subjectId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "decision": { "enum": ["APPROVE", "REJECT"] }
+      }
+    },
+    "AllocationInvalidatedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allocationId", "orderId", "reason", "status"],
+      "properties": {
+        "allocationId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "orderId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "reason": { "const": "SUPPLY_CHANGED" },
+        "status": { "const": "STALE" }
+      }
+    },
     "DeliveryMissionPayload": {
       "type": "object",
       "additionalProperties": false,
@@ -300,8 +356,23 @@
         "stops": {
           "type": "array",
           "minItems": 2,
-          "items": { "$ref": "../common.schema.json#/$defs/GeoPoint" }
-        }
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["sequence", "kind", "quantity", "location"],
+            "properties": {
+              "sequence": { "type": "integer", "minimum": 1 },
+              "kind": { "enum": ["PICKUP", "DROPOFF"] },
+              "farmId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+              "cropBatchIds": { "type": "array", "uniqueItems": true, "items": { "$ref": "../common.schema.json#/$defs/Uuid" } },
+              "quantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
+              "location": { "$ref": "../common.schema.json#/$defs/GeoPoint" }
+            }
+          }
+        },
+        "estimatedDistanceKm": { "type": "number", "minimum": 0 },
+        "estimatedDurationMinutes": { "type": "integer", "minimum": 0 },
+        "estimatedArrival": { "$ref": "../common.schema.json#/$defs/UtcDateTime" }
       }
     },
     "DeliveryUpdatePayload": {
@@ -335,13 +406,15 @@
     "RecoveryPayload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["exceptionId", "approvalId", "actionType"],
+      "required": ["exceptionId", "approvalId", "actionType", "missionId"],
       "properties": {
         "exceptionId": { "$ref": "../common.schema.json#/$defs/Uuid" },
         "approvalId": { "$ref": "../common.schema.json#/$defs/Uuid" },
         "actionType": { "enum": ["REALLOCATE", "REROUTE", "RESCHEDULE", "SUBSTITUTE", "CANCEL"] },
         "missionId": { "$ref": "../common.schema.json#/$defs/Uuid" },
-        "deadline": { "$ref": "../common.schema.json#/$defs/UtcDateTime" }
+        "deadline": { "$ref": "../common.schema.json#/$defs/UtcDateTime" },
+        "previousDeadline": { "$ref": "../common.schema.json#/$defs/UtcDateTime" },
+        "proposedDeadline": { "$ref": "../common.schema.json#/$defs/UtcDateTime" }
       }
     },
     "DeliveryAcceptedPayload": {
@@ -438,6 +511,62 @@
     }
   },
   "x-harvest-event-examples": [
+    {
+      "eventId": "e2000000-0000-4000-8000-000000000001",
+      "eventType": "CROP_OBSERVATION_INTAKE_DRAFTED",
+      "occurredAt": "2026-09-04T08:01:00Z",
+      "simulationRunId": null,
+      "actorId": "a0000000-0000-4000-8000-000000000001",
+      "entityId": "24000000-0000-4000-8000-000000000001",
+      "traceId": "c2000000-0000-4000-8000-000000000001",
+      "correlationId": "d2000000-0000-4000-8000-000000000001",
+      "causationId": null,
+      "schemaVersion": "1.0",
+      "provenance": "INFERRED",
+      "payload": {"intakeId": "24000000-0000-4000-8000-000000000001", "cropBatchId": "10000000-0000-4000-8000-000000000001", "sourceType": "TEXT", "status": "DRAFT", "promptId": "crop-observation-extraction-v1", "adapter": "fixture"}
+    },
+    {
+      "eventId": "e2000000-0000-4000-8000-000000000002",
+      "eventType": "APPROVAL_DECIDED",
+      "occurredAt": "2026-09-04T08:14:00Z",
+      "simulationRunId": null,
+      "actorId": "a0000000-0000-4000-8000-000000000002",
+      "entityId": "19000000-0000-4000-8000-000000000002",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000002",
+      "causationId": "e0000000-0000-4000-8000-000000000006",
+      "schemaVersion": "1.0",
+      "provenance": "OBSERVED",
+      "payload": {"approvalId": "19000000-0000-4000-8000-000000000002", "subjectType": "ALLOCATION", "subjectId": "16000000-0000-4000-8000-000000000001", "decision": "APPROVE"}
+    },
+    {
+      "eventId": "e2000000-0000-4000-8000-000000000003",
+      "eventType": "ALLOCATION_INVALIDATED",
+      "occurredAt": "2026-09-04T08:15:00Z",
+      "simulationRunId": null,
+      "actorId": "a0000000-0000-4000-8000-000000000001",
+      "entityId": "16000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000002",
+      "causationId": "e2000000-0000-4000-8000-000000000002",
+      "schemaVersion": "1.0",
+      "provenance": "INFERRED",
+      "payload": {"allocationId": "16000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "reason": "SUPPLY_CHANGED", "status": "STALE"}
+    },
+    {
+      "eventId": "e2000000-0000-4000-8000-000000000004",
+      "eventType": "RECOVERY_PROPOSED",
+      "occurredAt": "2026-09-04T12:00:00Z",
+      "simulationRunId": null,
+      "actorId": "a0000000-0000-4000-8000-000000000004",
+      "entityId": "18000000-0000-4000-8000-000000000001",
+      "traceId": "c2000000-0000-4000-8000-000000000002",
+      "correlationId": "d0000000-0000-4000-8000-000000000002",
+      "causationId": "e0000000-0000-4000-8000-000000000011",
+      "schemaVersion": "1.0",
+      "provenance": "INFERRED",
+      "payload": {"exceptionId": "18000000-0000-4000-8000-000000000001", "approvalId": "19000000-0000-4000-8000-000000000001", "actionType": "RESCHEDULE", "missionId": "17000000-0000-4000-8000-000000000001", "previousDeadline": "2026-09-05T15:00:00Z", "proposedDeadline": "2026-09-05T17:00:00Z"}
+    },
     {
       "eventId": "e0000000-0000-4000-8000-000000000001",
       "eventType": "CROP_OBSERVATION_SUBMITTED",
@@ -586,7 +715,7 @@
       "causationId": "e0000000-0000-4000-8000-000000000007",
       "schemaVersion": "1.0",
       "provenance": "INFERRED",
-      "payload": {"missionId": "17000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "status": "AVAILABLE", "stops": [{"latitude": 13.94, "longitude": -60.96}, {"latitude": 13.91, "longitude": -60.98}]}
+      "payload": {"missionId": "17000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "status": "AVAILABLE", "stops": [{"sequence": 1, "kind": "PICKUP", "farmId": "14000000-0000-4000-8000-000000000001", "cropBatchIds": ["10000000-0000-4000-8000-000000000001"], "quantity": {"value": 120, "unit": "kg"}, "location": {"latitude": 13.94, "longitude": -60.96}}, {"sequence": 2, "kind": "DROPOFF", "quantity": {"value": 120, "unit": "kg"}, "location": {"latitude": 13.91, "longitude": -60.98}}], "estimatedDistanceKm": 4.2, "estimatedDurationMinutes": 24, "estimatedArrival": "2026-08-12T13:54:00Z"}
     },
     {
       "eventId": "e0000000-0000-4000-8000-000000000009",
@@ -601,7 +730,7 @@
       "causationId": "e0000000-0000-4000-8000-000000000008",
       "schemaVersion": "1.0",
       "provenance": "SYNTHETIC",
-      "payload": {"missionId": "17000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "status": "ASSIGNED", "transporterId": "a0000000-0000-4000-8000-000000000004", "stops": [{"latitude": 13.94, "longitude": -60.96}, {"latitude": 13.91, "longitude": -60.98}]}
+      "payload": {"missionId": "17000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "status": "ASSIGNED", "transporterId": "a0000000-0000-4000-8000-000000000004", "stops": [{"sequence": 1, "kind": "PICKUP", "farmId": "14000000-0000-4000-8000-000000000001", "cropBatchIds": ["10000000-0000-4000-8000-000000000001"], "quantity": {"value": 120, "unit": "kg"}, "location": {"latitude": 13.94, "longitude": -60.96}}, {"sequence": 2, "kind": "DROPOFF", "quantity": {"value": 120, "unit": "kg"}, "location": {"latitude": 13.91, "longitude": -60.98}}]}
     },
     {
       "eventId": "e0000000-0000-4000-8000-000000000010",

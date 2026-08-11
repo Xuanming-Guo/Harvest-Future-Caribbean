@@ -105,6 +105,12 @@ export const api = {
   async cropBatch(cropBatchId: string) {
     return unwrap(await client.GET("/v1/crop-batches/{cropBatchId}", { params: { path: { cropBatchId } } }));
   },
+  async createObservationIntake(body: ApiSchema<"CropObservationIntakeCreate">) {
+    return unwrap(await client.POST("/v1/crop-observation-intakes", {
+      params: { header: { "Idempotency-Key": newIdempotencyKey("intake") } },
+      body,
+    }));
+  },
   async submitObservation(body: ApiSchema<"CropObservationCreate">) {
     return unwrap(await client.POST("/v1/crop-observations", {
       params: { header: { "Idempotency-Key": newIdempotencyKey("observation") } },
@@ -149,6 +155,9 @@ export const api = {
   },
   async order(orderId: string) {
     return unwrap(await client.GET("/v1/orders/{orderId}", { params: { path: { orderId } } }));
+  },
+  async agentTrace(traceId: string) {
+    return unwrap(await client.GET("/v1/agent-traces/{traceId}", { params: { path: { traceId } } }));
   },
   async createOrder(body: ApiSchema<"OrderCreate">) {
     return unwrap(await client.POST("/v1/orders", {
