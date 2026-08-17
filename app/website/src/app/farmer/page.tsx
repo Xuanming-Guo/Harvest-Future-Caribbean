@@ -19,7 +19,7 @@ export default function FarmerHome() {
 
   return (
     <>
-      <PageHeader eyebrow="My farm" title={`Welcome, ${actor?.name.split(" ")[0] ?? "farmer"}`} description="Share a simple crop update, see what can safely be sold, and respond to order requests." />
+      <div data-tour="farmer-home"><PageHeader eyebrow="My farm" title={`Welcome, ${actor?.name.split(" ")[0] ?? "farmer"}`} description="Share a simple crop update, see what can safely be sold, and respond to order requests." /></div>
       {batches.error ? <ErrorState error={batches.error} /> : !batches.data ? <LoadingState /> : (
         <>
           <div className="metric-grid">
@@ -31,8 +31,8 @@ export default function FarmerHome() {
             <Card>
               <SectionTitle title="My crops" detail="Update at any time" />
               <div className="crop-grid">
-                {batches.data.items.map((batch) => (
-                  <Link href={`/crops/${batch.cropBatchId}`} className="crop-card" key={batch.cropBatchId}>
+                {batches.data.items.map((batch, index) => (
+                  <Link href={`/crops/${batch.cropBatchId}`} className="crop-card" key={batch.cropBatchId} data-tour={index === 0 ? "farmer-crop-link" : undefined}>
                     <span className="crop-symbol"><Sprout /></span>
                     <div><Badge>{batch.status}</Badge><h3>{batch.cropType}</h3><p>{batch.availableToPromise.value} kg currently safe to promise</p></div>
                     <ArrowRight size={18} />

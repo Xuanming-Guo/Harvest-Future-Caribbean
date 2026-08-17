@@ -29,14 +29,14 @@ export default function TransporterHome() {
 
   return (
     <>
-      <PageHeader eyebrow="Delivery jobs" title="Move local food with confidence" description="Accept available jobs, follow the pickup sequence and report progress or problems as they happen." actions={<div className="field"><label htmlFor="vehicle">Vehicle</label><select id="vehicle" value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}><option value="">Select a vehicle</option>{vehicles.data?.items.map((vehicle) => <option value={vehicle.vehicleId} disabled={vehicle.status !== "AVAILABLE"} key={vehicle.vehicleId}>{vehicle.label} · {vehicle.status}</option>)}</select></div>} />
+      <div data-tour="transporter-home"><PageHeader eyebrow="Delivery jobs" title="Move local food with confidence" description="Accept available jobs, follow the pickup sequence and report progress or problems as they happen." actions={<div className="field" data-tour="transporter-vehicle"><label htmlFor="vehicle">Vehicle</label><select id="vehicle" value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}><option value="">Select a vehicle</option>{vehicles.data?.items.map((vehicle) => <option value={vehicle.vehicleId} disabled={vehicle.status !== "AVAILABLE"} key={vehicle.vehicleId}>{vehicle.label} · {vehicle.status}</option>)}</select></div>} /></div>
       <div className="metric-grid">
         <Metric label="Available jobs" value={available.length} detail="Ready to accept" icon={PackageCheck} />
         <Metric label="My active jobs" value={mine.filter((mission) => mission.status !== "DELIVERED").length} detail="Currently assigned" icon={Truck} tone="blue" />
         <Metric label="Completed" value={mine.filter((mission) => mission.status === "DELIVERED").length} detail="Delivered" icon={Clock3} tone="amber" />
       </div>
       <div className="dashboard-grid">
-        <Card>
+        <Card data-tour="transporter-available">
           <SectionTitle title="Available near you" detail={`${available.length} jobs`} />
           {!available.length ? <EmptyState title="No jobs waiting" detail="New approved orders will appear automatically." /> : <div className="mission-list">{available.map((mission) => (
             <article className="mission-card" key={mission.missionId}>
@@ -45,7 +45,7 @@ export default function TransporterHome() {
             </article>
           ))}</div>}
         </Card>
-        <Card>
+        <Card data-tour="transporter-jobs">
           <SectionTitle title="My jobs" detail={`${mine.length} assigned`} />
           {!mine.length ? <EmptyState title="No active deliveries" detail="Accept an available job to begin." /> : <div className="mission-list">{mine.map((mission) => (
             <Link href={`/missions/${mission.missionId}`} className="mission-card" key={mission.missionId}>

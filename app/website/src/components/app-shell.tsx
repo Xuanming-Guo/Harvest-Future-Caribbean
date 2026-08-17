@@ -2,6 +2,7 @@
 
 import {
   ClipboardCheck,
+  Compass,
   Leaf,
   LogOut,
   Menu,
@@ -16,6 +17,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { roleHome, type ProductRole } from "@/lib/api";
+import { OnboardingGuide } from "./onboarding-guide";
 import { useSession } from "./providers";
 
 const navigation = {
@@ -55,6 +57,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { actor, ready, signOut } = useSession();
   const [open, setOpen] = useState(false);
+  const [tutorialRequest, setTutorialRequest] = useState(0);
 
   useEffect(() => {
     if (!ready || pathname === "/") return;
@@ -89,8 +92,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </nav>
         <div className="sidebar-context">
           <p className="eyebrow">Need help?</p>
-          <strong>Harvest coordination team</strong>
-          <span>Use your task page to report missing information or delivery problems.</span>
+          <strong>Learn your workspace</strong>
+          <span>Replay the short guide for your role whenever you need it.</span>
+          <button className="sidebar-tutorial-button" onClick={() => { setOpen(false); setTutorialRequest((value) => value + 1); }}>
+            <Compass size={16} />Take the tutorial
+          </button>
         </div>
       </aside>
       <div className="main-column">
@@ -108,6 +114,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </header>
         <main>{children}</main>
       </div>
+      <OnboardingGuide actor={actor} restartSignal={tutorialRequest} />
     </div>
   );
 }

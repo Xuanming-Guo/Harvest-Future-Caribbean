@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/ui";
 export default function OrdersPage() {
   const { actor } = useSession();
   return (
-    <>
+    <div data-tour="orders-workspace">
       <PageHeader
         eyebrow="Shared commitments"
         title="Orders"
@@ -18,6 +18,6 @@ export default function OrdersPage() {
         actions={actor?.role === "BUYER" ? <Link href="/marketplace" className="button"><ShoppingBasket size={17} />Find produce</Link> : undefined}
       />
       <OrderList />
-    </>
+    </div>
   );
 }

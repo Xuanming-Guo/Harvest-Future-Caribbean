@@ -6,8 +6,8 @@ export function PageHeader({ eyebrow, title, description, actions }: { eyebrow?:
   return <header className="page-header"><div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1>{title}</h1><p>{description}</p></div>{actions && <div className="page-actions">{actions}</div>}</header>;
 }
 
-export function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <section className={`card ${className}`}>{children}</section>;
+export function Card({ children, className = "", ...props }: React.ComponentPropsWithoutRef<"section">) {
+  return <section className={`card ${className}`} {...props}>{children}</section>;
 }
 
 export function SectionTitle({ title, detail }: { title: string; detail?: string }) {

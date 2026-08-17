@@ -58,7 +58,7 @@ export default function MarketplacePage() {
     <>
       <PageHeader eyebrow="Local marketplace" title="Find produce you can rely on" description="Browse quantities that farmers can safely promise, then place an order or record future demand." />
       <div className="grid marketplace-layout">
-        <div>
+        <div data-tour="marketplace-supply">
           <div className="filter-row"><label htmlFor="crop-filter">Crop</label><input id="crop-filter" value={cropType} onChange={(event) => setCropType(event.target.value.toUpperCase())} /></div>
           {listings.error ? <ErrorState error={listings.error} /> : !listings.data ? <LoadingState label="Loading local produce..." /> : !listings.data.items.length ? <EmptyState title="No produce listed yet" detail="Record your demand so coordinators and farmers can respond." /> : (
             <div className="listing-grid">
@@ -88,7 +88,7 @@ export default function MarketplacePage() {
             </Card>
           )}
         </div>
-        <Card className="sticky-card">
+        <Card className="sticky-card" data-tour="marketplace-requirement">
           <SectionTitle title="Your requirement" detail={`${actor?.name ?? "Buyer"} · ${actor?.serviceZone ?? "Delivery zone not set"}`} />
           <form className="form-grid" onSubmit={(event: FormEvent) => { event.preventDefault(); order.mutate(); }}>
             <div className="field"><label>Crop</label><input value={cropType} onChange={(event) => setCropType(event.target.value.toUpperCase())} /></div>

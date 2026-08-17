@@ -48,7 +48,7 @@ export default function SignInPage() {
         <div className="role-picker-heading"><p className="eyebrow">Demo sign in</p><h2>Who are you working as?</h2></div>
         <div className="role-grid">
           {personas.map(({ id, role, name, detail, Icon }) => (
-            <button key={id} className="role-card" onClick={() => void choose(id)} disabled={busy !== null}>
+            <button key={id} className="role-card" onClick={() => void choose(id)} disabled={!ready || busy !== null}>
               <span className="role-icon"><Icon size={22} /></span>
               <span><small>{role}</small><strong>{name}</strong><em>{detail}</em></span>
               {busy === id ? <span className="spinner" /> : <ArrowRight size={19} />}
