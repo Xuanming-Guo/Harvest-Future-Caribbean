@@ -93,7 +93,7 @@ export default function CropDetailPage() {
       <Link className="back-link" href={actor?.role === "COORDINATOR" ? "/coordinator" : "/farmer"}><ArrowLeft size={16} />Back to crops</Link>
       <PageHeader eyebrow="Crop batch" title={batch.data.cropType} description={`${batch.data.availableToPromise.value} kg can currently be promised without overcommitting.`} actions={<Badge>{batch.data.status}</Badge>} />
       <div className="grid two-column">
-        <Card>
+        <div data-tour="crop-outlook"><Card>
           <SectionTitle title="Harvest outlook" detail="Range, not a false promise" />
           {prediction.error ? <ErrorState error={prediction.error} /> : !batch.data.latestPredictionId ? (
             <p>No forecast exists yet. Save a crop update to create one.</p>
@@ -113,9 +113,9 @@ export default function CropDetailPage() {
               {canEdit && <button className="button button-secondary" disabled={refresh.isPending} onClick={() => refresh.mutate()}><RefreshCw size={16} />Refresh forecast</button>}
             </div>
           )}
-        </Card>
+        </Card></div>
         {canEdit ? (
-          <Card>
+          <div data-tour="crop-update"><Card>
             <SectionTitle title="Share a crop update" detail="Takes less than a minute" />
             <div className="form-grid agent-draft">
               <div className="field field-full"><label htmlFor="description">Describe your update</label><textarea id="description" rows={3} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="For example: About 20 kg of cucumbers are ready, but some have rain damage." /></div>
@@ -129,13 +129,13 @@ export default function CropDetailPage() {
               <div className="field field-full"><label htmlFor="notes">What have you noticed?</label><textarea id="notes" rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="For example: heavy rain, pest damage, or good growth" /></div>
               <button className="button field-full" disabled={observation.isPending}><Save size={16} />{observation.isPending ? "Saving..." : "Save crop update"}</button>
             </form>
-          </Card>
+          </Card></div>
         ) : (
           <Card><SectionTitle title="Information status" detail="Coordinator view" /><div className="info-list"><div><CalendarDays /><span><strong>Latest observation</strong><small>{batch.data.latestObservationId ? "Recorded" : "Missing"}</small></span></div><div><RefreshCw /><span><strong>Forecast</strong><small>{batch.data.latestPredictionId ? "Available" : "Missing"}</small></span></div></div></Card>
         )}
       </div>
       {canEdit && (
-        <Card className="section-gap">
+        <div className="section-gap" data-tour="crop-listing"><Card>
           <SectionTitle title="Offer produce to buyers" detail={`Up to ${batch.data.availableToPromise.value} kg safe to list`} />
           <form className="form-grid four-fields" onSubmit={(event: FormEvent) => { event.preventDefault(); listing.mutate(); }}>
             <div className="field"><label>Quantity (kg)</label><input type="number" min="0.1" max={batch.data.availableToPromise.value} step="0.1" value={listingQuantity} onChange={(event) => setListingQuantity(Number(event.target.value))} /></div>
@@ -144,7 +144,7 @@ export default function CropDetailPage() {
             <div className="field"><label>Available until</label><input type="date" value={availableUntil} onChange={(event) => setAvailableUntil(event.target.value)} /></div>
             <button className="button field-full" disabled={listing.isPending || listingQuantity > batch.data.availableToPromise.value}><Store size={16} />{listing.isPending ? "Publishing..." : "List in marketplace"}</button>
           </form>
-        </Card>
+        </Card></div>
       )}
       {(message || intake.error || observation.error || refresh.error || listing.error) && <p className={(intake.error || observation.error || refresh.error || listing.error) ? "form-error" : "form-success"}>{message ?? intake.error?.message ?? observation.error?.message ?? refresh.error?.message ?? listing.error?.message}</p>}
     </>

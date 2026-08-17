@@ -22,6 +22,24 @@ Open `http://localhost:3000`. The Product API defaults to
 needed. The root page provides a development-only role sign-in backed by
 `POST /dev/session`.
 
+## First-session tutorial
+
+After a participant signs in for the first time, the website asks whether they
+want a short tutorial. Choosing **Yes** opens a role-specific guide that moves
+through the real pages and explains the main controls. Choosing **No** opens the
+workspace immediately. Either choice is remembered for that signed-in identity,
+and the guide can always be replayed with **Take the tutorial** in the sidebar.
+
+Tutorial completion is presentation-only state stored in browser local storage
+under `harvest.onboarding.v1:<auth-subject>`. It contains no farm, order, vehicle,
+delivery, or other operational data. A future production authentication flow can
+keep the same behaviour because the key uses the authenticated subject returned
+by the Product API; the current hackathon build uses the seeded demo personas.
+
+The guide never performs an operational action. It points to the same controls a
+participant uses, while crop updates, listings, demands, orders, approvals,
+verification, and mission changes continue to go through the shared Product API.
+
 ## Product routes
 
 | Role | Routes | Main actions |
@@ -47,9 +65,9 @@ boundary.
 
 ## Shared backend and client
 
-The future mobile app will reuse this Product API and the generated client in
-`app/shared`. PostgreSQL is authoritative. Browser local storage holds only the
-short-lived demo token and actor summary, never operational records.
+The website uses the Product API through the generated client in `app/shared`.
+PostgreSQL is authoritative. Browser local storage holds only the short-lived
+demo token, actor summary, and tutorial preference, never operational records.
 
 All seeded records are demo data. The participant interface presents them as
 normal workflow records and does not describe simulated outcomes as deployed

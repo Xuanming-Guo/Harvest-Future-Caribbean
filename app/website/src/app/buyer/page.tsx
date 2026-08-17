@@ -20,7 +20,7 @@ export default function BuyerHome() {
 
   return (
     <>
-      <PageHeader eyebrow="Buyer overview" title={`Welcome, ${actor?.name ?? "buyer"}`} description="Plan local demand, confirm safe supply and follow every delivery in one place." actions={<Link href="/marketplace" className="button"><ShoppingBasket size={17} />Find local produce</Link>} />
+      <div data-tour="buyer-home"><PageHeader eyebrow="Buyer overview" title={`Welcome, ${actor?.name ?? "buyer"}`} description="Plan local demand, confirm safe supply and follow every delivery in one place." actions={<Link href="/marketplace" className="button" data-tour="buyer-marketplace-link"><ShoppingBasket size={17} />Find local produce</Link>} /></div>
       <div className="metric-grid">
         <Metric label="Open demand" value={demands.data?.items.filter((item) => item.status !== "SATISFIED" && item.status !== "CANCELLED").length ?? "-"} detail="Needs being sourced" icon={ClipboardList} />
         <Metric label="Active orders" value={orderItems.filter((item) => !["FULFILLED", "REJECTED", "CANCELLED"].includes(item.lifecycleStatus)).length} detail="In progress" icon={ShoppingBasket} tone="blue" />

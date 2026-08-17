@@ -28,22 +28,22 @@ export default function CoordinatorHome() {
 
   return (
     <>
-      <PageHeader eyebrow="Coordination tasks" title="Help the network keep moving" description="Only the missing information, approval decisions and active exceptions that need human attention." />
+      <div data-tour="coordinator-home"><PageHeader eyebrow="Coordination tasks" title="Help the network keep moving" description="Only the missing information, approval decisions and active exceptions that need human attention." /></div>
       <div className="metric-grid">
         <Metric label="Decisions waiting" value={approvals.data.items.length} detail="Assigned to you" icon={ClipboardCheck} />
         <Metric label="Verification queue" value={verification.data.items.length} detail="Crop updates to check" icon={Sprout} tone="amber" />
         <Metric label="Open exceptions" value={openExceptions.length} detail="Recovery needed" icon={AlertTriangle} tone="red" />
       </div>
       <div className="dashboard-grid">
-        <ApprovalList />
-        <Card>
+        <div data-tour="coordinator-approvals"><ApprovalList /></div>
+        <Card data-tour="coordinator-verification">
           <SectionTitle title="Verification queue" detail={`${verification.data.items.length} open`} />
           {!verification.data.items.length ? <EmptyState title="Crop updates are verified" detail="New farmer observations will appear here automatically." /> : <div className="task-list">{verification.data.items.map((task) => (
             <article className="task-row" key={task.taskId}><div><Badge tone="pending">Verification</Badge><h3>{task.summary}</h3><Link className="text-link" href={`/crops/${task.cropBatchId}`}>Review crop evidence <ArrowRight size={15} /></Link></div><div className="inline-actions"><button className="button button-danger" disabled={decideVerification.isPending} onClick={() => decideVerification.mutate({ taskId: task.taskId, decision: "REQUEST_CHANGES" })}><X size={16} />Request changes</button><button className="button" disabled={decideVerification.isPending} onClick={() => decideVerification.mutate({ taskId: task.taskId, decision: "VERIFY" })}><Check size={16} />Verify</button></div></article>
           ))}</div>}
         </Card>
       </div>
-      <Card className="section-gap">
+      <Card className="section-gap" data-tour="coordinator-exceptions">
         <SectionTitle title="Active exceptions" detail={`${openExceptions.length} open`} />
         {!openExceptions.length ? <EmptyState title="No active exceptions" detail="Delivery and supply problems will appear here." /> : <div className="exception-list">{openExceptions.map((exception) => (
           <button type="button" className="exception-row" onClick={() => setSelectedExceptionId(exception.exceptionId)} key={exception.exceptionId}><span className="exception-icon"><AlertTriangle /></span><div><Badge tone={exception.severity.toLowerCase()}>{exception.severity}</Badge><h3>{titleCase(exception.exceptionType)}</h3><p>{exception.description}</p><small>Reported {formatDate(exception.reportedAt)}</small></div><Badge>{exception.status}</Badge></button>
@@ -52,7 +52,7 @@ export default function CoordinatorHome() {
       </Card>
       <Card className="section-gap">
         <SectionTitle title="Farm verification" detail="Permitted farms" />
-        <div className="verification-grid">{batches.data.items.map((batch) => <Link href={`/crops/${batch.cropBatchId}`} key={batch.cropBatchId}><CheckCircle2 /><span><strong>{titleCase(batch.cropType)}</strong><small>{batch.availableToPromise.value} kg safe to promise</small></span><ArrowRight size={16} /></Link>)}</div>
+        <div className="verification-grid">{batches.data.items.map((batch, index) => <Link href={`/crops/${batch.cropBatchId}`} key={batch.cropBatchId} data-tour={index === 0 ? "coordinator-crop-link" : undefined}><CheckCircle2 /><span><strong>{titleCase(batch.cropType)}</strong><small>{batch.availableToPromise.value} kg safe to promise</small></span><ArrowRight size={16} /></Link>)}</div>
       </Card>
     </>
   );

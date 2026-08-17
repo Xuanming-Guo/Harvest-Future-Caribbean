@@ -1,10 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import React from "react";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import { Badge } from "@/components/ui";
 import { roleHome } from "@/lib/api";
 import { compactId, formatPercent, titleCase } from "@/lib/format";
+import { clearOnboardingStatus, readOnboardingStatus, roleTutorials, writeOnboardingStatus } from "@/lib/onboarding";
+
+beforeEach(() => window.localStorage.clear());
 
 describe("website presentation helpers", () => {
   it("formats contract statuses without changing their value", () => {
@@ -23,5 +26,28 @@ describe("website presentation helpers", () => {
     expect(roleHome("BUYER")).toBe("/buyer");
     expect(roleHome("TRANSPORTER")).toBe("/transporter");
     expect(roleHome("COORDINATOR")).toBe("/coordinator");
+  });
+
+  it("stores the tutorial choice separately for each signed-in identity", () => {
+    const farmer = { authSubject: "farmer-ana" };
+    const buyer = { authSubject: "buyer-hotel" };
+
+    expect(readOnboardingStatus(farmer)).toBeNull();
+    writeOnboardingStatus(farmer, "skipped");
+    writeOnboardingStatus(buyer, "completed");
+
+    expect(readOnboardingStatus(farmer)).toBe("skipped");
+    expect(readOnboardingStatus(buyer)).toBe("completed");
+    clearOnboardingStatus(farmer);
+    expect(readOnboardingStatus(farmer)).toBeNull();
+    expect(readOnboardingStatus(buyer)).toBe("completed");
+  });
+
+  it("provides a focused tutorial for every product role", () => {
+    expect(Object.keys(roleTutorials)).toEqual(["FARMER", "BUYER", "TRANSPORTER", "COORDINATOR"]);
+    for (const tutorial of Object.values(roleTutorials)) {
+      expect(tutorial.steps.length).toBeGreaterThanOrEqual(4);
+      expect(tutorial.steps.every((step) => step.target.startsWith('[data-tour="'))).toBe(true);
+    }
   });
 });
