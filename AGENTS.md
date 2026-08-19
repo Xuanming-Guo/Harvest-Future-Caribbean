@@ -19,11 +19,14 @@ smallest coherent implementation that proves the end-to-end workflow.
 4. [`docs/architecture.md`](docs/architecture.md).
 5. [`docs/api_info.md`](docs/api_info.md) before implementing or calling an
    API, event, simulation effect, or model interface.
-6. [`docs/agent_workflows.md`](docs/agent_workflows.md) before changing agent
+6. [`docs/simulation_api_local_testing.md`](docs/simulation_api_local_testing.md)
+   before changing, testing, or consuming saved simulation runs, replay,
+   run-scoped snapshots, SSE, or control-room integration.
+7. [`docs/agent_workflows.md`](docs/agent_workflows.md) before changing agent
    roles, prompt context, text-model providers, or human approval boundaries.
-7. The README for the area being changed.
-8. [`contracts/README.md`](contracts/README.md) and any relevant contracts.
-9. [`docs/roadmap.md`](docs/roadmap.md) for current priorities.
+8. The README for the area being changed.
+9. [`contracts/README.md`](contracts/README.md) and any relevant contracts.
+10. [`docs/roadmap.md`](docs/roadmap.md) for current priorities.
 
 Use [`docs/context.md`](docs/context.md) for deeper background. It contains
 brainstorming and long-term ideas, so do not treat every item as current scope.

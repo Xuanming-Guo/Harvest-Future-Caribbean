@@ -107,6 +107,7 @@ export async function idempotent<T>(
       requestHash,
       statusCode,
       responseBody: response as Prisma.InputJsonValue,
+      simulationRunId: request.actor.simulationRunId,
     },
   });
   return reply.code(statusCode).send(response);

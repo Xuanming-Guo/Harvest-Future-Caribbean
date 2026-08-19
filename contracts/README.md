@@ -9,16 +9,14 @@ contract here.
 
 ## Contract locations
 
-- [`openapi.yaml`](openapi.yaml): public Product API and internal observable
-  simulation/result ingestion.
+- [`openapi.yaml`](openapi.yaml): public Product API, saved simulation runs,
+  replay, paired results, snapshot, and SSE operations.
 - [`common.schema.json`](common.schema.json): IDs, quantities, money, location,
   roles, provenance, pagination, and RFC 7807 errors.
 - [`events/event-envelope.schema.json`](events/event-envelope.schema.json):
   event envelope and typed payload validation.
 - [`events/EVENT_CATALOGUE.md`](events/EVENT_CATALOGUE.md): event purpose and
   deterministic simulation reaction.
-- [`simulation/openapi.yaml`](simulation/openapi.yaml): internal FastAPI run,
-  command, observable-world, and paired-run service.
 - [`model/openapi.yaml`](model/openapi.yaml) and
   [`model/yield-prediction.schema.json`](model/yield-prediction.schema.json):
   internal yield-prediction request/response.
@@ -46,3 +44,8 @@ code. Resolve the contract first.
 The Product API is the only gateway for user-visible operational changes.
 Neither the simulation nor the model may use a contract as justification to
 write directly to Product API storage.
+
+The simulation engine is a TypeScript workspace package called in process by
+Fastify. It has no second HTTP contract or port. Playback controls operate on
+the immutable frames returned by the Product API rather than sending run
+commands.

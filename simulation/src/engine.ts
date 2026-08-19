@@ -55,6 +55,13 @@ export type PolicyName = 'BASELINE' | 'HARVEST';
 export type RunStatus = 'READY' | 'RUNNING' | 'PAUSED' | 'COMPLETED' | 'FAILED';
 
 export interface EngineOptions {
+  /**
+   * Optional storage identity supplied by the Product API.
+   *
+   * The engine still consumes its deterministic run-id draw so supplying this
+   * value cannot shift any scenario/entity identifiers or random streams.
+   */
+  runId?: string;
   scenarioId: string;
   policy: PolicyName;
   seed: number;
@@ -206,9 +213,11 @@ export class SimulationEngine {
     this.endsAt = this.startsAt + this.scenario.durationDays * DAY_MS;
     this.clock = this.startsAt;
 
-    // The run id is drawn from the seeded stream, so a rerun of the same seed
-    // reproduces it. That is what makes two runs comparable artefact-for-artefact.
-    this.runId = this.ids.next();
+    // Always consume the deterministic id draw. The Product API may replace
+    // the public/storage identity, but doing so must not shift entity ids or
+    // any other seeded output inside the run.
+    const deterministicRunId = this.ids.next();
+    this.runId = options.runId ?? deterministicRunId;
 
     this.world = this.scenario.build({ random: this.random, ids: this.ids, startsAt: this.startsAt });
 

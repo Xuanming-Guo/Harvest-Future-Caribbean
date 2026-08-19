@@ -27,9 +27,15 @@ rather than a shortcut:
   what makes the baseline-versus-Harvest comparison something you can
   demonstrate rather than describe.
 
-`src/lib/run.ts` is the seam. When the simulation service described in
-`contracts/simulation/openapi.yaml` exists, `buildTimeline` becomes a `fetch`
-and nothing above it changes.
+`src/lib/run.ts` is the seam. Issue #29 now provides saved-run and timeline
+endpoints on the Product API; issue #30 will make `buildTimeline` call those
+endpoints without changing the playback components above it.
+
+The issue #29 backend can be tested independently using
+[`docs/simulation_api_local_testing.md`](../../docs/simulation_api_local_testing.md).
+Until issue #30 lands, an empty run-scoped operational snapshot and an idle
+run-scoped SSE stream are expected because simulated participants are not yet
+calling the Product API.
 
 ## Event injection
 

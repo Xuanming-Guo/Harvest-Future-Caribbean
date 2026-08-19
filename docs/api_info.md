@@ -1,7 +1,7 @@
 # Product API, events, and shared contracts
 
 This is the implementation guide for connecting Harvest's Product API,
-website, mobile app, simulation, control room, and yield model. Wire validation
+website, simulation, control room, and yield model. Wire validation
 is authoritative in [`contracts/`](../contracts/); this guide explains who uses
 each operation and what it must cause.
 
@@ -17,19 +17,20 @@ actor-targeted approval, vehicle, verification, delivery mission, exception and
 delivery-acceptance operations described below. Issue #6 adds the in-process
 agent coordinator, editable observation intake, and safe trace read operation.
 
-The operations snapshot, public SSE, polished trace viewer, simulation-run, observable
-world, paired-run and simulation-ingestion operations remain agreed **planned
-contracts only**. The Product API now serves role-filtered trace data, but does
-not expose an agent laboratory in the participant website. The remaining
-planned operations will be implemented with the separate
-simulation engine and simulation/control-room frontend, whose development port
-is reserved as `3002`. Retaining a path in OpenAPI does not imply that its
-runtime exists today.
+Issue #29 adds saved deterministic simulation runs, immutable replay timelines,
+paired runs, role/run-scoped operational snapshots, and cursor-based SSE to the
+same Fastify Product API. The Product API executes the existing TypeScript
+simulation engine in process and stores only observable replay artefacts. Issue
+#30 will connect simulated participant cycles and the control-room interface to
+these operations; the participant website does not expose a simulation page.
+Use [`simulation_api_local_testing.md`](simulation_api_local_testing.md) for the
+copy-ready localhost requests, expected seed-42 values and current issue #29/#30
+boundary.
 
 ## Canonical architecture
 
 ```text
-Website / Mobile / Harvest-mode simulated actor
+Website / future Harvest-mode simulated actor
                     |
                     | REST command/query
                     v
@@ -41,18 +42,17 @@ Website / Mobile / Harvest-mode simulated actor
           +---------+---------+
           |                   |
           v                   v
-      SSE clients       Simulation engine
- Website / Mobile /     deterministic event handler
+      SSE clients       TypeScript simulation engine
+ Website / future      deterministic run execution
  3D Control Room               |
                                v
-                    Future actor schedules, routes,
-                    observable world and metrics
+                    Immutable observable replay
 ```
 
 - The Product API is a standalone TypeScript/Node Fastify service.
-- Simulation and model are separate Python FastAPI services.
+- Saved simulation execution runs in the Fastify process; hidden truth remains
+  owned by the simulation package and is never stored in Product API records.
 - The Next.js website uses a generated TypeScript Product API client.
-- The Expo React Native app uses the same generated TypeScript client.
 - PostgreSQL/Supabase is accessed only by the Product API.
 - Agents run in the Product API runtime for the hackathon MVP.
 - Commands and queries use REST JSON under `/v1`; live updates use SSE.
@@ -65,7 +65,7 @@ Website / Mobile / Harvest-mode simulated actor
 | Product API | Farms and permissions; observations; crop batches; validated predictions; listings; demand; orders; allocations; reservations; approvals; deliveries; exceptions; traces; event log | Simulation hidden truth or model artefacts |
 | Simulation | Clock; seed; scenario; hidden crop truth; disruptions; actor schedules; baseline and Harvest policies; paired initial state | Product operational records or human credentials |
 | Model | Features; inference; model versions; evaluation; model artefacts | Inventory, reservations, ATP, orders, or delivery state |
-| Website/mobile | Local presentation, cache, optimistic UI, and navigation state | Authoritative operational or simulation state |
+| Website/control room | Local presentation, cache, playback position, and navigation state | Authoritative operational or simulation state |
 
 Hidden crop yield, future disruptions, future actor decisions, and other
 scenario truth must never appear in Product API responses, public events,
@@ -77,15 +77,13 @@ scenario event makes them observable.
 - People use a Supabase-compatible bearer JWT. Middleware derives `actorId`
   and one of `FARMER`, `BUYER`, `TRANSPORTER`, `COORDINATOR`, `OPERATIONS`, or
   `ADMIN`; a request body cannot override that identity.
-- The simulation and model use rotated internal service bearer tokens.
-- A Harvest-mode simulated user is given a synthetic `actorId`, human role,
+- A future Harvest-mode simulated user is given a synthetic `actorId`, human role,
   and `simulationRunId` by authentication middleware. It then sends exactly the
   same public request body as the corresponding real user.
 - A baseline-mode actor never calls Harvest coordination operations. Baseline
   policy acts inside the simulation and publishes only allow-listed observable
   run events for visualisation and comparison.
-- Internal ingestion under `/internal/v1` is never exposed to website/mobile
-  clients.
+- Saved runs do not use a second service token or an internal ingestion API.
 
 For example, a real farmer and a Harvest-mode simulated farmer submit the same
 crop-observation JSON:
@@ -148,8 +146,7 @@ scope, not only the role name.
 - Response: a role-filtered page of observable crop batches with latest safe
   prediction IDs, ATP, provenance, and latest verification status.
 - Product state/event and simulation effect: none; this is a read projection.
-- Consumers: operations supply table, Model Lab selector, and future mobile
-  crop lists.
+- Consumers: farmer crop lists and authorised technical evidence views.
 
 #### `POST /v1/crop-observation-intakes`
 
@@ -163,7 +160,7 @@ scope, not only the role name.
 - Product state/event: store a non-binding draft and emit
   `CROP_OBSERVATION_INTAKE_DRAFTED`. Do not update the batch, forecast, ATP,
   listing, order, or simulation truth.
-- Consumers: the farmer crop form and future mobile form.
+- Consumers: the farmer crop form.
 - Rules/failures: source text is limited to 4,000 characters. The caller must
   review and explicitly submit the structured observation separately.
 
@@ -223,7 +220,7 @@ scope, not only the role name.
   snapshot, version, interval, confidence, warnings, provenance, and optional
   accepted-outcome evaluation.
 - Product state/event and simulation effect: none.
-- Consumers: Model Lab and crop evidence panels. Website/mobile never call the
+- Consumers: technical evidence and crop evidence panels. The website never calls the
   internal model endpoint directly and never receive model artefacts or hidden
   simulation truth.
 
@@ -260,7 +257,7 @@ scope, not only the role name.
   and coordinator verification status. Exact farm coordinates are never part
   of this projection.
 - Product state/event and simulation effect: none.
-- Consumers: buyer marketplace detail and future mobile listing detail.
+- Consumers: buyer marketplace detail.
 
 #### `GET /v1/market-opportunities`
 
@@ -269,7 +266,7 @@ scope, not only the role name.
   zone, optional maximum price, and opportunity ID. Buyer identity and exact
   delivery coordinates are deliberately omitted.
 - Product state/event and simulation effect: none.
-- Consumers: farmer home and future farmer mobile opportunity view.
+- Consumers: farmer home opportunity view.
 
 #### `POST /v1/listings`
 
@@ -530,89 +527,105 @@ scope, not only the role name.
   assembled prompts, credentials, private chain-of-thought, hidden truth, or
   evidence the caller cannot access.
 
-### Planned operational and live views (not served by Issue #8)
-
-Every operation in this section and the planned simulation/internal-ingestion
-sections is marked `x-harvest-status: planned` in OpenAPI. Product clients must
-not call these ten operations until their separate runtime issues land.
+### Operational and live views
 
 #### `GET /v1/operations/snapshot`
 
 - Callers: coordinator, operations, admin; run-scoped control room.
-- Request: optional `simulationRunId`.
+- Request: optional `simulationRunId`. A run-scoped actor is always forced to
+  its authenticated run. Only operations/admin may explicitly select a run.
 - Response: generation time and role-filtered counts/IDs for supply, demand,
   order states, active missions, and open exceptions.
 - Product state/event: none.
 - Simulation effect: none.
 - Consumers: operations dashboard and initial control-room projection.
-- Rules/failures: snapshot and later SSE stream must use the same run/scope.
+- Rules/failures: omitting `simulationRunId` selects real/unscoped records.
+  Snapshot and SSE use the same run boundary and never combine real records or
+  records from two runs.
 
 #### `GET /v1/events/stream`
 
-- Callers: authenticated website/mobile clients; run-scoped simulation and 3D
+- Callers: authenticated website clients; run-scoped simulation and 3D
   control room.
 - Request: optional `simulationRunId`; optional `Last-Event-ID` header.
-- Response: `text/event-stream` frames where `id` is `eventId`, `event` is
-  `eventType`, and `data` is the validated event envelope.
+- Response: `text/event-stream` frames where `id` is the monotonic decimal
+  database cursor, `event` is `eventType`, and `data` is the validated event
+  envelope containing its UUID `eventId`.
 - Product state/event: read-only replay then live tail of the append-only log.
 - Simulation effect: Harvest simulation handlers deterministically schedule
   documented future effects.
-- Consumers: operations, mobile notifications/state cache, 3D control room,
+- Consumers: website state updates, 3D control room,
   trace viewer, benchmark UI, Harvest simulation policy.
-- Rules/failures: stream is role/run-filtered. An expired/invalid cursor returns
-  `409`; client refreshes snapshot, stores the new boundary, and reconnects.
+- Rules/failures: stream is role/run-filtered. With no cursor it replays all
+  retained visible events. A malformed cursor or one beyond the retained log
+  returns `409`; reconnecting after cursor `N` starts strictly after `N`.
 
-### Planned simulation gateway (not served by Issue #8)
+### Saved simulation runs and replay
 
-The future Product API gateway will expose these operations to the separate
-control room. It will validate and authorise them, call the internal
-[simulation API](../contracts/simulation/openapi.yaml), and return observable
-projections. It must never copy hidden truth into Product API storage.
+The Product API calls the deterministic TypeScript simulation package in
+process, assigns a unique storage run ID, and persists an immutable observable
+timeline. The simulation still owns its seed, clock and hidden truth. Only the
+safe scene, replay frames, concise decisions, metrics, evidence label and
+provenance are stored. Replay reads never execute a new simulation or LLM call.
+
+#### `GET /v1/simulation-scenarios`
+
+- Callers: operations/admin/control-room operator.
+- Response: safe scenario metadata, current policies, supported decision modes,
+  islands, duration and provenance. Saint Lucia is the only current island;
+  issue #31 owns regional generation.
+
+#### `GET /v1/simulation-runs`
+
+- Callers: operations/admin/control-room operator.
+- Request: optional scenario, policy, status, cursor and limit filters.
+- Response: saved-run metadata and metrics without the large replay frames.
+- Rules/failures: newest first; cursor is opaque to clients.
 
 #### `POST /v1/simulation-runs`
 
 - Callers: operations/admin/control-room operator.
-- Request: `scenarioId`, `policy` (`BASELINE`/`HARVEST`), integer `seed`, speed.
-- Response: run ID, inputs, `READY`, observable clock, creation time.
-- Product state/event: store run metadata/reference; ask simulation to create
-  deterministic state.
-- Simulation effect: initialise clock, actors, schedule and hidden truth from
-  scenario/seed; do not advance time.
+- Request for a new run: `scenarioId`, policy, integer seed, `decisionMode`,
+  island scope and optional deterministic disruptions. A derived request sends
+  only a completed `derivedFromRunId` and one or more additional disruptions.
+- Response: completed saved-run metadata, metrics, frame/decision counts and
+  explicit synthetic evidence labels.
+- Product state/event: store `CREATING`, execute the whole run synchronously,
+  validate the observable artefact for hidden-truth leakage, then store
+  `COMPLETED` or `FAILED`.
+- Simulation effect: initialise and execute from scenario/seed. A derived run
+  inherits immutable inputs and never edits its source.
 - Consumers: 3D control room and benchmark setup.
-- Rules/failures: seed/scenario/policy are immutable after creation.
+- Rules/failures: seed/scenario/policy/scope are immutable. `LLM_ASSISTED`
+  returns a clear configuration/not-implemented conflict until issue #30; it
+  never silently runs deterministic policy.
 
 #### `GET /v1/simulation-runs/{runId}`
 
 - Callers: operations/admin/control room and benchmark viewer.
 - Request: run UUID.
-- Response: policy, seed, speed, status, observable time, creation time.
+- Response: immutable inputs, status, metrics, evidence/provenance, counts,
+  source-run reference and failure information without frames or hidden digest.
 - Product state/event: none.
 - Simulation effect: none.
-- Consumers: run controls/status and benchmark progress.
+- Consumers: saved-run picker and benchmark progress.
 - Rules/failures: response cannot include future queue or hidden scenario state.
 
-#### `POST /v1/simulation-runs/{runId}/commands`
+#### `GET /v1/simulation-runs/{runId}/timeline`
 
-- Callers: authorised control-room operator.
-- Request: one typed command: `START`, `PAUSE`, `RESUME`, `RESET`; `SPEED` with
-  speed; `REWIND` with target time; or `INJECT` with allow-listed disruption,
-  schedule, affected IDs, and public description.
-- Response: command/run IDs, type, `ACCEPTED`, and accepted time.
-- Product state/event: store auditable command receipt and proxy it.
-- Simulation effect: deterministic state-machine action. Rewind reconstructs
-  from seed/checkpoint/event history. Injection schedules a future effect and
-  never edits past truth.
-- Consumers: 3D controls, timeline, scenario controls.
-- Rules/failures: invalid command/state is `409`; illegal time/speed/injection
-  is `422`; same idempotency key never applies twice.
+- Callers: operations/admin/control room.
+- Response: evidence label, provenance note, static scene and the complete
+  ordered observable frame array.
+- Product state/simulation effect: none. Playback position, pause, speed,
+  rewind and reset are local array navigation and never API commands.
+- Rules/failures: only completed runs are replayable.
 
 #### `GET /v1/simulation-runs/{runId}/world`
 
 - Callers: control room, operations/admin.
-- Request: run UUID.
-- Response: observable time, actors/roles/positions/activities, active routes,
-  and disruptions already observed.
-- Product state/event: none; gateway retrieves the allow-listed projection.
+- Request: run UUID and required zero-based `frameIndex`.
+- Response: run ID, frame index/count and exactly one saved observable frame.
+- Product state/event: none; this reads JSON already stored for the run.
 - Simulation effect: none.
 - Consumers: 3D map/control room.
 - Rules/failures: schema rejects hidden yields, quality, readiness, future
@@ -621,11 +634,12 @@ projections. It must never copy hidden truth into Product API storage.
 #### `POST /v1/paired-runs`
 
 - Callers: operations/admin/benchmark operator.
-- Request: `scenarioId` and seed.
-- Response: pair ID, baseline and Harvest run IDs, seed, `READY`.
-- Product state/event: store pair reference and ask simulation to create both.
-- Simulation effect: clone identical initial scenario/random streams, changing
-  only baseline versus Harvest policy.
+- Request: scenario, seed, deterministic decision mode, island scope and
+  optional disruptions.
+- Response: completed pair, unique baseline/Harvest run IDs, aggregate metrics,
+  signed deltas and synthetic evidence label.
+- Product state/simulation effect: create two immutable saved runs with exactly
+  the same scenario, seed, scope and disruptions, changing only policy.
 - Consumers: benchmark setup/progress.
 - Rules/failures: reject unavailable scenario or inconsistent pair creation;
   the two policies cannot have different initial inputs.
@@ -634,50 +648,23 @@ projections. It must never copy hidden truth into Product API storage.
 
 - Callers: benchmark viewer, operations/admin.
 - Request: pair UUID.
-- Response: pair/run IDs, seed, status, and baseline/Harvest aggregate result
-  after completion.
+- Response: pair inputs, run IDs, status and stored baseline/Harvest comparison.
 - Product state/event: none.
 - Simulation effect: none.
 - Consumers: benchmark website, Judge Mode, pitch dashboard.
 - Rules/failures: no result is fabricated while incomplete; metrics are labelled
   simulated and trace back to run IDs.
 
-### Planned internal ingestion (not served by Issue #8)
-
-#### `POST /internal/v1/simulation-events`
-
-- Caller: simulation service token only.
-- Request/response: one complete `EventEnvelope`; receipt is `ACCEPTED` or
-  `DUPLICATE` for its `eventId`.
-- Product state/event: validate allow-listed observable payload and run; append
-  once to the event log/projection. This does not permit arbitrary operational
-  mutation.
-- Simulation effect: none (it originated there); correlation prevents echo.
-- Consumers: observable world/control-room projections and run timeline.
-- Rules/failures: reject hidden fields, real-world/no-run context, unknown
-  schema versions, events from a different run token, and mismatched payload.
-
-#### `POST /internal/v1/benchmark-results`
-
-- Caller: simulation service token only after both paired runs complete.
-- Request: pair and run IDs, baseline/Harvest aggregate metrics, calculation
-  time. Response: ingestion receipt.
-- Product state/event: validate pair identity, store one aggregate result, emit
-  `BENCHMARK_RESULT_RECORDED`.
-- Simulation effect: none.
-- Consumers: benchmark website and Judge Mode.
-- Rules/failures: reject unpaired IDs, incomplete runs, invalid rates/units, or
-  conflicting replays.
 
 ## Interface-to-operation map
 
 | Interface | Reads | Writes/actions | Live events |
 |---|---|---|---|
-| Farmer website/future mobile | Owned crop batches, prediction, participating orders and missions | Crop observation, forecast request, safe listing, own approval decision | Crop/forecast/listing/allocation/order/delivery outcomes |
-| Buyer website/future mobile | Listings, owned demand/orders, relevant approval and delivery | Buyer demand, order, own approval decision, delivery acceptance | Demand/allocation/mission/delivery/order outcomes |
-| Transporter website/future mobile | Available and assigned mission detail | Mission acceptance, delivery updates, exception | Mission/update/exception/recovery/order outcome |
-| Coordinator website/future mobile | Permitted crops, relevant orders, targeted approvals and exceptions | Approval decision, verified update, exception escalation | Scoped operational events |
-| Future 3D control room | Run, observable world, snapshot | Run commands | Run-scoped operational and observable simulation events |
+| Farmer website | Owned crop batches, prediction, participating orders and missions | Crop observation, forecast request, safe listing, own approval decision | Crop/forecast/listing/allocation/order/delivery outcomes |
+| Buyer website | Listings, owned demand/orders, relevant approval and delivery | Buyer demand, order, own approval decision, delivery acceptance | Demand/allocation/mission/delivery/order outcomes |
+| Transporter website | Available and assigned mission detail | Mission acceptance, delivery updates, exception | Mission/update/exception/recovery/order outcome |
+| Coordinator website | Permitted crops, relevant orders, targeted approvals and exceptions | Approval decision, verified update, exception escalation | Scoped operational events |
+| Future 3D control room | Saved runs, timelines, individual frames and snapshot | Create run, derived run or paired run | Run-scoped operational events |
 | Future benchmark view | Paired-run status/result | Create paired run | Benchmark result and run progress |
 | Future trace/evidence view | Agent trace and relevant entity detail | None | Trace-linked events |
 | Harvest simulated farmer | Same crop/listing/approval operations as farmer | Same request bodies as farmer | Run-scoped events |
@@ -753,14 +740,14 @@ For each SSE event, the simulation must:
 
 1. Validate the envelope and event-specific payload.
 2. Ignore an already-applied `eventId`.
-3. Persist the last fully applied SSE ID before acknowledging progress.
+3. Persist the last fully applied monotonic SSE cursor before acknowledging progress.
 4. Ignore feedback whose correlation/causation shows it originated from the
    same already-applied simulation action.
 5. Apply only the effect in the table/catalogue, deterministically from current
    state, run seed, and event data.
 6. Schedule future effects; never rewrite past state or hidden crop truth.
-7. Publish only allow-listed observable simulation events through
-   `POST /internal/v1/simulation-events`.
+7. Publish only allow-listed operational events through the authenticated
+   Product API operations used by the simulated participant.
 
 On disconnect, reconnect with `Last-Event-ID`. If an event arrives again, step
 2 prevents a second schedule/metric mutation. If retention has expired and the
@@ -797,7 +784,7 @@ directly mutates inventory, reserves supply, or makes a binding commitment.
 
 ## Contract use in implementations
 
-- Generate the website and mobile TypeScript client from
+- Generate the website and control-room TypeScript client from
   `contracts/openapi.yaml`; keep no hand-written competing payload types.
 - Generate/validate Python simulation and model types from their OpenAPI files
   and the shared JSON Schemas.

@@ -19,6 +19,7 @@ export interface AuthActor {
   defaultLatitude: number | null;
   defaultLongitude: number | null;
   serviceZone: string | null;
+  simulationRunId: string | null;
 }
 
 declare module "fastify" {
@@ -42,6 +43,7 @@ function actorView(actor: Actor, _payload: JWTPayload): AuthActor {
     defaultLatitude: actor.defaultLatitude,
     defaultLongitude: actor.defaultLongitude,
     serviceZone: actor.serviceZone,
+    simulationRunId: actor.simulationRunId,
   };
 }
 

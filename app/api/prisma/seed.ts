@@ -11,6 +11,7 @@ const ids = {
   buyer: "a0000000-0000-4000-8000-000000000002",
   coordinator: "a0000000-0000-4000-8000-000000000003",
   transporter: "a0000000-0000-4000-8000-000000000004",
+  operations: "a0000000-0000-4000-8000-000000000006",
   farmOne: "14141414-1414-4414-8414-141414141414",
   farmTwo: "14141414-1414-4414-8414-141414141415",
   batchOne: "11111111-1111-4111-8111-111111111111",
@@ -53,6 +54,9 @@ async function main() {
     prisma.cropObservationIntake.deleteMany(),
     prisma.traceStep.deleteMany(),
     prisma.domainEvent.deleteMany(),
+    prisma.simulationActorMapping.deleteMany(),
+    prisma.pairedRun.deleteMany(),
+    prisma.simulationRun.deleteMany(),
     prisma.agentTrace.deleteMany(),
     prisma.order.deleteMany(),
     prisma.buyerDemand.deleteMany(),
@@ -71,6 +75,7 @@ async function main() {
     [ids.buyer, "buyer-hotel", "Bay Gardens Hotel", "BUYER"],
     [ids.coordinator, "coordinator-maya", "Maya Charles", "COORDINATOR"],
     [ids.transporter, "transporter-daniel", "Daniel Felix", "TRANSPORTER"],
+    [ids.operations, "operations-demo", "Harvest Operations", "OPERATIONS"],
   ] as const;
 
   for (const [id, authSubject, name, role] of actors) {

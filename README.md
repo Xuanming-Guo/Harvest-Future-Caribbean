@@ -15,7 +15,7 @@ and better future forecasts.
 
 | Area | Purpose |
 | --- | --- |
-| [`app/`](app/) | Product API, website, control room, mobile experiences, and shared client assets |
+| [`app/`](app/) | Product API, website, control room, and shared client assets |
 | [`simulation/`](simulation/) | Paired baseline and Harvest-enabled food-system simulations |
 | [`model/`](model/) | Harvest-estimation features, training, evaluation, and inference |
 | [`contracts/`](contracts/) | Source of truth for APIs, events, and model interfaces |
@@ -37,7 +37,8 @@ seeds the labelled Saint Lucia counterfactual scenario, and runs the Product
 API at `http://localhost:3001` plus the website at `http://localhost:3000`.
 See [`app/api/README.md`](app/api/README.md) and
 [`app/website/README.md`](app/website/README.md) for configuration and route
-details.
+details. The copy-ready saved-run API checks and their expected seed-42 values
+are in [`docs/simulation_api_local_testing.md`](docs/simulation_api_local_testing.md).
 
 The website on `3000` is only the real-user product interface. The separate
 simulation control room lives on port `3002` and is started on its own:
@@ -47,7 +48,11 @@ npm run control-room
 ```
 
 It needs no database and no Product API — it runs the simulation in the browser
-and replays the result. See [`app/control-room/README.md`](app/control-room/README.md).
+and replays the result. Issue #29 has added saved-run Product API endpoints for
+issue #30 to connect to this interface. See
+[`app/control-room/README.md`](app/control-room/README.md) for the current UI and
+[`docs/simulation_api_local_testing.md`](docs/simulation_api_local_testing.md)
+for the API foundation that will replace its browser-run seam.
 
 To run a scenario headlessly instead, without any interface:
 
@@ -57,7 +62,7 @@ npm run sim -- --paired --seed 42
 
 ## Architecture at a glance
 
-Website, mobile, and simulated users all interact through the same Product API.
+Website and simulated users all interact through the same Product API.
 The Product API owns user-visible operational state. The simulation owns its
 clock, scenarios, random seeds, and hidden ground truth. The model owns model
 features, predictions, versions, and artefacts. Communication between these

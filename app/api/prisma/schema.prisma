@@ -24,6 +24,93 @@ enum Provenance {
   MODEL_PREDICTED
 }
 
+enum SimulationRunStatus {
+  CREATING
+  COMPLETED
+  FAILED
+}
+
+enum SimulationDecisionMode {
+  DETERMINISTIC
+  LLM_ASSISTED
+}
+
+enum PairedRunStatus {
+  CREATING
+  COMPLETED
+  FAILED
+}
+
+model SimulationRun {
+  id                String                 @id @db.Uuid
+  scenarioId        String                 @map("scenario_id")
+  policy            String
+  seed              BigInt
+  decisionMode      SimulationDecisionMode @map("decision_mode")
+  scope             Json
+  resolvedIslandIds Json                    @map("resolved_island_ids")
+  disruptions       Json
+  derivedFromRunId  String?                 @map("derived_from_run_id") @db.Uuid
+  status            SimulationRunStatus
+  startedAt         DateTime?               @map("started_at") @db.Timestamptz(3)
+  endedAt           DateTime?               @map("ended_at") @db.Timestamptz(3)
+  frameCount        Int                     @default(0) @map("frame_count")
+  metrics           Json?
+  decisions         Json?
+  evidenceLabel     String?                 @map("evidence_label")
+  provenanceNote    String?                 @map("provenance_note")
+  determinismDigest String?                 @map("determinism_digest")
+  scene             Json?
+  frames            Json?
+  errorCode         String?                 @map("error_code")
+  errorMessage      String?                 @map("error_message")
+  createdByActorId  String                  @map("created_by_actor_id") @db.Uuid
+  createdAt         DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([createdAt])
+  @@index([scenarioId, policy, status])
+  @@map("simulation_runs")
+}
+
+model SimulationActorMapping {
+  id                String   @id @default(uuid()) @db.Uuid
+  simulationRunId   String   @map("simulation_run_id") @db.Uuid
+  simulationActorId String   @map("simulation_actor_id") @db.Uuid
+  productActorId    String?  @map("product_actor_id") @db.Uuid
+  role              ActorRole
+  displayName       String   @map("display_name")
+  islandId          String   @map("island_id")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([simulationRunId, simulationActorId])
+  @@index([simulationRunId, role])
+  @@map("simulation_actor_mappings")
+}
+
+model PairedRun {
+  id                String          @id @db.Uuid
+  scenarioId        String          @map("scenario_id")
+  seed              BigInt
+  decisionMode      SimulationDecisionMode @map("decision_mode")
+  scope             Json
+  resolvedIslandIds Json            @map("resolved_island_ids")
+  disruptions       Json
+  baselineRunId     String          @map("baseline_run_id") @db.Uuid
+  harvestRunId      String          @map("harvest_run_id") @db.Uuid
+  status            PairedRunStatus
+  comparison        Json?
+  evidenceLabel     String?         @map("evidence_label")
+  errorCode         String?         @map("error_code")
+  errorMessage      String?         @map("error_message")
+  createdByActorId  String          @map("created_by_actor_id") @db.Uuid
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([createdAt])
+  @@map("paired_runs")
+}
+
 model Actor {
   id            String    @id @db.Uuid
   authSubject   String    @unique @map("auth_subject")
@@ -33,6 +120,7 @@ model Actor {
   defaultLatitude  Float? @map("default_latitude")
   defaultLongitude Float? @map("default_longitude")
   serviceZone      String? @map("service_zone")
+  simulationRunId String?  @map("simulation_run_id") @db.Uuid
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@map("actors")
@@ -45,6 +133,7 @@ model Farm {
   latitude    Float
   longitude   Float
   productionZone String @default("Saint Lucia") @map("production_zone")
+  simulationRunId String? @map("simulation_run_id") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@map("farms")
@@ -55,6 +144,7 @@ model FarmPermission {
   farmId    String    @map("farm_id") @db.Uuid
   actorId   String    @map("actor_id") @db.Uuid
   role      ActorRole
+  simulationRunId String? @map("simulation_run_id") @db.Uuid
 
   @@unique([farmId, actorId])
   @@map("farm_permissions")
@@ -69,6 +159,7 @@ model CropBatch {
   provenance            Provenance
   latestObservationId   String?    @map("latest_observation_id") @db.Uuid
   latestPredictionId    String?    @map("latest_prediction_id") @db.Uuid
+  simulationRunId       String?    @map("simulation_run_id") @db.Uuid
   createdAt             DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt             DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -86,6 +177,7 @@ model CropObservation {
   estimatedQuantity Float?     @map("estimated_quantity")
   provenance        Provenance
   traceId           String     @map("trace_id") @db.Uuid
+  simulationRunId   String?    @map("simulation_run_id") @db.Uuid
 
   @@map("crop_observations")
 }
@@ -111,6 +203,7 @@ model CropObservationIntake {
   confirmedObservationId  String?    @map("confirmed_observation_id") @db.Uuid
   createdAt                DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
   confirmedAt              DateTime?  @map("confirmed_at") @db.Timestamptz(3)
+  simulationRunId          String?    @map("simulation_run_id") @db.Uuid
 
   @@index([cropBatchId, createdAt])
   @@map("crop_observation_intakes")
@@ -129,6 +222,7 @@ model VerificationTask {
   resolvedBy  String?  @map("resolved_by") @db.Uuid
   resolvedAt  DateTime? @map("resolved_at") @db.Timestamptz(3)
   note        String?
+  simulationRunId String? @map("simulation_run_id") @db.Uuid
 
   @@index([farmId, status])
   @@index([cropBatchId, createdAt])
@@ -153,6 +247,7 @@ model YieldPrediction {
   generatedAt    DateTime   @map("generated_at") @db.Timestamptz(3)
   actualQuantity Float?     @map("actual_quantity")
   absoluteError  Float?     @map("absolute_error")
+  simulationRunId String?   @map("simulation_run_id") @db.Uuid
 
   @@map("yield_predictions")
 }
@@ -168,6 +263,7 @@ model Listing {
   availableFrom  DateTime @map("available_from") @db.Date
   availableUntil DateTime @map("available_until") @db.Date
   status         String
+  simulationRunId String? @map("simulation_run_id") @db.Uuid
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@map("listings")
@@ -184,6 +280,7 @@ model BuyerDemand {
   maxUnitPrice   Float?   @map("max_unit_price")
   currency       String?  @default("XCD")
   status         String
+  simulationRunId String? @map("simulation_run_id") @db.Uuid
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@map("buyer_demands")
@@ -203,6 +300,7 @@ model Order {
   atRisk             Boolean  @default(false) @map("at_risk")
   activeExceptionIds Json     @map("active_exception_ids")
   traceId            String?  @map("trace_id") @db.Uuid
+  simulationRunId    String?  @map("simulation_run_id") @db.Uuid
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -213,6 +311,7 @@ model Allocation {
   id        String   @id @db.Uuid
   orderId   String   @map("order_id") @db.Uuid
   status    String
+  simulationRunId String? @map("simulation_run_id") @db.Uuid
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@map("allocations")
@@ -224,6 +323,7 @@ model AllocationLine {
   cropBatchId   String @map("crop_batch_id") @db.Uuid
   listingId     String @map("listing_id") @db.Uuid
   quantity      Float
+  simulationRunId String? @map("simulation_run_id") @db.Uuid
 
   @@map("allocation_lines")
 }
@@ -234,6 +334,7 @@ model Reservation {
   cropBatchId  String   @map("crop_batch_id") @db.Uuid
   quantity     Float
   status       String
+  simulationRunId String? @map("simulation_run_id") @db.Uuid
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@map("reservations")
@@ -249,6 +350,7 @@ model Approval {
   decidedBy   String?   @map("decided_by") @db.Uuid
   decidedAt   DateTime? @map("decided_at") @db.Timestamptz(3)
   reason      String?
+  simulationRunId String? @map("simulation_run_id") @db.Uuid
 
   @@map("approvals")
 }
@@ -266,6 +368,7 @@ model DeliveryMission {
   estimatedDistanceKm Float? @map("estimated_distance_km")
   estimatedDurationMinutes Int? @map("estimated_duration_minutes")
   estimatedArrival DateTime? @map("estimated_arrival") @db.Timestamptz(3)
+  simulationRunId String? @map("simulation_run_id") @db.Uuid
 
   @@map("delivery_missions")
 }
@@ -279,6 +382,7 @@ model DeliveryUpdate {
   quantity   Float?
   note       String?
   stopSequence Int?    @map("stop_sequence")
+  simulationRunId String? @map("simulation_run_id") @db.Uuid
 
   @@map("delivery_updates")
 }
@@ -296,6 +400,7 @@ model OperationalException {
   recoverySummary   String?    @map("recovery_summary")
   recoveryChanges   Json?      @map("recovery_changes")
   traceId           String?    @map("trace_id") @db.Uuid
+  simulationRunId   String?    @map("simulation_run_id") @db.Uuid
 
   @@map("operational_exceptions")
 }
@@ -310,6 +415,7 @@ model DeliveryAcceptance {
   acceptedBy       String   @map("accepted_by") @db.Uuid
   acceptedAt       DateTime @map("accepted_at") @db.Timestamptz(3)
   lineOutcomes     Json     @map("line_outcomes")
+  simulationRunId String?   @map("simulation_run_id") @db.Uuid
 
   @@unique([orderId])
   @@map("delivery_acceptances")
@@ -322,6 +428,7 @@ model Vehicle {
   registrationNumber String?  @map("registration_number")
   capacityKg         Float?   @map("capacity_kg")
   status             String
+  simulationRunId    String?  @map("simulation_run_id") @db.Uuid
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@index([transporterId, status])
@@ -337,6 +444,7 @@ model AgentTrace {
   workflowType String  @default("GENERAL") @map("workflow_type")
   stage       String   @default("RECORDED")
   parentTraceId String? @map("parent_trace_id") @db.Uuid
+  simulationRunId String? @map("simulation_run_id") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -356,6 +464,7 @@ model TraceStep {
   promptId   String?  @map("prompt_id")
   adapter    String?
   durationMs Int?     @map("duration_ms")
+  simulationRunId String? @map("simulation_run_id") @db.Uuid
 
   @@map("trace_steps")
 }
@@ -389,6 +498,7 @@ model IdempotencyRecord {
   requestHash  String   @map("request_hash")
   statusCode   Int      @map("status_code")
   responseBody Json     @map("response_body")
+  simulationRunId String? @map("simulation_run_id") @db.Uuid
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@unique([actorId, method, path, key])

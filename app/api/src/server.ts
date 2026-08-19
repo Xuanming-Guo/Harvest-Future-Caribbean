@@ -4,7 +4,7 @@ import cors from "@fastify/cors";
 import { Prisma, Provenance } from "@prisma/client";
 import Fastify from "fastify";
 
-import { canAccessBatch, canAccessOrder, visibleBatchIds, visibleExceptionRows, visibleFarmIds, visibleOrderIds } from "./access.js";
+import { actorRunScope, canAccessBatch, canAccessOrder, visibleBatchIds, visibleExceptionRows, visibleFarmIds, visibleOrderIds } from "./access.js";
 import { createAgentCoordinator } from "./agents/coordinator.js";
 import type { ObservationSourceType } from "./agents/prompts.js";
 import { registerAuthentication, requireRole, signDevelopmentToken, type AuthActor } from "./auth.js";
@@ -12,6 +12,7 @@ import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { recordEvent } from "./events.js";
 import { assertObjectBody, httpError, idempotent, readLocation, readQuantity, sendProblem } from "./http.js";
+import { registerSimulationRoutes } from "./simulation-routes.js";
 import {
   approvalDto,
   cropBatchDto,
@@ -60,7 +61,8 @@ async function verificationStatuses(batchIds: string[]) {
   return statuses;
 }
 
-async function canSeeMission(actor: AuthActor, mission: { orderId: string; status: string; transporterId: string | null }) {
+async function canSeeMission(actor: AuthActor, mission: { orderId: string; status: string; transporterId: string | null; simulationRunId: string | null }) {
+  if (mission.simulationRunId !== actor.simulationRunId) return false;
   return actor.role === "ADMIN" || actor.role === "OPERATIONS" ||
     (actor.role === "TRANSPORTER" ? mission.status === "AVAILABLE" || mission.transporterId === actor.id : await canAccessOrder(actor, mission.orderId));
 }
@@ -121,19 +123,19 @@ export async function buildServer() {
   const server = Fastify({ logger: true, bodyLimit: 1_000_000 });
   await server.register(cors, {
     origin: config.websiteOrigin,
-    allowedHeaders: ["Authorization", "Content-Type", "Idempotency-Key"],
+    allowedHeaders: ["Authorization", "Content-Type", "Idempotency-Key", "Last-Event-ID"],
     exposedHeaders: ["Content-Type"],
   });
   await registerAuthentication(server);
   server.setErrorHandler((error, _request, reply) => sendProblem(reply, error));
 
-  server.get("/health", async () => ({ status: "ok", service: "harvest-product-api", contractVersion: "0.4.0", adapters: { model: config.modelAdapter, agentText: agentCoordinator.textAdapterName } }));
+  server.get("/health", async () => ({ status: "ok", service: "harvest-product-api", contractVersion: "0.5.0", adapters: { model: config.modelAdapter, agentText: agentCoordinator.textAdapterName } }));
 
   server.post("/dev/session", async (request, reply) => {
     if (!config.enableDevAuth) throw httpError(404, "NOT_FOUND", "Development authentication is disabled.");
     const body = assertObjectBody(request.body, ["persona"], ["persona"]);
     const actor = await prisma.actor.findUnique({ where: { authSubject: asString(body.persona, "persona") } });
-    if (!actor || !["FARMER", "BUYER", "TRANSPORTER", "COORDINATOR"].includes(actor.role)) throw httpError(404, "PERSONA_NOT_FOUND", "The requested development persona was not seeded.");
+    if (!actor || !["FARMER", "BUYER", "TRANSPORTER", "COORDINATOR", "OPERATIONS", "ADMIN"].includes(actor.role)) throw httpError(404, "PERSONA_NOT_FOUND", "The requested development persona was not seeded.");
     return reply.send({
       accessToken: await signDevelopmentToken(actor),
       actor: {
@@ -206,7 +208,7 @@ export async function buildServer() {
     const createdAt = new Date();
     const row = await prisma.$transaction(async (tx) => {
       await tx.agentTrace.create({
-        data: { id: traceId, subjectType: "CROP_BATCH", subjectId: cropBatchId, workflowType: "CROP_INTELLIGENCE", stage: "DRAFT_READY", status: "AWAITING_HUMAN", summary: "Extracted a non-binding crop update draft for human review." },
+        data: { id: traceId, subjectType: "CROP_BATCH", subjectId: cropBatchId, workflowType: "CROP_INTELLIGENCE", stage: "DRAFT_READY", status: "AWAITING_HUMAN", summary: "Extracted a non-binding crop update draft for human review.", simulationRunId: actor.simulationRunId },
       });
       const intake = await tx.cropObservationIntake.create({
         data: {
@@ -228,6 +230,7 @@ export async function buildServer() {
           provenance,
           traceId,
           createdAt,
+          simulationRunId: actor.simulationRunId,
         },
       });
       await tx.traceStep.create({
@@ -243,6 +246,7 @@ export async function buildServer() {
           durationMs: Date.now() - startedAt,
           confidence: draft.confidence,
           summary: `Prepared an editable draft with ${draft.warnings.length} warning${draft.warnings.length === 1 ? "" : "s"}; no operational crop state changed.`,
+          simulationRunId: actor.simulationRunId,
         },
       });
       await recordEvent(tx, {
@@ -251,6 +255,7 @@ export async function buildServer() {
         entityId: intakeId,
         traceId,
         provenance: Provenance.INFERRED,
+        simulationRunId: actor.simulationRunId,
         payload: { intakeId, cropBatchId, sourceType, status: "DRAFT", promptId: draft.promptId, adapter: draft.adapter },
       });
       return intake;
@@ -265,7 +270,7 @@ export async function buildServer() {
     if (!(await canAccessBatch(actor, cropBatchId))) throw httpError(404, "CROP_BATCH_NOT_FOUND", "Crop batch was not found.");
     const intakeId = body.intakeId === undefined ? undefined : asString(body.intakeId, "intakeId");
     const intake = intakeId ? await prisma.cropObservationIntake.findUnique({ where: { id: intakeId } }) : null;
-    if (intakeId && (!intake || intake.cropBatchId !== cropBatchId || intake.status !== "DRAFT" || (actor.role === "FARMER" && intake.actorId !== actor.id))) {
+    if (intakeId && (!intake || intake.simulationRunId !== actor.simulationRunId || intake.cropBatchId !== cropBatchId || intake.status !== "DRAFT" || (actor.role === "FARMER" && intake.actorId !== actor.id))) {
       throw httpError(409, "INTAKE_NOT_CONFIRMABLE", "The observation intake is unavailable, already confirmed, or belongs to another crop batch.");
     }
     const provenance = asString(body.provenance, "provenance") as Provenance;
@@ -280,13 +285,13 @@ export async function buildServer() {
         await tx.cropObservationIntake.update({ where: { id: intake.id }, data: { status: "CONFIRMED", confirmedObservationId: observationId, confirmedAt: recordedAt } });
         await tx.agentTrace.update({ where: { id: traceId }, data: { status: "RUNNING", stage: "OBSERVATION_CONFIRMED", summary: "A human reviewed the draft and submitted the authoritative crop observation." } });
       } else {
-        await tx.agentTrace.create({ data: { id: traceId, subjectType: "CROP_BATCH", subjectId: cropBatchId, workflowType: "CROP_INTELLIGENCE", stage: "OBSERVATION_CONFIRMED", status: "RUNNING", summary: "Validated a crop observation and requested an updated conservative forecast." } });
+        await tx.agentTrace.create({ data: { id: traceId, subjectType: "CROP_BATCH", subjectId: cropBatchId, workflowType: "CROP_INTELLIGENCE", stage: "OBSERVATION_CONFIRMED", status: "RUNNING", summary: "Validated a crop observation and requested an updated conservative forecast.", simulationRunId: actor.simulationRunId } });
       }
-      await tx.traceStep.create({ data: { traceId, recordedAt, kind: "INPUT", agentName: "Intake Agent", toolName: "confirm-human-observation", provenance, summary: `Human confirmed ${asString(body.cropStage, "cropStage")} observation${estimatedQuantity !== null ? ` with ${estimatedQuantity} kg estimate` : ""}.` } });
-      await tx.cropObservation.create({ data: { id: observationId, cropBatchId, actorId: actor.id, observedAt, recordedAt, cropStage: asString(body.cropStage, "cropStage"), notes: typeof body.notes === "string" ? body.notes : null, estimatedQuantity, provenance, traceId } });
+      await tx.traceStep.create({ data: { traceId, recordedAt, kind: "INPUT", agentName: "Intake Agent", toolName: "confirm-human-observation", provenance, summary: `Human confirmed ${asString(body.cropStage, "cropStage")} observation${estimatedQuantity !== null ? ` with ${estimatedQuantity} kg estimate` : ""}.`, simulationRunId: actor.simulationRunId } });
+      await tx.cropObservation.create({ data: { id: observationId, cropBatchId, actorId: actor.id, observedAt, recordedAt, cropStage: asString(body.cropStage, "cropStage"), notes: typeof body.notes === "string" ? body.notes : null, estimatedQuantity, provenance, traceId, simulationRunId: actor.simulationRunId } });
       await tx.cropBatch.update({ where: { id: cropBatchId }, data: { latestObservationId: observationId, provenance } });
       const intakeEvent = intake ? await tx.domainEvent.findFirst({ where: { eventType: "CROP_OBSERVATION_INTAKE_DRAFTED", entityId: intake.id }, orderBy: { occurredAt: "desc" } }) : null;
-      const createdEvent = await recordEvent(tx, { eventType: "CROP_OBSERVATION_SUBMITTED", actorId: actor.id, entityId: cropBatchId, traceId, correlationId: intakeEvent?.correlationId, causationId: intakeEvent?.id, provenance, payload: { observationId, cropBatchId, observedAt: observedAt.toISOString(), cropStage: body.cropStage as string, ...(intake ? { intakeId: intake.id } : {}) } });
+      const createdEvent = await recordEvent(tx, { eventType: "CROP_OBSERVATION_SUBMITTED", actorId: actor.id, entityId: cropBatchId, traceId, correlationId: intakeEvent?.correlationId, causationId: intakeEvent?.id, provenance, simulationRunId: actor.simulationRunId, payload: { observationId, cropBatchId, observedAt: observedAt.toISOString(), cropStage: body.cropStage as string, ...(intake ? { intakeId: intake.id } : {}) } });
       const batch = await tx.cropBatch.findUniqueOrThrow({ where: { id: cropBatchId } });
       const taskId = randomUUID();
       await tx.verificationTask.create({
@@ -299,6 +304,7 @@ export async function buildServer() {
           taskType: "VERIFY_OBSERVATION",
           status: "OPEN",
           summary: `Verify the ${asString(body.cropStage, "cropStage").toLowerCase()} crop update.`,
+          simulationRunId: actor.simulationRunId,
         },
       });
       await recordEvent(tx, {
@@ -309,6 +315,7 @@ export async function buildServer() {
         correlationId: createdEvent.correlationId,
         causationId: createdEvent.id,
         provenance,
+        simulationRunId: actor.simulationRunId,
         payload: { taskId, cropBatchId, observationId, status: "OPEN" },
       });
       return createdEvent;
@@ -344,7 +351,7 @@ export async function buildServer() {
     const farmIds = await visibleFarmIds(actor);
     const farmerIds = farmIds.length ? (await prisma.farm.findMany({ where: { id: { in: farmIds } }, select: { farmerId: true } })).map((row) => row.farmerId) : [];
     const rows = await prisma.listing.findMany({
-      where: { ...(typeof query.cropType === "string" ? { cropType: query.cropType } : {}), ...(actor.role === "FARMER" || actor.role === "COORDINATOR" ? { farmerId: { in: farmerIds } } : { status: "ACTIVE" }) },
+      where: { ...actorRunScope(actor), ...(typeof query.cropType === "string" ? { cropType: query.cropType } : {}), ...(actor.role === "FARMER" || actor.role === "COORDINATOR" ? { farmerId: { in: farmerIds } } : { status: "ACTIVE" }) },
       orderBy: { createdAt: "desc" },
       take: queryLimit(query.limit),
     });
@@ -356,9 +363,9 @@ export async function buildServer() {
     const { listingId } = request.params as { listingId: string };
     const listing = await prisma.listing.findUnique({ where: { id: listingId } });
     if (!listing) throw httpError(404, "LISTING_NOT_FOUND", "Listing was not found.");
-    const visible = actor.role === "ADMIN" || actor.role === "OPERATIONS" ||
+    const visible = listing.simulationRunId === actor.simulationRunId && (actor.role === "ADMIN" || actor.role === "OPERATIONS" ||
       (actor.role === "BUYER" ? listing.status === "ACTIVE" :
-        actor.role === "FARMER" ? listing.farmerId === actor.id : await canAccessBatch(actor, listing.cropBatchId));
+        actor.role === "FARMER" ? listing.farmerId === actor.id : await canAccessBatch(actor, listing.cropBatchId)));
     if (!visible) throw httpError(404, "LISTING_NOT_FOUND", "Listing was not found.");
     const batch = await prisma.cropBatch.findUniqueOrThrow({ where: { id: listing.cropBatchId } });
     const farm = await prisma.farm.findUniqueOrThrow({ where: { id: batch.farmId } });
@@ -386,13 +393,14 @@ export async function buildServer() {
     const actor = requireRole(request, ["FARMER", "COORDINATOR", "ADMIN"]);
     const query = request.query as JsonObject;
     const batchIds = actor.role === "ADMIN"
-      ? (await prisma.cropBatch.findMany({ select: { id: true } })).map((row) => row.id)
+      ? (await prisma.cropBatch.findMany({ where: actorRunScope(actor), select: { id: true } })).map((row) => row.id)
       : await visibleBatchIds(actor);
     const cropTypes = [...new Set((await prisma.cropBatch.findMany({ where: { id: { in: batchIds } }, select: { cropType: true } })).map((row) => row.cropType))];
     const requestedCrop = typeof query.cropType === "string" ? query.cropType.toUpperCase() : undefined;
     const eligibleCropTypes = requestedCrop ? (cropTypes.includes(requestedCrop) ? [requestedCrop] : []) : cropTypes;
     const rows = await prisma.buyerDemand.findMany({
       where: {
+        ...actorRunScope(actor),
         status: { in: ["OPEN", "MATCHING"] },
         cropType: { in: eligibleCropTypes },
       },
@@ -431,9 +439,9 @@ export async function buildServer() {
     const listingId = randomUUID();
     const traceId = randomUUID();
     const row = await prisma.$transaction(async (tx) => {
-      const listing = await tx.listing.create({ data: { id: listingId, cropBatchId, farmerId: farm.farmerId, cropType: batch.cropType, quantity: amount, unitPrice, currency, availableFrom: asDate(body.availableFrom, "availableFrom"), availableUntil: asDate(body.availableUntil, "availableUntil"), status: "ACTIVE" } });
-      await tx.agentTrace.create({ data: { id: traceId, subjectType: "CROP_BATCH", subjectId: cropBatchId, status: "COMPLETED", summary: "Published supply without exceeding available-to-promise." } });
-      await recordEvent(tx, { eventType: "LISTING_PUBLISHED", actorId: actor.id, entityId: listingId, traceId, provenance: batch.provenance, payload: { listingId, cropBatchId, quantity: quantity(amount), availableFrom: listing.availableFrom.toISOString().slice(0, 10) } });
+      const listing = await tx.listing.create({ data: { id: listingId, cropBatchId, farmerId: farm.farmerId, cropType: batch.cropType, quantity: amount, unitPrice, currency, availableFrom: asDate(body.availableFrom, "availableFrom"), availableUntil: asDate(body.availableUntil, "availableUntil"), status: "ACTIVE", simulationRunId: actor.simulationRunId } });
+      await tx.agentTrace.create({ data: { id: traceId, subjectType: "CROP_BATCH", subjectId: cropBatchId, status: "COMPLETED", summary: "Published supply without exceeding available-to-promise.", simulationRunId: actor.simulationRunId } });
+      await recordEvent(tx, { eventType: "LISTING_PUBLISHED", actorId: actor.id, entityId: listingId, traceId, provenance: batch.provenance, simulationRunId: actor.simulationRunId, payload: { listingId, cropBatchId, quantity: quantity(amount), availableFrom: listing.availableFrom.toISOString().slice(0, 10) } });
       return listing;
     });
     return listingDto(row);
@@ -442,7 +450,7 @@ export async function buildServer() {
   server.get("/v1/buyer-demands", async (request) => {
     const actor = requireRole(request, ["BUYER", "ADMIN"]);
     const query = request.query as JsonObject;
-    const rows = await prisma.buyerDemand.findMany({ where: { ...(actor.role === "BUYER" ? { buyerId: actor.id } : {}), ...(typeof query.status === "string" ? { status: query.status } : {}), ...(typeof query.cropType === "string" ? { cropType: query.cropType } : {}) }, orderBy: { createdAt: "desc" }, take: queryLimit(query.limit) });
+    const rows = await prisma.buyerDemand.findMany({ where: { ...actorRunScope(actor), ...(actor.role === "BUYER" ? { buyerId: actor.id } : {}), ...(typeof query.status === "string" ? { status: query.status } : {}), ...(typeof query.cropType === "string" ? { cropType: query.cropType } : {}) }, orderBy: { createdAt: "desc" }, take: queryLimit(query.limit) });
     return { items: rows.map(demandDto), pageInfo };
   });
 
@@ -454,9 +462,9 @@ export async function buildServer() {
     const traceId = randomUUID();
     const maxPrice = body.maxUnitPrice as JsonObject | undefined;
     const row = await prisma.$transaction(async (tx) => {
-      const demand = await tx.buyerDemand.create({ data: { id: demandId, buyerId: actor.id, cropType: asString(body.cropType, "cropType").toUpperCase(), quantity: readQuantity(body.quantity), neededBy: asDate(body.neededBy, "neededBy"), latitude: location.latitude, longitude: location.longitude, maxUnitPrice: typeof maxPrice?.amount === "number" ? maxPrice.amount : null, currency: typeof maxPrice?.currency === "string" ? maxPrice.currency : "XCD", status: "OPEN" } });
-      await tx.agentTrace.create({ data: { id: traceId, subjectType: "ORDER", subjectId: demandId, status: "RUNNING", summary: "Recorded buyer demand for matching." } });
-      await recordEvent(tx, { eventType: "BUYER_DEMAND_CREATED", actorId: actor.id, entityId: demandId, traceId, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, payload: { demandId, cropType: demand.cropType, quantity: quantity(demand.quantity), neededBy: demand.neededBy.toISOString() } });
+      const demand = await tx.buyerDemand.create({ data: { id: demandId, buyerId: actor.id, cropType: asString(body.cropType, "cropType").toUpperCase(), quantity: readQuantity(body.quantity), neededBy: asDate(body.neededBy, "neededBy"), latitude: location.latitude, longitude: location.longitude, maxUnitPrice: typeof maxPrice?.amount === "number" ? maxPrice.amount : null, currency: typeof maxPrice?.currency === "string" ? maxPrice.currency : "XCD", status: "OPEN", simulationRunId: actor.simulationRunId } });
+      await tx.agentTrace.create({ data: { id: traceId, subjectType: "ORDER", subjectId: demandId, status: "RUNNING", summary: "Recorded buyer demand for matching.", simulationRunId: actor.simulationRunId } });
+      await recordEvent(tx, { eventType: "BUYER_DEMAND_CREATED", actorId: actor.id, entityId: demandId, traceId, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, simulationRunId: actor.simulationRunId, payload: { demandId, cropType: demand.cropType, quantity: quantity(demand.quantity), neededBy: demand.neededBy.toISOString() } });
       return demand;
     });
     return demandDto(row);
@@ -479,10 +487,10 @@ export async function buildServer() {
     const traceId = randomUUID();
     const requestedQuantity = readQuantity(body.requestedQuantity, "requestedQuantity");
     const row = await prisma.$transaction(async (tx) => {
-      const order = await tx.order.create({ data: { id: orderId, buyerId: actor.id, cropType: asString(body.cropType, "cropType").toUpperCase(), requestedQuantity, acceptedQuantity: 0, neededBy: asDate(body.neededBy, "neededBy"), latitude: location.latitude, longitude: location.longitude, listingIds, lifecycleStatus: "REQUESTED", atRisk: false, activeExceptionIds: [], traceId } });
-      await tx.agentTrace.create({ data: { id: traceId, subjectType: "ORDER", subjectId: orderId, workflowType: "ORDER_FULFILMENT", stage: "ORDER_REQUESTED", status: "RUNNING", summary: "Validating safe supply for a buyer order." } });
-      await tx.traceStep.create({ data: { traceId, recordedAt: new Date(), kind: "INPUT", agentName: "Market Balance Agent", toolName: "read-order-request", provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, summary: `Buyer requested ${requestedQuantity} kg of ${order.cropType}.` } });
-      await recordEvent(tx, { eventType: "ORDER_REQUESTED", actorId: actor.id, entityId: orderId, traceId, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, payload: { orderId, cropType: order.cropType, requestedQuantity: quantity(requestedQuantity), status: "REQUESTED" } });
+      const order = await tx.order.create({ data: { id: orderId, buyerId: actor.id, cropType: asString(body.cropType, "cropType").toUpperCase(), requestedQuantity, acceptedQuantity: 0, neededBy: asDate(body.neededBy, "neededBy"), latitude: location.latitude, longitude: location.longitude, listingIds, lifecycleStatus: "REQUESTED", atRisk: false, activeExceptionIds: [], traceId, simulationRunId: actor.simulationRunId } });
+      await tx.agentTrace.create({ data: { id: traceId, subjectType: "ORDER", subjectId: orderId, workflowType: "ORDER_FULFILMENT", stage: "ORDER_REQUESTED", status: "RUNNING", summary: "Validating safe supply for a buyer order.", simulationRunId: actor.simulationRunId } });
+      await tx.traceStep.create({ data: { traceId, recordedAt: new Date(), kind: "INPUT", agentName: "Market Balance Agent", toolName: "read-order-request", provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, summary: `Buyer requested ${requestedQuantity} kg of ${order.cropType}.`, simulationRunId: actor.simulationRunId } });
+      await recordEvent(tx, { eventType: "ORDER_REQUESTED", actorId: actor.id, entityId: orderId, traceId, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, simulationRunId: actor.simulationRunId, payload: { orderId, cropType: order.cropType, requestedQuantity: quantity(requestedQuantity), status: "REQUESTED" } });
       return order;
     });
     await agentCoordinator.matchOrder(orderId, actor.id, traceId);
@@ -515,7 +523,7 @@ export async function buildServer() {
     const { traceId } = request.params as { traceId: string };
     const trace = await prisma.agentTrace.findUnique({ where: { id: traceId } });
     if (!trace) throw httpError(404, "TRACE_NOT_FOUND", "Agent trace was not found.");
-    let visible = actor.role === "ADMIN" || actor.role === "OPERATIONS";
+    let visible = trace.simulationRunId === actor.simulationRunId && (actor.role === "ADMIN" || actor.role === "OPERATIONS");
     if (!visible && trace.subjectType === "CROP_BATCH") visible = await canAccessBatch(actor, trace.subjectId);
     if (!visible && trace.subjectType === "ORDER") visible = await canAccessOrder(actor, trace.subjectId);
     if (!visible && trace.subjectType === "EXCEPTION") visible = (await visibleExceptionRows(actor)).some((row) => row.id === trace.subjectId);
@@ -527,7 +535,7 @@ export async function buildServer() {
   server.get("/v1/approvals", async (request) => {
     const actor = requireRole(request, ["FARMER", "BUYER", "COORDINATOR", "ADMIN"]);
     const query = request.query as JsonObject;
-    const rows = await prisma.approval.findMany({ where: { ...(actor.role !== "ADMIN" ? { requestedFromActorId: actor.id } : {}), ...(typeof query.status === "string" ? { status: query.status } : {}), ...(typeof query.subjectType === "string" ? { subjectType: query.subjectType } : {}) }, orderBy: { requestedAt: "desc" }, take: queryLimit(query.limit) });
+    const rows = await prisma.approval.findMany({ where: { ...actorRunScope(actor), ...(actor.role !== "ADMIN" ? { requestedFromActorId: actor.id } : {}), ...(typeof query.status === "string" ? { status: query.status } : {}), ...(typeof query.subjectType === "string" ? { subjectType: query.subjectType } : {}) }, orderBy: { requestedAt: "desc" }, take: queryLimit(query.limit) });
     return { items: await Promise.all(rows.map(async (row) => approvalDto(row, await approvalContext(row)))), pageInfo };
   });
 
@@ -547,7 +555,7 @@ export async function buildServer() {
     const query = request.query as JsonObject;
     const orderIds = await visibleOrderIds(actor);
     const where = actor.role === "TRANSPORTER" ? { OR: [{ status: "AVAILABLE" }, { transporterId: actor.id }] } : actor.role === "ADMIN" || actor.role === "OPERATIONS" ? {} : { orderId: { in: orderIds } };
-    const rows = await prisma.deliveryMission.findMany({ where: { ...where, ...(typeof query.status === "string" ? { status: query.status } : {}) }, orderBy: { deadline: "asc" }, take: queryLimit(query.limit) });
+    const rows = await prisma.deliveryMission.findMany({ where: { ...actorRunScope(actor), ...where, ...(typeof query.status === "string" ? { status: query.status } : {}) }, orderBy: { deadline: "asc" }, take: queryLimit(query.limit) });
     return { items: rows.map(missionDto), pageInfo };
   });
 
@@ -572,7 +580,7 @@ export async function buildServer() {
 
   server.get("/v1/me/vehicles", async (request) => {
     const actor = requireRole(request, ["TRANSPORTER"]);
-    const rows = await prisma.vehicle.findMany({ where: { transporterId: actor.id }, orderBy: [{ status: "asc" }, { label: "asc" }] });
+    const rows = await prisma.vehicle.findMany({ where: { transporterId: actor.id, ...actorRunScope(actor) }, orderBy: [{ status: "asc" }, { label: "asc" }] });
     return { items: rows.map(vehicleDto), pageInfo };
   });
 
@@ -582,11 +590,11 @@ export async function buildServer() {
     const body = assertObjectBody(request.body, ["decision", "vehicleId"], ["decision", "vehicleId"]);
     if (body.decision !== "ACCEPT") throw httpError(400, "VALIDATION_FAILED", "Only ACCEPT is supported.");
     const current = await prisma.deliveryMission.findUnique({ where: { id: missionId } });
-    if (!current) throw httpError(404, "MISSION_NOT_FOUND", "Delivery mission was not found.");
+    if (!current || current.simulationRunId !== actor.simulationRunId) throw httpError(404, "MISSION_NOT_FOUND", "Delivery mission was not found.");
     if (current.status !== "AVAILABLE") throw httpError(409, "MISSION_UNAVAILABLE", "Mission is no longer available.");
     const vehicleId = asString(body.vehicleId, "vehicleId");
     const vehicle = await prisma.vehicle.findUnique({ where: { id: vehicleId } });
-    if (!vehicle || vehicle.transporterId !== actor.id) throw httpError(404, "VEHICLE_NOT_FOUND", "Vehicle was not found.");
+    if (!vehicle || vehicle.transporterId !== actor.id || vehicle.simulationRunId !== actor.simulationRunId) throw httpError(404, "VEHICLE_NOT_FOUND", "Vehicle was not found.");
     if (vehicle.status !== "AVAILABLE") throw httpError(409, "VEHICLE_UNAVAILABLE", "Vehicle is not available for this mission.");
     if (vehicle.capacityKg !== null && vehicle.capacityKg < current.quantity) throw httpError(422, "VEHICLE_CAPACITY_EXCEEDED", "Vehicle capacity is below the mission quantity.");
     const trace = await prisma.agentTrace.findFirst({ where: { subjectType: "ORDER", subjectId: current.orderId } });
@@ -597,7 +605,7 @@ export async function buildServer() {
       const mission = await tx.deliveryMission.findUniqueOrThrow({ where: { id: missionId } });
       await tx.order.update({ where: { id: current.orderId }, data: { lifecycleStatus: "IN_DELIVERY" } });
       const stops = current.stops as Array<{ location: GeoPoint }>;
-      await recordEvent(tx, { eventType: "DELIVERY_MISSION_ACCEPTED", actorId: actor.id, entityId: missionId, traceId: trace?.id ?? randomUUID(), provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, payload: { missionId, orderId: current.orderId, status: "ASSIGNED", transporterId: actor.id, stops } });
+      await recordEvent(tx, { eventType: "DELIVERY_MISSION_ACCEPTED", actorId: actor.id, entityId: missionId, traceId: trace?.id ?? randomUUID(), provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, simulationRunId: actor.simulationRunId, payload: { missionId, orderId: current.orderId, status: "ASSIGNED", transporterId: actor.id, stops } });
       return mission;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     return missionDto(row);
@@ -608,7 +616,7 @@ export async function buildServer() {
     const { missionId } = request.params as { missionId: string };
     const body = assertObjectBody(request.body, ["updateType", "recordedAt", "position", "quantity", "note"], ["updateType", "recordedAt"]);
     const mission = await prisma.deliveryMission.findUnique({ where: { id: missionId } });
-    if (!mission || (actor.role === "TRANSPORTER" && mission.transporterId !== actor.id)) throw httpError(404, "MISSION_NOT_FOUND", "Delivery mission was not found.");
+    if (!mission || mission.simulationRunId !== actor.simulationRunId || (actor.role === "TRANSPORTER" && mission.transporterId !== actor.id)) throw httpError(404, "MISSION_NOT_FOUND", "Delivery mission was not found.");
     const updateType = asString(body.updateType, "updateType");
     if (!["PICKED_UP", "POSITION", "DELAYED", "ARRIVED", "DELIVERED"].includes(updateType)) throw httpError(422, "INVALID_DELIVERY_UPDATE", "The delivery update type is not supported.");
     const updateId = randomUUID();
@@ -649,10 +657,10 @@ export async function buildServer() {
     }
     const trace = await prisma.agentTrace.findFirst({ where: { subjectType: "ORDER", subjectId: mission.orderId } });
     const row = await prisma.$transaction(async (tx) => {
-      const update = await tx.deliveryUpdate.create({ data: { id: updateId, missionId, updateType, recordedAt, position: position ?? Prisma.JsonNull, quantity: amount, note: typeof body.note === "string" ? body.note : null, stopSequence } });
+      const update = await tx.deliveryUpdate.create({ data: { id: updateId, missionId, updateType, recordedAt, position: position ?? Prisma.JsonNull, quantity: amount, note: typeof body.note === "string" ? body.note : null, stopSequence, simulationRunId: actor.simulationRunId } });
       await tx.deliveryMission.update({ where: { id: missionId }, data: { status, ...(updateType === "ARRIVED" ? { currentStopSequence: stopSequence ?? mission.currentStopSequence } : {}) } });
       if (status === "DELIVERED" && mission.vehicleId) await tx.vehicle.updateMany({ where: { id: mission.vehicleId, transporterId: actor.id }, data: { status: "AVAILABLE" } });
-      await recordEvent(tx, { eventType: "DELIVERY_UPDATE_POSTED", actorId: actor.id, entityId: missionId, traceId: trace?.id ?? randomUUID(), provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, payload: { missionId, updateType, recordedAt: update.recordedAt.toISOString(), ...(position ? { position } : {}), ...(typeof body.note === "string" ? { note: body.note } : {}) } });
+      await recordEvent(tx, { eventType: "DELIVERY_UPDATE_POSTED", actorId: actor.id, entityId: missionId, traceId: trace?.id ?? randomUUID(), provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, simulationRunId: actor.simulationRunId, payload: { missionId, updateType, recordedAt: update.recordedAt.toISOString(), ...(position ? { position } : {}), ...(typeof body.note === "string" ? { note: body.note } : {}) } });
       return update;
     });
     return deliveryUpdateDto(row);
@@ -662,10 +670,10 @@ export async function buildServer() {
     const actor = requireRole(request, ["COORDINATOR", "ADMIN"]);
     const query = request.query as JsonObject;
     const farmIds = actor.role === "ADMIN"
-      ? (await prisma.farm.findMany({ select: { id: true } })).map((row) => row.id)
+      ? (await prisma.farm.findMany({ where: actorRunScope(actor), select: { id: true } })).map((row) => row.id)
       : await visibleFarmIds(actor);
     const rows = await prisma.verificationTask.findMany({
-      where: { farmId: { in: farmIds }, ...(typeof query.status === "string" ? { status: query.status } : {}) },
+      where: { ...actorRunScope(actor), farmId: { in: farmIds }, ...(typeof query.status === "string" ? { status: query.status } : {}) },
       orderBy: { createdAt: "desc" },
       take: queryLimit(query.limit),
     });
@@ -680,7 +688,7 @@ export async function buildServer() {
     if (!["VERIFY", "REQUEST_CHANGES"].includes(decision)) throw httpError(422, "INVALID_VERIFICATION_DECISION", "decision must be VERIFY or REQUEST_CHANGES.");
     const task = await prisma.verificationTask.findUnique({ where: { id: taskId } });
     const farmIds = actor.role === "ADMIN" ? [task?.farmId] : await visibleFarmIds(actor);
-    if (!task || !farmIds.includes(task.farmId)) throw httpError(404, "VERIFICATION_TASK_NOT_FOUND", "Verification task was not found.");
+    if (!task || task.simulationRunId !== actor.simulationRunId || !farmIds.includes(task.farmId)) throw httpError(404, "VERIFICATION_TASK_NOT_FOUND", "Verification task was not found.");
     if (task.status !== "OPEN") throw httpError(409, "VERIFICATION_ALREADY_DECIDED", "This verification task already has a final decision.");
     const status = decision === "VERIFY" ? "VERIFIED" : "CHANGES_REQUESTED";
     const observation = await prisma.cropObservation.findUnique({ where: { id: task.subjectId } });
@@ -693,6 +701,7 @@ export async function buildServer() {
         entityId: taskId,
         traceId,
         provenance: Provenance.OBSERVED,
+        simulationRunId: actor.simulationRunId,
         payload: { taskId, cropBatchId: task.cropBatchId, observationId: task.subjectId, status, ...(typeof body.note === "string" ? { note: body.note } : {}) },
       });
       return updated;
@@ -724,13 +733,13 @@ export async function buildServer() {
     if (actor.role !== "ADMIN") {
       const orderIds = await visibleOrderIds(actor);
       const batchIds = await visibleBatchIds(actor);
-      const missionIds = (await prisma.deliveryMission.findMany({ where: actor.role === "TRANSPORTER" ? { transporterId: actor.id } : { orderId: { in: orderIds } }, select: { id: true } })).map((row) => row.id);
+      const missionIds = (await prisma.deliveryMission.findMany({ where: actor.role === "TRANSPORTER" ? { transporterId: actor.id, ...actorRunScope(actor) } : { orderId: { in: orderIds }, ...actorRunScope(actor) }, select: { id: true } })).map((row) => row.id);
       const allowed = new Set([...orderIds, ...batchIds, ...missionIds]);
       if (requestedEntityIds.some((id) => !allowed.has(id))) throw httpError(404, "AFFECTED_ENTITY_NOT_FOUND", "An affected record was not found.");
     }
-    const affectedMissions = await prisma.deliveryMission.findMany({ where: { id: { in: requestedEntityIds } } });
+    const affectedMissions = await prisma.deliveryMission.findMany({ where: { id: { in: requestedEntityIds }, ...actorRunScope(actor) } });
     const affectedOrderIds = [...new Set([
-      ...(await prisma.order.findMany({ where: { id: { in: requestedEntityIds } }, select: { id: true } })).map((row) => row.id),
+      ...(await prisma.order.findMany({ where: { id: { in: requestedEntityIds }, ...actorRunScope(actor) }, select: { id: true } })).map((row) => row.id),
       ...affectedMissions.map((mission) => mission.orderId),
     ])];
     const affectedEntityIds = [...new Set([...requestedEntityIds, ...affectedOrderIds])];
@@ -741,7 +750,7 @@ export async function buildServer() {
     const proposedDeadline = delayedMission ? new Date(delayedMission.deadline.getTime() + 2 * 60 * 60 * 1000) : undefined;
     const delayedOrder = delayedMission ? await prisma.order.findUnique({ where: { id: delayedMission.orderId } }) : null;
     const parentTrace = delayedOrder ? await prisma.agentTrace.findFirst({ where: { subjectType: "ORDER", subjectId: delayedOrder.id } }) : null;
-    const coordinator = delayedMission ? (actor.role === "COORDINATOR" ? actor : await prisma.actor.findFirst({ where: { role: "COORDINATOR" } })) : null;
+    const coordinator = delayedMission ? (actor.role === "COORDINATOR" ? actor : await prisma.actor.findFirst({ where: { role: "COORDINATOR", ...actorRunScope(actor) } })) : null;
     if (delayedMission && !coordinator) throw httpError(409, "COORDINATOR_UNAVAILABLE", "No coordinator is available for the recovery decision.");
     const recoveryExplanation = delayedMission && proposedDeadline && delayedOrder
       ? await agentCoordinator.explainDelayRecovery({
@@ -773,6 +782,7 @@ export async function buildServer() {
           provenance,
           reportedAt,
           traceId,
+          simulationRunId: actor.simulationRunId,
           ...(delayedMission && proposedDeadline ? {
             recoveryAction: "RESCHEDULE",
             recoverySummary: recoveryExplanation?.summary ?? `Extend mission ${delayedMission.id.slice(0, 8)} by two hours to recover from the delay.`,
@@ -789,15 +799,15 @@ export async function buildServer() {
         const order = await tx.order.findUnique({ where: { id: orderId } });
         if (order) await tx.order.update({ where: { id: orderId }, data: { atRisk: true, activeExceptionIds: [...new Set([...(order.activeExceptionIds as string[]), exceptionId])] } });
       }
-      if (approvalId && coordinator) await tx.approval.create({ data: { id: approvalId, subjectType: "RECOVERY", subjectId: exceptionId, requestedFromActorId: coordinator.id, status: "PENDING", requestedAt: reportedAt } });
-      await tx.agentTrace.create({ data: { id: traceId, subjectType: "EXCEPTION", subjectId: exceptionId, parentTraceId: parentTrace?.id, workflowType: "EXCEPTION_RECOVERY", stage: delayedMission ? "RECOVERY_PROPOSED" : "MANUAL_RECOVERY", status: delayedMission ? "AWAITING_APPROVAL" : "WAITING", summary: delayedMission ? "Proposed a deterministic two-hour reschedule and paused for coordinator approval." : "Recorded an unsupported exception type for manual coordinator review." } });
-      await tx.traceStep.create({ data: { traceId, recordedAt: reportedAt, kind: "INPUT", agentName: "Exception Agent", toolName: "validate-exception", provenance, summary: `Recorded a ${exception.severity.toLowerCase()} ${exception.exceptionType.toLowerCase()} exception affecting ${affectedEntityIds.length} visible record${affectedEntityIds.length === 1 ? "" : "s"}.` } });
-      const exceptionEvent = await recordEvent(tx, { eventType: "EXCEPTION_REPORTED", actorId: actor.id, entityId: exceptionId, traceId, provenance, payload: { exceptionId, exceptionType: exception.exceptionType, severity: exception.severity, affectedEntityIds } });
+      if (approvalId && coordinator) await tx.approval.create({ data: { id: approvalId, subjectType: "RECOVERY", subjectId: exceptionId, requestedFromActorId: coordinator.id, status: "PENDING", requestedAt: reportedAt, simulationRunId: actor.simulationRunId } });
+      await tx.agentTrace.create({ data: { id: traceId, subjectType: "EXCEPTION", subjectId: exceptionId, parentTraceId: parentTrace?.id, workflowType: "EXCEPTION_RECOVERY", stage: delayedMission ? "RECOVERY_PROPOSED" : "MANUAL_RECOVERY", status: delayedMission ? "AWAITING_APPROVAL" : "WAITING", summary: delayedMission ? "Proposed a deterministic two-hour reschedule and paused for coordinator approval." : "Recorded an unsupported exception type for manual coordinator review.", simulationRunId: actor.simulationRunId } });
+      await tx.traceStep.create({ data: { traceId, recordedAt: reportedAt, kind: "INPUT", agentName: "Exception Agent", toolName: "validate-exception", provenance, summary: `Recorded a ${exception.severity.toLowerCase()} ${exception.exceptionType.toLowerCase()} exception affecting ${affectedEntityIds.length} visible record${affectedEntityIds.length === 1 ? "" : "s"}.`, simulationRunId: actor.simulationRunId } });
+      const exceptionEvent = await recordEvent(tx, { eventType: "EXCEPTION_REPORTED", actorId: actor.id, entityId: exceptionId, traceId, provenance, simulationRunId: actor.simulationRunId, payload: { exceptionId, exceptionType: exception.exceptionType, severity: exception.severity, affectedEntityIds } });
       if (delayedMission && proposedDeadline && recoveryExplanation) {
-        await tx.traceStep.create({ data: { traceId, recordedAt: reportedAt, kind: "DECISION", agentName: "Exception Agent", toolName: "calculate-delay-recovery", provenance: Provenance.INFERRED, summary: `Deterministic policy proposed changing the deadline from ${delayedMission.deadline.toISOString()} to ${proposedDeadline.toISOString()}.` } });
-        await tx.traceStep.create({ data: { traceId, recordedAt: reportedAt, kind: "TOOL_CALL", agentName: "Exception Agent", toolName: "explain-delay-recovery", provenance: Provenance.INFERRED, promptId: recoveryExplanation.promptId, adapter: recoveryExplanation.adapter, summary: "Prepared a participant-facing explanation of the fixed recovery proposal; the text adapter could not change or approve it." } });
-        await tx.traceStep.create({ data: { traceId, recordedAt: reportedAt, kind: "APPROVAL", agentName: "Exception Agent", toolName: "request-human-approval", provenance: Provenance.INFERRED, summary: "Paused before applying the deadline change for explicit coordinator approval." } });
-        await recordEvent(tx, { eventType: "RECOVERY_PROPOSED", actorId: actor.id, entityId: exceptionId, traceId, correlationId: exceptionEvent.correlationId, causationId: exceptionEvent.id, provenance: Provenance.INFERRED, payload: { exceptionId, approvalId, actionType: "RESCHEDULE", missionId: delayedMission.id, previousDeadline: delayedMission.deadline.toISOString(), proposedDeadline: proposedDeadline.toISOString() } });
+        await tx.traceStep.create({ data: { traceId, recordedAt: reportedAt, kind: "DECISION", agentName: "Exception Agent", toolName: "calculate-delay-recovery", provenance: Provenance.INFERRED, summary: `Deterministic policy proposed changing the deadline from ${delayedMission.deadline.toISOString()} to ${proposedDeadline.toISOString()}.`, simulationRunId: actor.simulationRunId } });
+        await tx.traceStep.create({ data: { traceId, recordedAt: reportedAt, kind: "TOOL_CALL", agentName: "Exception Agent", toolName: "explain-delay-recovery", provenance: Provenance.INFERRED, promptId: recoveryExplanation.promptId, adapter: recoveryExplanation.adapter, summary: "Prepared a participant-facing explanation of the fixed recovery proposal; the text adapter could not change or approve it.", simulationRunId: actor.simulationRunId } });
+        await tx.traceStep.create({ data: { traceId, recordedAt: reportedAt, kind: "APPROVAL", agentName: "Exception Agent", toolName: "request-human-approval", provenance: Provenance.INFERRED, summary: "Paused before applying the deadline change for explicit coordinator approval.", simulationRunId: actor.simulationRunId } });
+        await recordEvent(tx, { eventType: "RECOVERY_PROPOSED", actorId: actor.id, entityId: exceptionId, traceId, correlationId: exceptionEvent.correlationId, causationId: exceptionEvent.id, provenance: Provenance.INFERRED, simulationRunId: actor.simulationRunId, payload: { exceptionId, approvalId, actionType: "RESCHEDULE", missionId: delayedMission.id, previousDeadline: delayedMission.deadline.toISOString(), proposedDeadline: proposedDeadline.toISOString() } });
       }
       return exception;
     });
@@ -809,7 +819,7 @@ export async function buildServer() {
     const { deliveryId } = request.params as { deliveryId: string };
     const body = assertObjectBody(request.body, ["outcome", "acceptedQuantity", "rejectedQuantity", "lineOutcomes", "note"], ["outcome", "acceptedQuantity", "rejectedQuantity", "lineOutcomes"]);
     const mission = await prisma.deliveryMission.findUnique({ where: { id: deliveryId } });
-    if (!mission) throw httpError(404, "DELIVERY_NOT_FOUND", "Delivery mission was not found.");
+    if (!mission || mission.simulationRunId !== actor.simulationRunId) throw httpError(404, "DELIVERY_NOT_FOUND", "Delivery mission was not found.");
     const order = await prisma.order.findUniqueOrThrow({ where: { id: mission.orderId } });
     if (actor.role === "BUYER" && order.buyerId !== actor.id) throw httpError(404, "DELIVERY_NOT_FOUND", "Delivery mission was not found.");
     if (mission.status !== "DELIVERED") throw httpError(409, "DELIVERY_NOT_READY", "The delivery has not been completed by the transporter.");
@@ -847,7 +857,7 @@ export async function buildServer() {
     const trace = await prisma.agentTrace.findFirst({ where: { subjectType: "ORDER", subjectId: order.id } });
     const priorEvent = await prisma.domainEvent.findFirst({ where: { traceId: trace?.id, entityId: { in: [order.id, mission.id] } }, orderBy: { occurredAt: "desc" } });
     const acceptance = await prisma.$transaction(async (tx) => {
-      const created = await tx.deliveryAcceptance.create({ data: { id: acceptanceId, orderId: order.id, outcome, acceptedQuantity: accepted, rejectedQuantity: rejected, lineOutcomes: serializedLineOutcomes, note: typeof body.note === "string" ? body.note : null, acceptedBy: actor.id, acceptedAt } });
+      const created = await tx.deliveryAcceptance.create({ data: { id: acceptanceId, orderId: order.id, outcome, acceptedQuantity: accepted, rejectedQuantity: rejected, lineOutcomes: serializedLineOutcomes, note: typeof body.note === "string" ? body.note : null, acceptedBy: actor.id, acceptedAt, simulationRunId: actor.simulationRunId } });
       await tx.order.update({ where: { id: order.id }, data: { lifecycleStatus, acceptedQuantity: accepted, atRisk: false, activeExceptionIds: [] } });
       await tx.reservation.updateMany({ where: { allocationId: { in: (await tx.allocation.findMany({ where: { orderId: order.id }, select: { id: true } })).map((row) => row.id) } }, data: { status: "RELEASED" } });
       for (const line of lineOutcomes) {
@@ -862,14 +872,16 @@ export async function buildServer() {
       }
       if (trace) {
         await tx.agentTrace.update({ where: { id: trace.id }, data: { status: "COMPLETED", stage: "DELIVERY_OUTCOME_RECORDED", summary: `Delivery finished with ${accepted} kg accepted and ${rejected} kg rejected.` } });
-        await tx.traceStep.create({ data: { traceId: trace.id, recordedAt: acceptedAt, kind: "STATE_CHANGE", agentName: "Traceability Agent", toolName: "record-delivery-outcome", provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, summary: `Recorded ${outcome.toLowerCase().replaceAll("_", " ")}: ${accepted} kg accepted and ${rejected} kg rejected; reservations were released and model outcomes updated.` } });
+        await tx.traceStep.create({ data: { traceId: trace.id, recordedAt: acceptedAt, kind: "STATE_CHANGE", agentName: "Traceability Agent", toolName: "record-delivery-outcome", provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, summary: `Recorded ${outcome.toLowerCase().replaceAll("_", " ")}: ${accepted} kg accepted and ${rejected} kg rejected; reservations were released and model outcomes updated.`, simulationRunId: actor.simulationRunId } });
       }
-      const deliveryEvent = await recordEvent(tx, { eventType: "DELIVERY_ACCEPTED", actorId: actor.id, entityId: acceptanceId, traceId: trace?.id ?? randomUUID(), correlationId: priorEvent?.correlationId, causationId: priorEvent?.id, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, payload: { deliveryId: acceptanceId, orderId: order.id, acceptedQuantity: quantity(accepted), rejectedQuantity: quantity(rejected), outcome, lineOutcomes: serializedLineOutcomes } });
-      await recordEvent(tx, { eventType: `ORDER_${lifecycleStatus}`, actorId: actor.id, entityId: order.id, traceId: trace?.id ?? randomUUID(), correlationId: deliveryEvent.correlationId, causationId: deliveryEvent.id, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, payload: { orderId: order.id, status: lifecycleStatus, acceptedQuantity: quantity(accepted), releasedReservationQuantity: quantity(Math.max(0, order.requestedQuantity - accepted)) } });
+      const deliveryEvent = await recordEvent(tx, { eventType: "DELIVERY_ACCEPTED", actorId: actor.id, entityId: acceptanceId, traceId: trace?.id ?? randomUUID(), correlationId: priorEvent?.correlationId, causationId: priorEvent?.id, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, simulationRunId: actor.simulationRunId, payload: { deliveryId: acceptanceId, orderId: order.id, acceptedQuantity: quantity(accepted), rejectedQuantity: quantity(rejected), outcome, lineOutcomes: serializedLineOutcomes } });
+      await recordEvent(tx, { eventType: `ORDER_${lifecycleStatus}`, actorId: actor.id, entityId: order.id, traceId: trace?.id ?? randomUUID(), correlationId: deliveryEvent.correlationId, causationId: deliveryEvent.id, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, simulationRunId: actor.simulationRunId, payload: { orderId: order.id, status: lifecycleStatus, acceptedQuantity: quantity(accepted), releasedReservationQuantity: quantity(Math.max(0, order.requestedQuantity - accepted)) } });
       return created;
     });
     return deliveryAcceptanceDto(acceptance);
   }));
+
+  await registerSimulationRoutes(server);
 
   server.addHook("onClose", async () => prisma.$disconnect());
   return server;
