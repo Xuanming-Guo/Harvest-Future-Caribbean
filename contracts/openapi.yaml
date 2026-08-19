@@ -1,10 +1,10 @@
 openapi: 3.1.0
 info:
   title: Harvest Product API
-  version: 0.4.0
+  version: 0.5.0
   description: >-
     Canonical operational API for real users, Harvest-mode simulated actors,
-    website/mobile clients, and internal simulation ingestion. Operational
+    the participant website, and the simulation control room. Operational
     state and its outbox event are committed atomically by this service.
 servers:
   - url: http://localhost:3001
@@ -22,11 +22,8 @@ tags:
     description: Role-filtered projections, event stream, and safe traces.
   - name: Simulation
     description: Public control-room gateway to observable simulation state.
-  - name: Internal
-    description: Service-token-only observable simulation/result ingestion.
 security:
   - bearerJwt: []
-  - internalServiceToken: []
 paths:
   /v1/crop-observation-intakes:
     post:
@@ -759,7 +756,6 @@ paths:
         default: {$ref: '#/components/responses/Problem'}
   /v1/operations/snapshot:
     get:
-      x-harvest-status: planned
       tags: [Operations]
       operationId: getOperationsSnapshot
       summary: Read the role-filtered operational projection
@@ -810,7 +806,6 @@ paths:
         default: {$ref: '#/components/responses/Problem'}
   /v1/events/stream:
     get:
-      x-harvest-status: planned
       tags: [Operations]
       operationId: streamEvents
       summary: Stream role-filtered domain events with replay
@@ -820,8 +815,8 @@ paths:
           schema: {type: string, format: uuid}
         - name: Last-Event-ID
           in: header
-          description: Last fully applied event ID; the server replays later retained events.
-          schema: {type: string, format: uuid}
+          description: Last fully applied monotonic decimal cursor; the server replays later retained events.
+          schema: {type: string, pattern: '^[0-9]+$'}
       responses:
         '200':
           description: SSE frames use `id`, `event`, and JSON `data` containing EventEnvelope.
@@ -832,7 +827,7 @@ paths:
             text/event-stream:
               schema: {type: string}
               example: |-
-                id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+                id: 42
                 event: ORDER_FULFILLED
                 data: {"eventId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","eventType":"ORDER_FULFILLED","occurredAt":"2026-08-12T13:45:00Z"}
         '409':
@@ -841,12 +836,40 @@ paths:
             application/problem+json:
               schema: {$ref: './common.schema.json#/$defs/Problem'}
         default: {$ref: '#/components/responses/Problem'}
+  /v1/simulation-scenarios:
+    get:
+      tags: [Simulation]
+      operationId: listSimulationScenarios
+      summary: List safe scenario metadata available for saved runs
+      responses:
+        '200':
+          description: Available scenarios, policies, islands, and evidence provenance.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SimulationScenarioPage'}
+        default: {$ref: '#/components/responses/Problem'}
   /v1/simulation-runs:
+    get:
+      tags: [Simulation]
+      operationId: listSimulationRuns
+      summary: List saved immutable simulation runs
+      parameters:
+        - {name: scenarioId, in: query, schema: {type: string}}
+        - {name: policy, in: query, schema: {enum: [BASELINE, HARVEST]}}
+        - {name: status, in: query, schema: {enum: [CREATING, COMPLETED, FAILED]}}
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Recent saved runs without their full replay frames.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SimulationRunPage'}
+        default: {$ref: '#/components/responses/Problem'}
     post:
-      x-harvest-status: planned
       tags: [Simulation]
       operationId: createSimulationRun
-      summary: Create a reproducible baseline or Harvest run
+      summary: Execute and save a deterministic run or disruption-derived run
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -858,106 +881,66 @@ paths:
               scenarioId: saint-lucia-demo-v1
               policy: HARVEST
               seed: 8675309
-              speed: 10
+              decisionMode: DETERMINISTIC
+              scope: {mode: SELECTED, islandIds: [saint-lucia]}
       responses:
         '201':
-          description: Run created in `READY`; no hidden state is returned.
+          description: Completed saved run metadata; replay is read through the timeline/world endpoints.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SimulationRun'}
-              example:
-                runId: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
-                scenarioId: saint-lucia-demo-v1
-                policy: HARVEST
-                seed: 8675309
-                speed: 10
-                status: READY
-                currentTime: '2026-09-01T06:00:00Z'
-                createdAt: '2026-08-01T12:00:00Z'
         default: {$ref: '#/components/responses/Problem'}
   /v1/simulation-runs/{runId}:
     get:
-      x-harvest-status: planned
       tags: [Simulation]
       operationId: getSimulationRun
-      summary: Read run status and observable clock
+      summary: Read saved run configuration, status, metrics, and evidence
       parameters:
         - $ref: '#/components/parameters/RunId'
       responses:
         '200':
-          description: Public run status without scenario hidden truth.
+          description: Saved run metadata without replay frames or hidden truth.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SimulationRun'}
-              example:
-                runId: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
-                scenarioId: saint-lucia-demo-v1
-                policy: HARVEST
-                seed: 8675309
-                speed: 10
-                status: RUNNING
-                currentTime: '2026-09-04T14:15:00Z'
-                createdAt: '2026-08-01T12:00:00Z'
         default: {$ref: '#/components/responses/Problem'}
-  /v1/simulation-runs/{runId}/commands:
-    post:
-      x-harvest-status: planned
-      tags: [Simulation]
-      operationId: commandSimulationRun
-      summary: Start, pause, resume, reset, change speed, rewind, or inject an observable scenario action
-      parameters:
-        - $ref: '#/components/parameters/RunId'
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/SimulationCommand'}
-            example:
-              command: SPEED
-              speed: 20
-      responses:
-        '202':
-          description: Valid command accepted by the simulation gateway.
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/SimulationCommandReceipt'}
-              example:
-                commandId: 29292929-2929-4929-8929-292929292929
-                runId: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
-                command: SPEED
-                status: ACCEPTED
-                acceptedAt: '2026-08-01T12:05:00Z'
-        default: {$ref: '#/components/responses/Problem'}
-  /v1/simulation-runs/{runId}/world:
+  /v1/simulation-runs/{runId}/timeline:
     get:
-      x-harvest-status: planned
       tags: [Simulation]
-      operationId: getObservableWorld
-      summary: Read only the observable world projection used by the 3D control room
+      operationId: getSimulationTimeline
+      summary: Load the complete immutable observable replay timeline
       parameters:
         - $ref: '#/components/parameters/RunId'
       responses:
         '200':
-          description: Observable actors, routes, and disruptions; never hidden crop truth.
+          description: Static scene and ordered observable frames for local playback.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/ObservableWorld'}
-              example:
-                runId: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
-                simulationTime: '2026-09-04T14:15:00Z'
-                actors:
-                  - {actorId: 24242424-2424-4424-8424-242424242424, role: TRANSPORTER, position: {latitude: 13.925, longitude: -60.97}, activity: DELIVERING}
-                routes:
-                  - {missionId: 23232323-2323-4323-8323-232323232323, status: ACTIVE, path: [{latitude: 13.94, longitude: -60.96}, {latitude: 13.9094, longitude: -60.9789}]}
-                disruptions: []
+              schema: {$ref: '#/components/schemas/SimulationTimeline'}
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/simulation-runs/{runId}/world:
+    get:
+      tags: [Simulation]
+      operationId: getSimulationWorldFrame
+      summary: Read one saved observable replay frame
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+        - name: frameIndex
+          in: query
+          required: true
+          schema: {type: integer, minimum: 0}
+      responses:
+        '200':
+          description: One immutable observable frame; never hidden crop truth.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SimulationWorldFrame'}
         default: {$ref: '#/components/responses/Problem'}
   /v1/paired-runs:
     post:
-      x-harvest-status: planned
       tags: [Simulation]
       operationId: createPairedRun
-      summary: Create baseline and Harvest runs with identical scenario and seed
+      summary: Execute and save baseline and Harvest runs with identical inputs
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -968,9 +951,11 @@ paths:
             example:
               scenarioId: saint-lucia-demo-v1
               seed: 8675309
+              decisionMode: DETERMINISTIC
+              scope: {mode: SELECTED, islandIds: [saint-lucia]}
       responses:
         '201':
-          description: Paired runs created with identical initial conditions.
+          description: Completed paired runs and their synthetic comparison.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/PairedRun'}
@@ -980,14 +965,13 @@ paths:
                 seed: 8675309
                 baselineRunId: 31313131-3131-4131-8131-313131313131
                 harvestRunId: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
-                status: READY
+                status: COMPLETED
         default: {$ref: '#/components/responses/Problem'}
   /v1/paired-runs/{pairId}:
     get:
-      x-harvest-status: planned
       tags: [Simulation]
       operationId: getPairedRun
-      summary: Read paired-run status and aggregate benchmark result
+      summary: Read a saved paired-run comparison
       parameters:
         - $ref: '#/components/parameters/PairId'
       responses:
@@ -1007,75 +991,6 @@ paths:
                   baseline: {localProcurementRate: 0.44, fulfilmentRate: 0.68, wasteQuantity: {value: 170, unit: kg}}
                   harvest: {localProcurementRate: 0.7, fulfilmentRate: 0.91, wasteQuantity: {value: 80, unit: kg}}
         default: {$ref: '#/components/responses/Problem'}
-  /internal/v1/simulation-events:
-    post:
-      x-harvest-status: planned
-      tags: [Internal]
-      operationId: ingestSimulationEvent
-      summary: Ingest one observable simulation event idempotently
-      security:
-        - internalServiceToken: []
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: './events/event-envelope.schema.json'}
-            x-harvest-example:
-              eventId: 32323232-3232-4232-8232-323232323232
-              eventType: SIMULATION_ACTOR_MOVED
-              occurredAt: '2026-08-01T12:10:00Z'
-              simulationTime: '2026-09-04T14:15:00Z'
-              simulationRunId: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
-              actorId: 24242424-2424-4424-8424-242424242424
-              entityId: 24242424-2424-4424-8424-242424242424
-              traceId: 33333333-3333-4333-8333-333333333333
-              correlationId: 34343434-3434-4434-8434-343434343434
-              causationId: null
-              schemaVersion: '1.0'
-              provenance: SYNTHETIC
-              payload:
-                actorId: 24242424-2424-4424-8424-242424242424
-                position: {latitude: 13.925, longitude: -60.97}
-      responses:
-        '202':
-          description: New event accepted or an identical `eventId` acknowledged without reapplying it.
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/IngestionReceipt'}
-              example: {eventId: 32323232-3232-4232-8232-323232323232, status: ACCEPTED}
-        default: {$ref: '#/components/responses/Problem'}
-  /internal/v1/benchmark-results:
-    post:
-      x-harvest-status: planned
-      tags: [Internal]
-      operationId: ingestBenchmarkResult
-      summary: Ingest aggregate paired-run metrics
-      security:
-        - internalServiceToken: []
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/BenchmarkResultIngress'}
-            example:
-              pairId: 30303030-3030-4030-8030-303030303030
-              baselineRunId: 31313131-3131-4131-8131-313131313131
-              harvestRunId: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
-              baseline: {localProcurementRate: 0.44, fulfilmentRate: 0.68, wasteQuantity: {value: 170, unit: kg}}
-              harvest: {localProcurementRate: 0.7, fulfilmentRate: 0.91, wasteQuantity: {value: 80, unit: kg}}
-              calculatedAt: '2026-08-01T12:30:00Z'
-      responses:
-        '202':
-          description: Result stored and `BENCHMARK_RESULT_RECORDED` emitted.
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/IngestionReceipt'}
-              example: {eventId: 35353535-3535-4535-8535-353535353535, status: ACCEPTED}
-        default: {$ref: '#/components/responses/Problem'}
 components:
   securitySchemes:
     bearerJwt:
@@ -1083,11 +998,6 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Supabase-compatible human bearer JWT.
-    internalServiceToken:
-      type: http
-      scheme: bearer
-      bearerFormat: opaque-service-token
-      description: Rotated token for the simulation or model service. Actor/run context is derived by middleware.
   parameters:
     IdempotencyKey:
       name: Idempotency-Key
@@ -1099,7 +1009,7 @@ components:
         minLength: 8
         maxLength: 128
         pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]+$'
-      example: mobile-20260801-000001
+      example: web-20260801-000001
     Cursor:
       name: cursor
       in: query
@@ -1800,70 +1710,134 @@ components:
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
         steps: {type: array, items: {$ref: '#/components/schemas/TraceStep'}}
-    SimulationRunCreate:
+    SimulationIsland:
       type: object
       additionalProperties: false
-      required: [scenarioId, policy, seed, speed]
+      required: [islandId, name, countryCode]
       properties:
-        scenarioId: {type: string, minLength: 1}
-        policy: {enum: [BASELINE, HARVEST]}
-        seed: {type: integer, minimum: 0, maximum: 4294967295}
-        speed: {type: number, exclusiveMinimum: 0, maximum: 1000}
-    SimulationRun:
+        islandId: {type: string, minLength: 1}
+        name: {type: string, minLength: 1}
+        countryCode: {type: string, pattern: '^[A-Z]{2}$'}
+    SimulationScenario:
       type: object
       additionalProperties: false
-      required: [runId, scenarioId, policy, seed, speed, status, currentTime, createdAt]
+      required: [scenarioId, description, startsAt, durationDays, availablePolicies, availableDecisionModes, islands, provenanceNote]
       properties:
-        runId: {type: string, format: uuid}
         scenarioId: {type: string, minLength: 1}
-        policy: {enum: [BASELINE, HARVEST]}
-        seed: {type: integer, minimum: 0, maximum: 4294967295}
-        speed: {type: number, exclusiveMinimum: 0, maximum: 1000}
-        status: {enum: [READY, RUNNING, PAUSED, COMPLETED, FAILED]}
-        currentTime: {type: string, format: date-time}
-        createdAt: {type: string, format: date-time}
-    SimulationCommand:
+        description: {type: string, minLength: 1}
+        startsAt: {type: string, format: date-time}
+        durationDays: {type: integer, minimum: 1}
+        availablePolicies: {type: array, items: {enum: [BASELINE, HARVEST]}}
+        availableDecisionModes: {type: array, items: {const: DETERMINISTIC}}
+        islands: {type: array, minItems: 1, items: {$ref: '#/components/schemas/SimulationIsland'}}
+        provenanceNote: {type: string, minLength: 1}
+    SimulationScenarioPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/SimulationScenario'}}
+    SimulationScope:
       oneOf:
         - type: object
           additionalProperties: false
-          required: [command]
-          properties: {command: {enum: [START, PAUSE, RESUME, RESET]}}
+          required: [mode]
+          properties: {mode: {const: ALL}}
         - type: object
           additionalProperties: false
-          required: [command, speed]
+          required: [mode, islandIds]
           properties:
-            command: {const: SPEED}
-            speed: {type: number, exclusiveMinimum: 0, maximum: 1000}
-        - type: object
-          additionalProperties: false
-          required: [command, targetTime]
-          properties:
-            command: {const: REWIND}
-            targetTime: {type: string, format: date-time}
-        - type: object
-          additionalProperties: false
-          required: [command, injection]
-          properties:
-            command: {const: INJECT}
-            injection:
-              type: object
-              additionalProperties: false
-              required: [type, scheduledFor, affectedEntityIds]
-              properties:
-                type: {enum: [WEATHER, ROAD, VEHICLE, CROP, DEMAND]}
-                scheduledFor: {type: string, format: date-time}
-                affectedEntityIds: {type: array, minItems: 1, items: {type: string, format: uuid}}
-                publicDescription: {type: string, maxLength: 500}
-    SimulationCommandReceipt:
+            mode: {const: SELECTED}
+            islandIds: {type: array, minItems: 1, uniqueItems: true, items: {type: string, minLength: 1}}
+    InjectedDisruption:
       type: object
       additionalProperties: false
-      required: [commandId, runId, command, status, acceptedAt]
+      required: [type, offsetMs, durationMs, affectedEntityIds, publicDescription]
       properties:
-        commandId: {type: string, format: uuid}
+        type: {enum: [WEATHER, ROAD, VEHICLE, CROP, DEMAND]}
+        offsetMs: {type: integer, minimum: 0}
+        durationMs: {type: integer, minimum: 1}
+        affectedEntityIds: {type: array, minItems: 1, items: {type: string, minLength: 1}}
+        publicDescription: {type: string, minLength: 1, maxLength: 500}
+    SimulationRunCreate:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [scenarioId, policy, seed, decisionMode, scope]
+          properties:
+            scenarioId: {type: string, minLength: 1}
+            policy: {enum: [BASELINE, HARVEST]}
+            seed: {type: integer, minimum: 0, maximum: 4294967295}
+            decisionMode: {enum: [DETERMINISTIC, LLM_ASSISTED]}
+            scope: {$ref: '#/components/schemas/SimulationScope'}
+            disruptions: {type: array, items: {$ref: '#/components/schemas/InjectedDisruption'}}
+        - type: object
+          additionalProperties: false
+          required: [derivedFromRunId, disruptions]
+          properties:
+            derivedFromRunId: {type: string, format: uuid}
+            disruptions: {type: array, minItems: 1, items: {$ref: '#/components/schemas/InjectedDisruption'}}
+    SimulationRunMetrics:
+      type: object
+      additionalProperties: false
+      required: [localProcurementRate, fulfilmentRate, wasteQuantity, totalDemandedKg, totalAcceptedKg, totalSubstitutedKg, totalPromisedKg, commitmentsProposed, commitmentsApproved, commitmentsDelivered, demandsFullyMet, demandsPartiallyMet, demandsUnmet, missionsCompleted, missionsCancelled, observationRequests, eventsProcessed]
+      properties:
+        localProcurementRate: {type: number, minimum: 0, maximum: 1}
+        fulfilmentRate: {type: number, minimum: 0, maximum: 1}
+        wasteQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        totalDemandedKg: {type: number, minimum: 0}
+        totalAcceptedKg: {type: number, minimum: 0}
+        totalSubstitutedKg: {type: number, minimum: 0}
+        totalPromisedKg: {type: number, minimum: 0}
+        commitmentsProposed: {type: integer, minimum: 0}
+        commitmentsApproved: {type: integer, minimum: 0}
+        commitmentsDelivered: {type: integer, minimum: 0}
+        demandsFullyMet: {type: integer, minimum: 0}
+        demandsPartiallyMet: {type: integer, minimum: 0}
+        demandsUnmet: {type: integer, minimum: 0}
+        missionsCompleted: {type: integer, minimum: 0}
+        missionsCancelled: {type: integer, minimum: 0}
+        observationRequests: {type: integer, minimum: 0}
+        eventsProcessed: {type: integer, minimum: 0}
+    SimulationRunError:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code: {type: string}
+        detail: {type: [string, 'null']}
+    SimulationRun:
+      type: object
+      additionalProperties: false
+      required: [runId, scenarioId, policy, seed, decisionMode, scope, resolvedIslandIds, disruptions, status, frameCount, decisionCount, createdAt, updatedAt]
+      properties:
         runId: {type: string, format: uuid}
-        command: {enum: [START, PAUSE, RESUME, RESET, SPEED, REWIND, INJECT]}
-        status: {const: ACCEPTED}
-        acceptedAt: {type: string, format: date-time}
+        scenarioId: {type: string, minLength: 1}
+        policy: {enum: [BASELINE, HARVEST]}
+        seed: {type: integer, minimum: 0, maximum: 4294967295}
+        decisionMode: {enum: [DETERMINISTIC, LLM_ASSISTED]}
+        scope: {$ref: '#/components/schemas/SimulationScope'}
+        resolvedIslandIds: {type: array, minItems: 1, items: {type: string}}
+        disruptions: {type: array, items: {$ref: '#/components/schemas/InjectedDisruption'}}
+        derivedFromRunId: {type: string, format: uuid}
+        status: {enum: [CREATING, COMPLETED, FAILED]}
+        startedAt: {type: string, format: date-time}
+        endedAt: {type: string, format: date-time}
+        frameCount: {type: integer, minimum: 0}
+        decisionCount: {type: integer, minimum: 0}
+        metrics: {$ref: '#/components/schemas/SimulationRunMetrics'}
+        evidenceLabel: {type: string}
+        provenanceNote: {type: string}
+        error: {$ref: '#/components/schemas/SimulationRunError'}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    SimulationRunPage:
+      type: object
+      additionalProperties: false
+      required: [items, pageInfo]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/SimulationRun'}}
+        pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
     ObservableActor:
       type: object
       additionalProperties: false
@@ -1890,23 +1864,100 @@ components:
         type: {enum: [WEATHER, ROAD, VEHICLE, CROP, OTHER]}
         description: {type: string}
         observedAt: {type: string, format: date-time}
-    ObservableWorld:
+    ReplayDecision:
       type: object
       additionalProperties: false
-      required: [runId, simulationTime, actors, routes, disruptions]
+      required: [at, kind, summary, evidence]
+      properties:
+        at: {type: integer}
+        kind: {type: string}
+        summary: {type: string}
+        evidence: {type: object, additionalProperties: {type: [string, number, boolean]}}
+    ReplayScene:
+      type: object
+      additionalProperties: false
+      required: [runId, scenarioId, policy, seed, startsAt, endsAt, farms, buyers, transporters, roads, evidenceLabel]
       properties:
         runId: {type: string, format: uuid}
-        simulationTime: {type: string, format: date-time}
+        scenarioId: {type: string}
+        policy: {enum: [BASELINE, HARVEST]}
+        seed: {type: integer, minimum: 0, maximum: 4294967295}
+        startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
+        farms:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [farmId, name, position]
+            properties: {farmId: {type: string, format: uuid}, name: {type: string}, position: {$ref: './common.schema.json#/$defs/GeoPoint'}}
+        buyers:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [buyerId, name, position]
+            properties: {buyerId: {type: string, format: uuid}, name: {type: string}, position: {$ref: './common.schema.json#/$defs/GeoPoint'}}
+        transporters:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [transporterId, name, homePosition, capacityKg]
+            properties: {transporterId: {type: string, format: uuid}, name: {type: string}, homePosition: {$ref: './common.schema.json#/$defs/GeoPoint'}, capacityKg: {type: number, minimum: 0}}
+        roads:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [roadSegmentId, name, from, to, distanceKm]
+            properties: {roadSegmentId: {type: string, format: uuid}, name: {type: string}, from: {$ref: './common.schema.json#/$defs/GeoPoint'}, to: {$ref: './common.schema.json#/$defs/GeoPoint'}, distanceKm: {type: number, minimum: 0}}
+        evidenceLabel: {type: string}
+    ReplayFrame:
+      type: object
+      additionalProperties: false
+      required: [atMs, at, eventType, actors, missions, batches, demands, disruptions, degradedRoadSegmentIds, newDecisions, totals]
+      properties:
+        atMs: {type: integer}
+        at: {type: string, format: date-time}
+        eventType: {type: string}
         actors: {type: array, items: {$ref: '#/components/schemas/ObservableActor'}}
-        routes: {type: array, items: {$ref: '#/components/schemas/ObservableRoute'}}
+        missions: {type: array, items: {type: object, additionalProperties: true}}
+        batches: {type: array, items: {type: object, additionalProperties: true}}
+        demands: {type: array, items: {type: object, additionalProperties: true}}
         disruptions: {type: array, items: {$ref: '#/components/schemas/ObservableDisruption'}}
+        degradedRoadSegmentIds: {type: array, items: {type: string, format: uuid}}
+        newDecisions: {type: array, items: {$ref: '#/components/schemas/ReplayDecision'}}
+        totals: {type: object, additionalProperties: {type: number}}
+    SimulationTimeline:
+      type: object
+      additionalProperties: false
+      required: [runId, evidenceLabel, provenanceNote, scene, frames]
+      properties:
+        runId: {type: string, format: uuid}
+        evidenceLabel: {type: string}
+        provenanceNote: {type: string}
+        scene: {$ref: '#/components/schemas/ReplayScene'}
+        frames: {type: array, items: {$ref: '#/components/schemas/ReplayFrame'}}
+    SimulationWorldFrame:
+      type: object
+      additionalProperties: false
+      required: [runId, frameIndex, frameCount, frame]
+      properties:
+        runId: {type: string, format: uuid}
+        frameIndex: {type: integer, minimum: 0}
+        frameCount: {type: integer, minimum: 1}
+        frame: {$ref: '#/components/schemas/ReplayFrame'}
     PairedRunCreate:
       type: object
       additionalProperties: false
-      required: [scenarioId, seed]
+      required: [scenarioId, seed, decisionMode, scope]
       properties:
         scenarioId: {type: string, minLength: 1}
         seed: {type: integer, minimum: 0, maximum: 4294967295}
+        decisionMode: {enum: [DETERMINISTIC, LLM_ASSISTED]}
+        scope: {$ref: '#/components/schemas/SimulationScope'}
+        disruptions: {type: array, items: {$ref: '#/components/schemas/InjectedDisruption'}}
     BenchmarkMetrics:
       type: object
       additionalProperties: false
@@ -1918,37 +1969,39 @@ components:
     BenchmarkComparison:
       type: object
       additionalProperties: false
-      required: [baseline, harvest]
+      required: [baseline, harvest, delta]
       properties:
         baseline: {$ref: '#/components/schemas/BenchmarkMetrics'}
         harvest: {$ref: '#/components/schemas/BenchmarkMetrics'}
+        delta:
+          type: object
+          additionalProperties: false
+          required: [localProcurementRate, fulfilmentRate, wasteQuantity]
+          properties:
+            localProcurementRate: {type: number}
+            fulfilmentRate: {type: number}
+            wasteQuantity:
+              type: object
+              additionalProperties: false
+              required: [value, unit]
+              properties: {value: {type: number}, unit: {const: kg}}
     PairedRun:
       type: object
       additionalProperties: false
-      required: [pairId, scenarioId, seed, baselineRunId, harvestRunId, status]
+      required: [pairId, scenarioId, seed, decisionMode, scope, resolvedIslandIds, disruptions, baselineRunId, harvestRunId, status, createdAt, updatedAt]
       properties:
         pairId: {type: string, format: uuid}
         scenarioId: {type: string, minLength: 1}
         seed: {type: integer, minimum: 0, maximum: 4294967295}
+        decisionMode: {enum: [DETERMINISTIC, LLM_ASSISTED]}
+        scope: {$ref: '#/components/schemas/SimulationScope'}
+        resolvedIslandIds: {type: array, minItems: 1, items: {type: string}}
+        disruptions: {type: array, items: {$ref: '#/components/schemas/InjectedDisruption'}}
         baselineRunId: {type: string, format: uuid}
         harvestRunId: {type: string, format: uuid}
-        status: {enum: [READY, RUNNING, COMPLETED, FAILED]}
+        status: {enum: [CREATING, COMPLETED, FAILED]}
         result: {$ref: '#/components/schemas/BenchmarkComparison'}
-    BenchmarkResultIngress:
-      type: object
-      additionalProperties: false
-      required: [pairId, baselineRunId, harvestRunId, baseline, harvest, calculatedAt]
-      properties:
-        pairId: {type: string, format: uuid}
-        baselineRunId: {type: string, format: uuid}
-        harvestRunId: {type: string, format: uuid}
-        baseline: {$ref: '#/components/schemas/BenchmarkMetrics'}
-        harvest: {$ref: '#/components/schemas/BenchmarkMetrics'}
-        calculatedAt: {type: string, format: date-time}
-    IngestionReceipt:
-      type: object
-      additionalProperties: false
-      required: [eventId, status]
-      properties:
-        eventId: {type: string, format: uuid}
-        status: {enum: [ACCEPTED, DUPLICATE]}
+        evidenceLabel: {type: string}
+        error: {$ref: '#/components/schemas/SimulationRunError'}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}

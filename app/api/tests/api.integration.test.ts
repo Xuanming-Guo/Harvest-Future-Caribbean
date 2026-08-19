@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { AddressInfo } from "node:net";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -7,6 +8,7 @@ import { buildServer } from "../src/server.js";
 
 const server = await buildServer();
 const tokens: Record<string, string> = {};
+let apiBaseUrl = "";
 
 async function signIn(persona: string) {
   const response = await server.inject({ method: "POST", url: "/dev/session", payload: { persona } });
@@ -28,8 +30,10 @@ async function decide(persona: string, approvalId: string, decision: "APPROVE" |
 }
 
 beforeAll(async () => {
-  await server.ready();
-  for (const persona of ["buyer-hotel", "farmer-ana", "farmer-marcus", "transporter-daniel", "coordinator-maya"]) await signIn(persona);
+  await server.listen({ host: "127.0.0.1", port: 0 });
+  const address = server.server.address() as AddressInfo;
+  apiBaseUrl = `http://127.0.0.1:${address.port}`;
+  for (const persona of ["buyer-hotel", "farmer-ana", "farmer-marcus", "transporter-daniel", "coordinator-maya", "operations-demo"]) await signIn(persona);
 });
 
 afterAll(async () => server.close());
@@ -238,7 +242,7 @@ describe("participant Product API", () => {
     expect(await prisma.reservation.count({ where: { allocationId: allocation.id } })).toBe(0);
   });
 
-  it("records coordinator verification, protects traces, and keeps planned simulation routes unserved", async () => {
+  it("records coordinator verification, protects traces, and restricts technical simulation routes", async () => {
     const tasks = (await server.inject({ method: "GET", url: "/v1/verification-tasks?status=OPEN", headers: auth("coordinator-maya") })).json().items;
     const latest = tasks.find((task: { subjectId: string }) => task.subjectId !== "12121212-1212-4212-8212-121212121212");
     const decision = await server.inject({ method: "POST", url: `/v1/verification-tasks/${latest.taskId}/decisions`, headers: mutationHeaders("coordinator-maya", "verify-observation"), payload: { decision: "VERIFY", note: "Field update confirmed." } });
@@ -249,9 +253,9 @@ describe("participant Product API", () => {
     const hiddenTrace = await server.inject({ method: "GET", url: `/v1/agent-traces/${cropTrace.id}`, headers: auth("farmer-marcus") });
     expect(hiddenTrace.statusCode).toBe(404);
 
-    for (const url of ["/v1/operations/snapshot", "/v1/events/stream", "/v1/simulation-runs/99999999-9999-4999-8999-999999999999", "/v1/paired-runs/99999999-9999-4999-8999-999999999999"]) {
+    for (const url of ["/v1/operations/snapshot", "/v1/simulation-runs", "/v1/simulation-runs/99999999-9999-4999-8999-999999999999", "/v1/paired-runs/99999999-9999-4999-8999-999999999999"]) {
       const response = await server.inject({ method: "GET", url, headers: auth("buyer-hotel") });
-      expect(response.statusCode).toBe(404);
+      expect(response.statusCode).toBe(403);
     }
   });
 
@@ -264,5 +268,206 @@ describe("participant Product API", () => {
     expect(replay.json()).toEqual(first.json());
     const conflict = await server.inject({ method: "POST", url: "/v1/buyer-demands", headers, payload: { ...payload, quantity: { value: 11, unit: "kg" } } });
     expect(conflict.statusCode).toBe(409);
+  });
+
+  it("creates immutable replayable runs, derived runs, and deterministic pairs", async () => {
+    const payload = {
+      scenarioId: "saint-lucia-demo-v1",
+      policy: "HARVEST",
+      seed: 42,
+      decisionMode: "DETERMINISTIC",
+      scope: { mode: "SELECTED", islandIds: ["saint-lucia"] },
+    };
+    const headers = { ...auth("operations-demo"), "idempotency-key": "simulation-run-seed-42" };
+
+    const scenarios = await server.inject({ method: "GET", url: "/v1/simulation-scenarios", headers: auth("operations-demo") });
+    expect(scenarios.statusCode).toBe(200);
+    expect(scenarios.json().items[0]).toMatchObject({
+      scenarioId: "saint-lucia-demo-v1",
+      availableDecisionModes: ["DETERMINISTIC"],
+      islands: [{ islandId: "saint-lucia", countryCode: "LC" }],
+    });
+
+    const unavailableLlm = await server.inject({
+      method: "POST",
+      url: "/v1/simulation-runs",
+      headers: mutationHeaders("operations-demo", "llm-run"),
+      payload: { ...payload, decisionMode: "LLM_ASSISTED" },
+    });
+    expect(unavailableLlm.statusCode).toBe(409);
+    expect(unavailableLlm.json().code).toBe("LLM_PROVIDER_NOT_CONFIGURED");
+
+    const created = await server.inject({ method: "POST", url: "/v1/simulation-runs", headers, payload });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({
+      scenarioId: payload.scenarioId,
+      policy: "HARVEST",
+      seed: 42,
+      decisionMode: "DETERMINISTIC",
+      status: "COMPLETED",
+      resolvedIslandIds: ["saint-lucia"],
+      evidenceLabel: expect.stringContaining("SYNTHETIC"),
+    });
+    expect(created.json().frameCount).toBeGreaterThan(20);
+    const runId = created.json().runId as string;
+
+    const replayedRequest = await server.inject({ method: "POST", url: "/v1/simulation-runs", headers, payload });
+    expect(replayedRequest.json()).toEqual(created.json());
+    const changedRequest = await server.inject({ method: "POST", url: "/v1/simulation-runs", headers, payload: { ...payload, seed: 43 } });
+    expect(changedRequest.statusCode).toBe(409);
+
+    const run = await server.inject({ method: "GET", url: `/v1/simulation-runs/${runId}`, headers: auth("operations-demo") });
+    expect(run.statusCode).toBe(200);
+    expect(run.body).not.toContain("determinismDigest");
+    expect(run.body).not.toContain("potentialYieldKg");
+
+    const timeline = await server.inject({ method: "GET", url: `/v1/simulation-runs/${runId}/timeline`, headers: auth("operations-demo") });
+    expect(timeline.statusCode).toBe(200);
+    expect(timeline.json().frames).toHaveLength(created.json().frameCount);
+    expect(timeline.json().scene.runId).toBe(runId);
+    for (const forbidden of ["potentialYieldKg", "qualityFraction", "dailySpoilageRate", "severity"]) {
+      expect(timeline.body).not.toContain(forbidden);
+    }
+
+    const firstFrame = await server.inject({ method: "GET", url: `/v1/simulation-runs/${runId}/world?frameIndex=0`, headers: auth("operations-demo") });
+    expect(firstFrame.statusCode).toBe(200);
+    expect(firstFrame.json()).toMatchObject({ runId, frameIndex: 0, frameCount: created.json().frameCount });
+    const invalidFrame = await server.inject({ method: "GET", url: `/v1/simulation-runs/${runId}/world?frameIndex=${created.json().frameCount}`, headers: auth("operations-demo") });
+    expect(invalidFrame.statusCode).toBe(422);
+
+    const reproducible = await server.inject({
+      method: "POST",
+      url: "/v1/simulation-runs",
+      headers: mutationHeaders("operations-demo", "same-seed-run"),
+      payload,
+    });
+    expect(reproducible.statusCode).toBe(201);
+    expect(reproducible.json().runId).not.toBe(runId);
+    const [storedFirst, storedSecond] = await Promise.all([
+      prisma.simulationRun.findUniqueOrThrow({ where: { id: runId } }),
+      prisma.simulationRun.findUniqueOrThrow({ where: { id: reproducible.json().runId } }),
+    ]);
+    expect(storedSecond.determinismDigest).toBe(storedFirst.determinismDigest);
+    expect(storedSecond.metrics).toEqual(storedFirst.metrics);
+
+    const derived = await server.inject({
+      method: "POST",
+      url: "/v1/simulation-runs",
+      headers: mutationHeaders("operations-demo", "derived-storm"),
+      payload: {
+        derivedFromRunId: runId,
+        disruptions: [{
+          type: "WEATHER",
+          offsetMs: 432_000_000,
+          durationMs: 86_400_000,
+          affectedEntityIds: ["all"],
+          publicDescription: "Synthetic storm introduced for a derived replay.",
+        }],
+      },
+    });
+    expect(derived.statusCode).toBe(201);
+    expect(derived.json()).toMatchObject({ derivedFromRunId: runId, status: "COMPLETED" });
+    expect(derived.json().disruptions).toHaveLength(1);
+    expect((await prisma.simulationRun.findUniqueOrThrow({ where: { id: runId } })).disruptions).toEqual([]);
+
+    const pair = await server.inject({
+      method: "POST",
+      url: "/v1/paired-runs",
+      headers: mutationHeaders("operations-demo", "paired-seed-42"),
+      payload: { scenarioId: payload.scenarioId, seed: 42, decisionMode: "DETERMINISTIC", scope: payload.scope },
+    });
+    expect(pair.statusCode).toBe(201);
+    expect(pair.json()).toMatchObject({ status: "COMPLETED", evidenceLabel: expect.stringContaining("SYNTHETIC") });
+    expect(pair.json().baselineRunId).not.toBe(pair.json().harvestRunId);
+    expect(pair.json().result).toHaveProperty("baseline.fulfilmentRate");
+    expect(pair.json().result).toHaveProperty("harvest.fulfilmentRate");
+    expect(pair.json().result).toHaveProperty("delta.wasteQuantity.value");
+
+    const list = await server.inject({ method: "GET", url: "/v1/simulation-runs?limit=2", headers: auth("operations-demo") });
+    expect(list.statusCode).toBe(200);
+    expect(list.json().items).toHaveLength(2);
+    expect(await prisma.simulationActorMapping.count({ where: { simulationRunId: runId } })).toBeGreaterThan(0);
+
+    const realSnapshot = await server.inject({ method: "GET", url: "/v1/operations/snapshot", headers: auth("operations-demo") });
+    const runSnapshot = await server.inject({ method: "GET", url: `/v1/operations/snapshot?simulationRunId=${runId}`, headers: auth("operations-demo") });
+    expect(realSnapshot.statusCode).toBe(200);
+    expect(realSnapshot.json()).not.toHaveProperty("simulationRunId");
+    expect(runSnapshot.json()).toMatchObject({ simulationRunId: runId, activeListings: 0, openDemands: 0 });
+  });
+
+  it("keeps marketplace records isolated between real users and simulation runs", async () => {
+    const runs = await prisma.simulationRun.findMany({ where: { status: "COMPLETED" }, take: 2, orderBy: { createdAt: "asc" } });
+    expect(runs).toHaveLength(2);
+    const createdIds: string[] = [];
+    try {
+      for (const [index, run] of runs.entries()) {
+        const farmerId = randomUUID();
+        const buyerId = randomUUID();
+        const farmId = randomUUID();
+        const batchId = randomUUID();
+        const listingId = randomUUID();
+        createdIds.push(listingId, batchId, farmId, farmerId, buyerId);
+        await prisma.actor.createMany({ data: [
+          { id: farmerId, authSubject: `sim-farmer-${index}`, name: `Sim Farmer ${index}`, role: "FARMER", isSynthetic: true, simulationRunId: run.id },
+          { id: buyerId, authSubject: `sim-buyer-${index}`, name: `Sim Buyer ${index}`, role: "BUYER", isSynthetic: true, simulationRunId: run.id },
+        ] });
+        await prisma.farm.create({ data: { id: farmId, name: `Run ${index} Farm`, farmerId, latitude: 13.95, longitude: -61, simulationRunId: run.id } });
+        await prisma.cropBatch.create({ data: { id: batchId, farmId, cropType: "CUCUMBER", status: "HARVEST_READY", availableToPromise: 10, provenance: "SYNTHETIC", simulationRunId: run.id } });
+        await prisma.listing.create({ data: { id: listingId, cropBatchId: batchId, farmerId, cropType: "CUCUMBER", quantity: 10, unitPrice: 5, availableFrom: new Date("2026-09-01"), availableUntil: new Date("2026-10-01"), status: "ACTIVE", simulationRunId: run.id } });
+        await signIn(`sim-buyer-${index}`);
+      }
+
+      const first = await server.inject({ method: "GET", url: "/v1/listings", headers: auth("sim-buyer-0") });
+      const second = await server.inject({ method: "GET", url: "/v1/listings", headers: auth("sim-buyer-1") });
+      const real = await server.inject({ method: "GET", url: "/v1/listings", headers: auth("buyer-hotel") });
+      expect(first.json().items).toHaveLength(1);
+      expect(second.json().items).toHaveLength(1);
+      expect(first.json().items[0].listingId).not.toBe(second.json().items[0].listingId);
+      expect(real.json().items.every((item: { listingId: string }) => !createdIds.includes(item.listingId))).toBe(true);
+    } finally {
+      await prisma.listing.deleteMany({ where: { id: { in: createdIds } } });
+      await prisma.cropBatch.deleteMany({ where: { id: { in: createdIds } } });
+      await prisma.farm.deleteMany({ where: { id: { in: createdIds } } });
+      await prisma.actor.deleteMany({ where: { id: { in: createdIds } } });
+    }
+  });
+
+  it("replays SSE events strictly after the monotonic Last-Event-ID cursor", async () => {
+    const readEvents = async (lastEventId?: string) => {
+      const controller = new AbortController();
+      const response = await fetch(`${apiBaseUrl}/v1/events/stream`, {
+        headers: {
+          ...auth("operations-demo"),
+          ...(lastEventId ? { "Last-Event-ID": lastEventId } : {}),
+        },
+        signal: controller.signal,
+      });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("text/event-stream");
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      for (let attempt = 0; attempt < 5 && (text.match(/^id: /gm)?.length ?? 0) < 2; attempt += 1) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        text += decoder.decode(chunk.value, { stream: true });
+      }
+      controller.abort();
+      await reader.cancel().catch(() => undefined);
+      return text;
+    };
+
+    const initial = await readEvents();
+    const initialIds = [...initial.matchAll(/^id: (\d+)$/gm)].map((match) => BigInt(match[1]!));
+    expect(initialIds.length).toBeGreaterThan(1);
+    expect(new Set(initialIds.map(String)).size).toBe(initialIds.length);
+    expect(initialIds).toEqual([...initialIds].sort((a, b) => (a < b ? -1 : 1)));
+    expect(initial).toMatch(/^data: \{"eventId":"[0-9a-f-]+","eventType":/m);
+
+    const resumed = await readEvents(initialIds[0]!.toString());
+    const resumedIds = [...resumed.matchAll(/^id: (\d+)$/gm)].map((match) => BigInt(match[1]!));
+    expect(resumedIds.length).toBeGreaterThan(0);
+    expect(resumedIds.every((cursor) => cursor > initialIds[0]!)).toBe(true);
+    expect(resumedIds).not.toContain(initialIds[0]);
   });
 });

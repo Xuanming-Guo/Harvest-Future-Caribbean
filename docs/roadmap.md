@@ -44,7 +44,7 @@ the executable scope and acceptance criteria.
 
 - Product direction and priorities.
 - Product API and full-stack implementation.
-- Website/mobile/simulation integration.
+- Website/control-room/simulation integration.
 - Agent architecture and model integration.
 
 ### Faisal

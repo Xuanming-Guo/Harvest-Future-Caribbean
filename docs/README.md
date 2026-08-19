@@ -14,6 +14,12 @@ Use this reading order:
 7. [`context.md`](context.md) — complete application, research, and planning
    background.
 
+Before changing or testing saved simulation runs, replay, run-scoped
+snapshots, SSE, or control-room integration, read
+[`simulation_api_local_testing.md`](simulation_api_local_testing.md). It is the
+copy-ready localhost guide and records the expected deterministic seed-42
+values and the current issue #29/#30 boundary.
+
 The linked GitHub issue defines the scope of a change. Product, architecture,
 and contracts define the current system constraints. If an issue conflicts with
 those constraints, record the decision and update the governing documentation

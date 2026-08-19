@@ -114,7 +114,7 @@ export async function produceFixturePrediction(
   const batch = await prisma.cropBatch.findUnique({ where: { id: cropBatchId } });
   if (!batch) throw httpError(404, "CROP_BATCH_NOT_FOUND", "Crop batch was not found.");
   const observation = await prisma.cropObservation.findFirst({
-    where: { cropBatchId },
+    where: { cropBatchId, simulationRunId: batch.simulationRunId },
     orderBy: { recordedAt: "desc" },
   });
   const estimate = observation?.estimatedQuantity ?? 20;
@@ -132,7 +132,7 @@ export async function produceFixturePrediction(
 
   await prisma.$transaction(async (tx) => {
     const committed = await tx.reservation.aggregate({
-      where: { cropBatchId, status: "ACTIVE" },
+      where: { cropBatchId, status: "ACTIVE", simulationRunId: batch.simulationRunId },
       _sum: { quantity: true },
     });
     const committedQuantity = committed._sum.quantity ?? 0;
@@ -160,6 +160,7 @@ export async function produceFixturePrediction(
         },
         provenance: Provenance.MODEL_PREDICTED,
         generatedAt,
+        simulationRunId: batch.simulationRunId,
       },
     });
     await tx.cropBatch.update({
@@ -178,6 +179,7 @@ export async function produceFixturePrediction(
       correlationId: eventContext.correlationId,
       causationId: eventContext.causationId,
       provenance: Provenance.MODEL_PREDICTED,
+      simulationRunId: batch.simulationRunId,
       payload: {
         predictionId,
         cropBatchId,
@@ -200,6 +202,7 @@ export async function produceFixturePrediction(
         provenance: Provenance.MODEL_PREDICTED,
         summary: `Forecast q10 is ${q10} kg; ${committedQuantity} kg is committed, leaving ${availableToPromise} kg ATP.`,
         confidence: observation ? 0.76 : 0.55,
+        simulationRunId: batch.simulationRunId,
       },
     });
     return forecastEvent;
@@ -223,12 +226,13 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
       status: "ACTIVE",
       availableFrom: { lte: order.neededBy },
       availableUntil: { gte: new Date() },
+      simulationRunId: order.simulationRunId,
       ...(requestedIds.length ? { id: { in: requestedIds } } : {}),
     },
     orderBy: [{ unitPrice: "asc" }, { availableFrom: "asc" }, { createdAt: "asc" }, { id: "asc" }],
   });
   const batches = await prisma.cropBatch.findMany({
-    where: { id: { in: [...new Set(listings.map((listing) => listing.cropBatchId))] } },
+    where: { id: { in: [...new Set(listings.map((listing) => listing.cropBatchId))] }, simulationRunId: order.simulationRunId },
   });
   const remainingByBatch = new Map(batches.map((batch) => [batch.id, batch.availableToPromise]));
 
@@ -261,6 +265,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
           toolName: "read-safe-supply",
           provenance: Provenance.INFERRED,
           summary: `Found ${order.requestedQuantity - remaining} kg of ${order.requestedQuantity} kg required. No partial commitment was proposed.`,
+          simulationRunId: order.simulationRunId,
         },
       });
     });
@@ -269,14 +274,14 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
 
   const allocationId = randomUUID();
   const farmers = await prisma.listing.findMany({
-    where: { id: { in: lines.map((line) => line.listingId) } },
+    where: { id: { in: lines.map((line) => line.listingId) }, simulationRunId: order.simulationRunId },
     select: { farmerId: true },
   });
   const approverIds = [...new Set([order.buyerId, ...farmers.map((listing) => listing.farmerId)])];
   const approvalIds = approverIds.map(() => randomUUID());
   await prisma.$transaction(async (tx) => {
-    await tx.allocation.create({ data: { id: allocationId, orderId, status: "PROPOSED" } });
-    await tx.allocationLine.createMany({ data: lines.map((line) => ({ allocationId, ...line })) });
+    await tx.allocation.create({ data: { id: allocationId, orderId, status: "PROPOSED", simulationRunId: order.simulationRunId } });
+    await tx.allocationLine.createMany({ data: lines.map((line) => ({ allocationId, ...line, simulationRunId: order.simulationRunId })) });
     await tx.approval.createMany({
       data: approverIds.map((requestedFromActorId, index) => ({
         id: approvalIds[index],
@@ -285,6 +290,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
         requestedFromActorId,
         status: "PENDING",
         requestedAt: new Date(),
+        simulationRunId: order.simulationRunId,
       })),
     });
     await tx.order.update({ where: { id: orderId }, data: { lifecycleStatus: "AWAITING_APPROVAL" } });
@@ -301,6 +307,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
         toolName: "read-safe-supply",
         provenance: Provenance.INFERRED,
         summary: `Confirmed complete coverage for ${order.requestedQuantity} kg using current listing windows and per-batch ATP.`,
+        simulationRunId: order.simulationRunId,
       },
     });
     await tx.traceStep.create({
@@ -313,6 +320,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
         provenance: Provenance.INFERRED,
         summary: `Proposed ${lines.map((line) => `${line.quantity} kg`).join(" + ")} across ${lines.length} farms.`,
         confidence: 0.94,
+        simulationRunId: order.simulationRunId,
       },
     });
     await tx.traceStep.create({
@@ -324,6 +332,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
         toolName: "request-human-approval",
         provenance: Provenance.INFERRED,
         summary: `Requested approval from the buyer and ${approverIds.length - 1} participating farmer${approverIds.length === 2 ? "" : "s"}; no stock is reserved yet.`,
+        simulationRunId: order.simulationRunId,
       },
     });
     await recordEvent(tx, {
@@ -334,6 +343,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
       correlationId: orderEvent?.correlationId,
       causationId: orderEvent?.id,
       provenance: Provenance.INFERRED,
+      simulationRunId: order.simulationRunId,
       payload: {
         allocationId,
         orderId,
@@ -385,6 +395,7 @@ export async function approveAllocation(
         correlationId: proposedEvent?.correlationId,
         causationId: proposedEvent?.id,
         provenance: Provenance.OBSERVED,
+        simulationRunId: order.simulationRunId,
         payload: { approvalId: approval.id, subjectType: "ALLOCATION", subjectId: allocation.id, decision: "APPROVE" },
       });
       if (trace) {
@@ -397,6 +408,7 @@ export async function approveAllocation(
             toolName: "record-human-decision",
             provenance: Provenance.OBSERVED,
             summary: `Human approval recorded${reason ? `: ${reason}` : "."}`,
+            simulationRunId: order.simulationRunId,
           },
         });
       }
@@ -432,7 +444,7 @@ export async function approveAllocation(
         if (trace) {
           await tx.agentTrace.update({ where: { id: traceId }, data: { status: "WAITING", stage: "AWAITING_SUPPLY", summary: "Supply changed before final commitment; the proposal was invalidated without reserving stock." } });
           await tx.traceStep.create({
-            data: { traceId, recordedAt: decidedAt, kind: "DECISION", agentName: "Commitment Agent", toolName: "revalidate-safe-supply", provenance: Provenance.INFERRED, summary: "Invalidated the allocation because aggregate ATP or listing supply changed; no partial reservation was created." },
+            data: { traceId, recordedAt: decidedAt, kind: "DECISION", agentName: "Commitment Agent", toolName: "revalidate-safe-supply", provenance: Provenance.INFERRED, summary: "Invalidated the allocation because aggregate ATP or listing supply changed; no partial reservation was created.", simulationRunId: order.simulationRunId },
           });
         }
         await recordEvent(tx, {
@@ -443,6 +455,7 @@ export async function approveAllocation(
           correlationId: approvalEvent.correlationId,
           causationId: approvalEvent.id,
           provenance: Provenance.INFERRED,
+          simulationRunId: order.simulationRunId,
           payload: { allocationId: allocation.id, orderId: order.id, reason: "SUPPLY_CHANGED", status: "STALE" },
         });
         return updatedApproval;
@@ -450,7 +463,7 @@ export async function approveAllocation(
 
       await tx.allocation.update({ where: { id: allocation.id }, data: { status: "APPROVED" } });
       for (const [cropBatchId, quantity] of requiredByBatch) {
-        await tx.reservation.create({ data: { allocationId: allocation.id, cropBatchId, quantity, status: "ACTIVE" } });
+        await tx.reservation.create({ data: { allocationId: allocation.id, cropBatchId, quantity, status: "ACTIVE", simulationRunId: order.simulationRunId } });
         await tx.cropBatch.update({ where: { id: cropBatchId }, data: { availableToPromise: { decrement: quantity } } });
       }
       for (const [listingId, quantity] of requiredByListing) {
@@ -473,12 +486,13 @@ export async function approveAllocation(
           estimatedDistanceKm: route.distanceKm,
           estimatedDurationMinutes: route.durationMinutes,
           estimatedArrival: route.estimatedArrival,
+          simulationRunId: order.simulationRunId,
         },
       });
       if (trace) {
         await tx.agentTrace.update({ where: { id: trace.id }, data: { status: "RUNNING", stage: "DELIVERY_AVAILABLE", summary: "All participants approved; safe supply was reserved and a delivery mission is available." } });
-        await tx.traceStep.create({ data: { traceId, recordedAt: decidedAt, kind: "STATE_CHANGE", agentName: "Commitment Agent", toolName: "commit-reservations", provenance: Provenance.INFERRED, summary: "Aggregate supply was revalidated and reservations were committed atomically." } });
-        await tx.traceStep.create({ data: { traceId, recordedAt: decidedAt, kind: "DECISION", agentName: "Logistics Agent", toolName: "build-pickup-route", provenance: Provenance.INFERRED, summary: `Created a ${route.stops.length}-stop mission covering ${route.distanceKm} km with an estimated ${route.durationMinutes}-minute duration.` } });
+        await tx.traceStep.create({ data: { traceId, recordedAt: decidedAt, kind: "STATE_CHANGE", agentName: "Commitment Agent", toolName: "commit-reservations", provenance: Provenance.INFERRED, summary: "Aggregate supply was revalidated and reservations were committed atomically.", simulationRunId: order.simulationRunId } });
+        await tx.traceStep.create({ data: { traceId, recordedAt: decidedAt, kind: "DECISION", agentName: "Logistics Agent", toolName: "build-pickup-route", provenance: Provenance.INFERRED, summary: `Created a ${route.stops.length}-stop mission covering ${route.distanceKm} km with an estimated ${route.durationMinutes}-minute duration.`, simulationRunId: order.simulationRunId } });
       }
       const allocationEvent = await recordEvent(tx, {
         eventType: "ALLOCATION_APPROVED",
@@ -488,6 +502,7 @@ export async function approveAllocation(
         correlationId: approvalEvent.correlationId,
         causationId: approvalEvent.id,
         provenance: Provenance.OBSERVED,
+        simulationRunId: order.simulationRunId,
         payload: { allocationId: allocation.id, orderId: order.id, lines: lines.map((line) => ({ cropBatchId: line.cropBatchId, quantity: kilograms(line.quantity) })) },
       });
       await recordEvent(tx, {
@@ -498,6 +513,7 @@ export async function approveAllocation(
         causationId: allocationEvent.id,
         correlationId: allocationEvent.correlationId,
         provenance: Provenance.INFERRED,
+        simulationRunId: order.simulationRunId,
         payload: { missionId, orderId: order.id, status: "AVAILABLE", stops: route.stops, estimatedDistanceKm: route.distanceKm, estimatedDurationMinutes: route.durationMinutes, estimatedArrival: route.estimatedArrival.toISOString() },
       });
       return updatedApproval;
@@ -507,7 +523,7 @@ export async function approveAllocation(
 
 async function approveRecovery(
   tx: Prisma.TransactionClient,
-  approval: { id: string; subjectType: string; subjectId: string },
+  approval: { id: string; subjectType: string; subjectId: string; simulationRunId: string | null },
   actorId: string,
   reason?: string,
 ) {
@@ -543,6 +559,7 @@ async function approveRecovery(
     correlationId: proposedEvent?.correlationId,
     causationId: proposedEvent?.id,
     provenance: Provenance.OBSERVED,
+    simulationRunId: approval.simulationRunId,
     payload: { approvalId: approval.id, subjectType: "RECOVERY", subjectId: exception.id, decision: "APPROVE" },
   });
   await recordEvent(tx, {
@@ -553,12 +570,13 @@ async function approveRecovery(
     correlationId: approvalEvent.correlationId,
     causationId: approvalEvent.id,
     provenance: Provenance.OBSERVED,
+    simulationRunId: approval.simulationRunId,
     payload: { exceptionId: exception.id, approvalId: approval.id, actionType: "RESCHEDULE", missionId: mission.id, deadline: proposedDeadline.toISOString() },
   });
   if (trace) {
     await tx.agentTrace.update({ where: { id: traceId }, data: { status: "COMPLETED", stage: "RECOVERY_APPLIED", summary: "A human coordinator approved the deterministic two-hour recovery proposal." } });
     await tx.traceStep.create({
-      data: { traceId, recordedAt: decidedAt, kind: "APPROVAL", agentName: "Exception Agent", toolName: "apply-approved-recovery", provenance: Provenance.OBSERVED, summary: `Human approval applied the stored deadline change to ${proposedDeadline.toISOString()}.` },
+      data: { traceId, recordedAt: decidedAt, kind: "APPROVAL", agentName: "Exception Agent", toolName: "apply-approved-recovery", provenance: Provenance.OBSERVED, summary: `Human approval applied the stored deadline change to ${proposedDeadline.toISOString()}.`, simulationRunId: approval.simulationRunId },
     });
   }
   return tx.approval.findUniqueOrThrow({ where: { id: approval.id } });
@@ -582,20 +600,20 @@ export async function rejectApproval(approvalId: string, actorId: string, reason
       const trace = await tx.agentTrace.findFirst({ where: { subjectType: "ORDER", subjectId: allocation.orderId } });
       const traceId = order.traceId ?? trace?.id ?? randomUUID();
       const proposedEvent = await tx.domainEvent.findFirst({ where: { eventType: "ALLOCATION_PROPOSED", entityId: allocation.id }, orderBy: { occurredAt: "desc" } });
-      await recordEvent(tx, { eventType: "APPROVAL_DECIDED", actorId, entityId: approvalId, traceId, correlationId: proposedEvent?.correlationId, causationId: proposedEvent?.id, provenance: Provenance.OBSERVED, payload: { approvalId, subjectType: "ALLOCATION", subjectId: allocation.id, decision: "REJECT" } });
+      await recordEvent(tx, { eventType: "APPROVAL_DECIDED", actorId, entityId: approvalId, traceId, correlationId: proposedEvent?.correlationId, causationId: proposedEvent?.id, provenance: Provenance.OBSERVED, simulationRunId: approval.simulationRunId, payload: { approvalId, subjectType: "ALLOCATION", subjectId: allocation.id, decision: "REJECT" } });
       if (trace) {
         await tx.agentTrace.update({ where: { id: traceId }, data: { status: "COMPLETED", stage: "ALLOCATION_REJECTED", summary: "A participant rejected the proposed commitment; no stock was reserved." } });
-        await tx.traceStep.create({ data: { traceId, recordedAt: decidedAt, kind: "APPROVAL", agentName: "Commitment Agent", toolName: "record-human-decision", provenance: Provenance.OBSERVED, summary: `Human rejected the allocation${reason ? `: ${reason}` : "."}` } });
+        await tx.traceStep.create({ data: { traceId, recordedAt: decidedAt, kind: "APPROVAL", agentName: "Commitment Agent", toolName: "record-human-decision", provenance: Provenance.OBSERVED, summary: `Human rejected the allocation${reason ? `: ${reason}` : "."}`, simulationRunId: approval.simulationRunId } });
       }
     } else if (approval.subjectType === "RECOVERY") {
       const exception = await tx.operationalException.update({ where: { id: approval.subjectId }, data: { status: "OPEN" } });
       const trace = await tx.agentTrace.findFirst({ where: { subjectType: "EXCEPTION", subjectId: exception.id } });
       const traceId = exception.traceId ?? trace?.id ?? randomUUID();
       const proposedEvent = await tx.domainEvent.findFirst({ where: { eventType: "RECOVERY_PROPOSED", entityId: exception.id }, orderBy: { occurredAt: "desc" } });
-      await recordEvent(tx, { eventType: "APPROVAL_DECIDED", actorId, entityId: approvalId, traceId, correlationId: proposedEvent?.correlationId, causationId: proposedEvent?.id, provenance: Provenance.OBSERVED, payload: { approvalId, subjectType: "RECOVERY", subjectId: exception.id, decision: "REJECT" } });
+      await recordEvent(tx, { eventType: "APPROVAL_DECIDED", actorId, entityId: approvalId, traceId, correlationId: proposedEvent?.correlationId, causationId: proposedEvent?.id, provenance: Provenance.OBSERVED, simulationRunId: approval.simulationRunId, payload: { approvalId, subjectType: "RECOVERY", subjectId: exception.id, decision: "REJECT" } });
       if (trace) {
         await tx.agentTrace.update({ where: { id: traceId }, data: { status: "WAITING", stage: "MANUAL_RECOVERY", summary: "The automatic recovery proposal was rejected and the exception remains open." } });
-        await tx.traceStep.create({ data: { traceId, recordedAt: decidedAt, kind: "APPROVAL", agentName: "Exception Agent", toolName: "record-human-decision", provenance: Provenance.OBSERVED, summary: `Human rejected the recovery proposal${reason ? `: ${reason}` : "."}` } });
+        await tx.traceStep.create({ data: { traceId, recordedAt: decidedAt, kind: "APPROVAL", agentName: "Exception Agent", toolName: "record-human-decision", provenance: Provenance.OBSERVED, summary: `Human rejected the recovery proposal${reason ? `: ${reason}` : "."}`, simulationRunId: approval.simulationRunId } });
       }
     }
     return updated;

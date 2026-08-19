@@ -1,9 +1,9 @@
 /**
  * Producing a replay timeline for the control room.
  *
- * The simulation runs IN THE BROWSER. That looks surprising for something the
- * architecture describes as a service, and it is a deliberate choice for this
- * issue:
+ * The simulation currently runs IN THE BROWSER. Issue #29 added persisted run
+ * and timeline endpoints to the Product API; issue #30 owns switching this
+ * temporary seam to those endpoints.
  *
  *   - A twenty-one-day run costs a few milliseconds, so there is nothing to
  *     offload. A network round trip would be slower than the computation.
@@ -14,9 +14,9 @@
  *     is what makes the paired comparison demonstrable rather than described.
  *
  * The engine is pure TypeScript with no Node dependencies, so it runs unchanged
- * here. When the simulation service in `contracts/simulation/openapi.yaml` is
- * built, this module is the seam: `buildTimeline` becomes a fetch and nothing
- * above it changes.
+ * here. This module is the seam: `buildTimeline` will create/load a saved run
+ * through the Product API and return its immutable timeline without changing
+ * the playback components above it.
  */
 
 import { runScenario, type InjectedDisruption, type ReplayTimeline, type RunResult } from '@harvest/simulation';

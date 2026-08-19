@@ -1,7 +1,7 @@
 # Harvest Product API
 
-The Product API is the single operational backend for the Next.js website,
-future Expo app, and Harvest-mode simulated actors. It runs on Fastify and owns
+The Product API is the single operational backend for the Next.js website and
+future Harvest-mode simulated actors. It runs on Fastify and owns
 PostgreSQL state; clients never query the database directly.
 
 ## Local start
@@ -30,6 +30,12 @@ npm run dev:api
 The local database URL is a non-production default. Set `DATABASE_URL` to use a
 different PostgreSQL or Supabase database. Never commit real credentials.
 
+Use [`../../docs/simulation_api_local_testing.md`](../../docs/simulation_api_local_testing.md)
+for copy-ready authentication, saved-run, replay, determinism, derived-run,
+paired-run, snapshot and SSE checks with expected values. The root `npm run
+dev` command reseeds disposable development data, so it clears saved run IDs
+from a previous root development session.
+
 ## Authentication
 
 All `/v1` operations require a bearer JWT. In development only,
@@ -41,6 +47,7 @@ personas:
 - `farmer-marcus`
 - `transporter-daniel`
 - `coordinator-maya`
+- `operations-demo`
 
 The middleware derives identity and role from the token and database record;
 request bodies cannot inject them. Set `ENABLE_DEV_AUTH=false` or run with
@@ -65,7 +72,7 @@ the corresponding event transactionally. Every POST requires
 
 `MODEL_ADAPTER=fixture` is the local default and returns deterministic,
 contract-valid prediction evidence. A later model issue can replace it with an
-HTTP adapter without changing website or mobile payloads.
+HTTP adapter without changing website payloads.
 
 Agent text assistance is separately provider-neutral. Leave
 `AGENT_LLM_PROVIDER`, `AGENT_LLM_MODEL`, `AGENT_LLM_BASE_URL`, and
@@ -73,10 +80,15 @@ Agent text assistance is separately provider-neutral. Leave
 SDK is installed. Provider selection and adapter instructions are in
 [`../../docs/agent_workflows.md`](../../docs/agent_workflows.md).
 
-Issue #8 does not serve simulation runs, observable world projections, paired
-runs, an operations snapshot, or a browser event stream. Those OpenAPI paths
-remain planned contracts for the separate simulation/control-room issue; they
-have no runtime handler or Product API database model in this implementation.
+Issue #29 serves deterministic saved runs, disruption-derived runs, immutable
+timelines and frames, paired comparisons, run-scoped operations snapshots, and
+cursor-based SSE from this Fastify service. It imports the TypeScript simulation
+package directly; there is no Docker container, Python service, run-command
+endpoint, internal ingestion endpoint, or port `8001`.
+
+`LLM_ASSISTED` remains an explicit reserved decision mode. It returns a clear
+conflict until issue #30 provides the simulated-agent decision cycle and a text
+provider is configured; it never silently falls back to deterministic mode.
 
 The canonical wire contract is [`../../contracts/openapi.yaml`](../../contracts/openapi.yaml),
 with behaviour and deterministic effects in
@@ -88,8 +100,6 @@ The P0 API includes privacy-safe listing evidence and market opportunities,
 profile-backed buyer delivery defaults, transporter-owned vehicles, explicit
 coordinator verification tasks, aggregated order details, chronological
 mission updates, concrete exception recovery proposals, and per-crop delivery
-outcomes. These projections are shared by the website and future mobile app.
-
-The ten simulation/control-room and internal-ingestion operations remain in
-OpenAPI with `x-harvest-status: planned`; Fastify intentionally does not serve
-them yet.
+outcomes. Normal records use a null run scope. Future simulated participants
+inherit `simulationRunId` from authentication, and all created operational
+records and events retain that scope so real data and separate runs cannot mix.

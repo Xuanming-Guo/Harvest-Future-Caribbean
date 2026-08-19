@@ -120,8 +120,12 @@ Communication with the Product API follows [`contracts/`](../contracts/).
 ## Integration guide
 
 Use [`docs/api_info.md`](../docs/api_info.md) for the public operations used by
-Harvest-mode simulated actors, run/control-room operations, SSE replay rules,
-and the deterministic effect of every Product API event. The simulation service
-interface is [`contracts/simulation/openapi.yaml`](../contracts/simulation/openapi.yaml).
-Handlers must deduplicate event IDs, persist `Last-Event-ID`, schedule future
-effects, and never expose or rewrite hidden truth.
+future Harvest-mode simulated actors, saved-run/control-room operations, SSE
+replay rules, and deterministic effects. Fastify imports this package directly;
+there is no separate simulation HTTP service or port. Event consumers must
+deduplicate UUID event IDs, persist the monotonic `Last-Event-ID` cursor,
+schedule future effects, and never expose or rewrite hidden truth.
+
+For a complete localhost Product API walkthrough, including the exact expected
+seed-42 replay and paired-run values, use
+[`docs/simulation_api_local_testing.md`](../docs/simulation_api_local_testing.md).

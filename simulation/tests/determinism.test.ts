@@ -42,6 +42,28 @@ describe('run reproducibility', () => {
     expect(b.digest).not.toBe(a.digest);
   });
 
+  it('allows an API-owned run id without changing deterministic outcomes', () => {
+    const first = runScenario({
+      runId: '11111111-1111-4111-8111-111111111111',
+      scenarioId: saintLuciaDemoV1.scenarioId,
+      policy: 'HARVEST',
+      seed: 8675309,
+      captureFrames: true,
+    });
+    const second = runScenario({
+      runId: '22222222-2222-4222-8222-222222222222',
+      scenarioId: saintLuciaDemoV1.scenarioId,
+      policy: 'HARVEST',
+      seed: 8675309,
+      captureFrames: true,
+    });
+
+    expect(first.runId).not.toBe(second.runId);
+    expect(first.digest).toBe(second.digest);
+    expect(first.metrics).toEqual(second.metrics);
+    expect(first.timeline?.frames).toEqual(second.timeline?.frames);
+  });
+
   it('gives the baseline and Harvest runs of one seed the same starting world', () => {
     // The paired benchmark depends on this. Both runs must be built from an
     // identical world; only the coordination policy may differ.

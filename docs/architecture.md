@@ -7,17 +7,16 @@ interfaces. All components communicate through documented contracts.
 
 ```text
 Farmer / buyer / transporter / coordinator website (port 3000)
-Future mobile app                         Future simulated actors
-                       \                   /
-                        v                 v
-                         Product API (3001)
-                         /               \
-                        v                 v
-            Operational PostgreSQL      Model service
-
-Future simulation engine <-> future simulation/control-room website (3002)
-          |                         map, benchmark and technical evidence
-          +------ documented Product API and event contracts only --------+
+Future simulated actors ------------------------+
+                                                v
+                                  Product API (3001)
+                                  /        |        \
+                                 v         v         v
+                 Operational PostgreSQL  Model   TypeScript simulation
+                                                saved observable replay
+                                                         |
+                                                         v
+                                   Simulation control room (3002, issue #30)
 ```
 
 ## Ownership
@@ -34,7 +33,7 @@ The Product API owns user-visible operational state, including:
 - transporter vehicles and coordinator verification tasks;
 - traceability and accepted operational outcomes.
 
-Website, mobile, and simulated users call this API. They do not access its
+Website and simulated users call this API. They do not access its
 database directly.
 
 The product website is role-facing. It contains crop, marketplace, order,
@@ -76,7 +75,7 @@ Python consumers do not drift.
 
 [`api_info.md`](api_info.md) maps each contracted operation to its caller,
 Product API state change, emitted event, deterministic simulation effect, and
-website/mobile consumer. Implementations must follow both sources together.
+website/control-room consumer. Implementations must follow both sources together.
 
 ## State and events
 
@@ -158,16 +157,21 @@ adapter provides deterministic fixture predictions and can later be replaced
 by the Python model service through configuration.
 
 `npm run dev` starts PostgreSQL, the Product API on `3001`, and the participant
-website on `3000`.
+website on `3000`. It also reseeds disposable development data, so saved run
+IDs do not survive a new root development session. The complete API smoke test
+and expected deterministic values are documented in
+[`simulation_api_local_testing.md`](simulation_api_local_testing.md).
 
-The simulation control room runs separately on `3002` via `npm run control-room`.
-It does not touch PostgreSQL or the Product API: it executes the simulation
-engine in the browser and replays the recorded frames, because a full run costs
-a few milliseconds and a recorded timeline can be scrubbed backwards where a
-live engine cannot. `app/control-room/src/lib/run.ts` is the seam at which that
-becomes a call to the simulation service in
-[`contracts/simulation/openapi.yaml`](../contracts/simulation/openapi.yaml)
-once that service exists.
+The Product API executes the deterministic TypeScript simulation package in
+process and stores immutable observable replay artefacts. Hidden truth remains
+inside the engine and is not copied into Product API storage. Run creation is
+synchronous because a complete run costs only a few milliseconds; pause,
+speed, rewind and reset are local playback controls over saved frames.
+
+The control room still runs separately on `3002` via `npm run control-room`.
+Issue #30 owns replacing its temporary browser-run seam with the saved-run,
+timeline, world-frame, snapshot and SSE Product API operations introduced by
+issue #29.
 
 The browser never treats local storage as operational state. Website caches and
 navigation state are disposable; PostgreSQL plus the append-only event log are
