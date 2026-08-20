@@ -9,12 +9,13 @@
  * unlike EventFeed and Legend, because it needs a close button in its header.
  */
 
-import type { ControlRoomBatch, ControlRoomDemand, ControlRoomFrame, ControlRoomMission, ControlRoomScene, CropStage } from "@harvest/simulation";
+import type { ControlRoomBatch, ControlRoomDemand, ControlRoomFrame, ControlRoomMission, ControlRoomScene, CropStage, SimulationAgentAction } from "@harvest/simulation";
 
 export interface InspectorProps {
   scene: ControlRoomScene;
   frame: ControlRoomFrame;
   selectedId: string | null;
+  selectedAction: SimulationAgentAction | null;
   onClose: () => void;
 }
 
@@ -200,6 +201,33 @@ function DisruptionView({ disruption, onClose }: { disruption: ControlRoomFrame[
   );
 }
 
+function safeReference(value: string | undefined) {
+  return value ? value.slice(0, 8) : "not recorded";
+}
+
+function AgentActionView({ action, scene, onClose }: { action: SimulationAgentAction; scene: ControlRoomScene; onClose: () => void }): React.JSX.Element {
+  const participant = scene.participants.find((item) => item.simulationActorId === action.simulationActorId);
+  return (
+    <>
+      <Header title={participant?.displayName ?? action.role.toLowerCase()} subtitle="Agent action" onClose={onClose} />
+      <div className="panel-body">
+        <Row label="Role" value={action.role.toLowerCase()} />
+        <Row label="Tool" value={action.toolName.replaceAll("_", " ")} />
+        <Row label="Status" value={<span className={`pill ${action.status === "SUCCEEDED" ? "pill-good" : "pill-bad"}`}>{action.status.toLowerCase()}</span>} />
+        <Row label="Decision adapter" value={action.adapter} />
+        <Row label="Simulation time" value={formatWhen(Date.parse(action.at))} />
+        <Row label="Approval" value={action.approval === "SYNTHETIC_PARTICIPANT" ? "synthetic participant decision" : "not required by this action"} />
+        <Row label="Summary" value={action.summary} />
+        <Row label="Trace" value={safeReference(action.traceId)} />
+        <Row label="Entity" value={safeReference(action.entityId)} />
+        <Row label="Events" value={action.eventIds.length ? action.eventIds.map((id) => id.slice(0, 8)).join(", ") : "none"} />
+        {action.correlationId && <Row label="Correlation" value={safeReference(action.correlationId)} />}
+        {action.causationId && <Row label="Causation" value={safeReference(action.causationId)} />}
+      </div>
+    </>
+  );
+}
+
 function Header({ title, subtitle, onClose }: { title: string; subtitle: string; onClose: () => void }): React.JSX.Element {
   return (
     <header className="panel-header">
@@ -213,7 +241,10 @@ function Header({ title, subtitle, onClose }: { title: string; subtitle: string;
   );
 }
 
-export default function Inspector({ scene, frame, selectedId, onClose }: InspectorProps): React.JSX.Element {
+export default function Inspector({ scene, frame, selectedId, selectedAction, onClose }: InspectorProps): React.JSX.Element {
+  if (selectedAction) {
+    return <section className="panel"><AgentActionView action={selectedAction} scene={scene} onClose={onClose} /></section>;
+  }
   if (!selectedId) {
     return (
       <section className="panel">

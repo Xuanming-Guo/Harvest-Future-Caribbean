@@ -164,14 +164,27 @@ and expected deterministic values are documented in
 
 The Product API executes the deterministic TypeScript simulation package in
 process and stores immutable observable replay artefacts. Hidden truth remains
-inside the engine and is not copied into Product API storage. Run creation is
-synchronous because a complete run costs only a few milliseconds; pause,
-speed, rewind and reset are local playback controls over saved frames.
+inside the engine and is not copied into Product API storage. In a Harvest run,
+the engine advances to an actionable physical event, synthetic participants use
+the authenticated Product API, and validated Product events schedule only later
+physical work before time advances again. Run creation remains synchronous;
+pause, speed, rewind and reset are local playback controls over saved frames.
 
-The control room still runs separately on `3002` via `npm run control-room`.
-Issue #30 owns replacing its temporary browser-run seam with the saved-run,
-timeline, world-frame, snapshot and SSE Product API operations introduced by
-issue #29.
+The connected control room has two deliberately separate sources of truth.
+Engine frames own physical context such as crop state, weather, roads,
+spoilage and disruptions. Run-scoped Product API records own Harvest's
+operational outcomes: orders, commitments, delivery missions and accepted
+quantities. Harvest headline cards use the latter; baseline cards are labelled
+engine outcomes because baseline actors never use the Harvest Product API.
+
+The control room runs separately on `3002` via `npm run control-room`, while
+`npm run dev` keeps PostgreSQL, the Product API and participant website alive.
+It creates and loads saved runs through the generated Product API client, then
+plays the immutable timeline locally. Harvest-mode interleaved cycles create
+run-scoped Product API state and future physical effects; baseline cycles remain
+isolated inside the engine.
+Completed synthetic identities can open their normal website workspace with a
+short-lived token, and both API and UI enforce read-only replay.
 
 The browser never treats local storage as operational state. Website caches and
 navigation state are disposable; PostgreSQL plus the append-only event log are

@@ -1,196 +1,301 @@
 "use client";
 
-/**
- * The control room.
- *
- * Composition only: this file owns layout and the small amount of state that
- * genuinely spans panels (which run is loaded, what is selected, where the
- * camera is pointed). Rendering and behaviour live in the components.
- *
- * The whole surface is a client component because the simulation runs in the
- * browser — see `src/lib/run.ts` for why that is the right call for a recorded
- * timeline rather than a compromise.
- */
-
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { InjectedDisruption } from "@harvest/simulation";
+import type { InjectedDisruption, ReplayTimeline, SimulationAgentAction } from "@harvest/simulation";
 
-import Masthead from "@/components/panels/Masthead";
-import MetricsPanel from "@/components/panels/MetricsPanel";
+import InjectionPanel from "@/components/InjectionPanel";
 import EventFeed from "@/components/panels/EventFeed";
 import Inspector from "@/components/panels/Inspector";
 import Legend from "@/components/panels/Legend";
+import Masthead from "@/components/panels/Masthead";
+import MetricsPanel from "@/components/panels/MetricsPanel";
 import PlaybackControls from "@/components/transport/PlaybackControls";
-import InjectionPanel from "@/components/InjectionPanel";
 import { usePlayback } from "@/lib/playback";
-import { DEFAULT_SEED, buildTimeline, type PolicyName } from "@/lib/run";
+import {
+  DEFAULT_SEED,
+  DEFAULT_SCENARIO,
+  PARTICIPANT_WEBSITE_URL,
+  compareRunOutcomes,
+  createDerivedRun,
+  createParticipantSession,
+  createSavedRun,
+  listSavedRuns,
+  listScenarios,
+  loadSavedRun,
+  loadTimeline,
+  loadWorldFrame,
+  type DecisionMode,
+  type PolicyName,
+  type RunOutcomeComparison,
+  type SavedRun,
+  type SimulationScenario,
+} from "@/lib/run";
 
-/**
- * Cesium touches `window` and WebGL at import time, so it cannot be rendered on
- * the server. `ssr: false` keeps it out of the server bundle entirely rather
- * than failing at runtime.
- */
 const CesiumGlobe = dynamic(() => import("@/components/globe/CesiumGlobe"), {
   ssr: false,
   loading: () => <div className="globe-loading">Preparing the globe…</div>,
 });
 
 export default function ControlRoomPage() {
+  const [scenarioId, setScenarioId] = useState(DEFAULT_SCENARIO);
+  const [scenarios, setScenarios] = useState<SimulationScenario[]>([]);
   const [policy, setPolicy] = useState<PolicyName>("HARVEST");
   const [seed, setSeed] = useState(DEFAULT_SEED);
+  const [decisionMode, setDecisionMode] = useState<DecisionMode>("DETERMINISTIC");
   const [injections, setInjections] = useState<InjectedDisruption[]>([]);
+  const [timeline, setTimeline] = useState<ReplayTimeline | null>(null);
+  const [currentRun, setCurrentRun] = useState<SavedRun | null>(null);
+  const [injectionComparison, setInjectionComparison] = useState<RunOutcomeComparison | null>(null);
+  const [savedRuns, setSavedRuns] = useState<SavedRun[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedAction, setSelectedAction] = useState<SimulationAgentAction | null>(null);
+  const [participantId, setParticipantId] = useState("");
   const [focusRegion, setFocusRegion] = useState<string | null>(null);
-
-  /**
-   * Building the timeline is a full simulation run. It is only a few
-   * milliseconds, but it must not happen on every render — the frame data is
-   * referentially compared all the way down, and a new array each render would
-   * re-run the globe's entity diffing sixty times a second.
-   */
-  const built = useMemo(() => {
-    try {
-      return { data: buildTimeline({ policy, seed, injectedDisruptions: injections }), error: null };
-    } catch (error) {
-      return { data: null, error: error instanceof Error ? error.message : String(error) };
-    }
-  }, [policy, seed, injections]);
-
-  const timeline = built.data?.timeline ?? null;
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const playback = usePlayback(timeline);
   const { controls, ...state } = playback;
 
-  // Selecting an entity points the camera at it. This is the region-to-region
-  // transition: the globe zooms out, turns, and comes back down somewhere else.
+  const loadRun = useCallback(async (run: SavedRun) => {
+    setLoading(true);
+    setError(null);
+    setInjectionComparison(null);
+    try {
+      const loaded = await loadTimeline(run.runId);
+      setTimeline(loaded);
+      setCurrentRun(run);
+      setScenarioId(run.scenarioId);
+      setPolicy(run.policy);
+      setSeed(run.seed);
+      setDecisionMode(run.decisionMode);
+      setInjections(run.disruptions as InjectedDisruption[]);
+      const firstMapped = loaded.scene.participants.find((item) => item.productActorId);
+      setParticipantId(firstMapped?.productActorId ?? "");
+      setSelectedId(null);
+      setSelectedAction(null);
+      setFocusRegion(null);
+      if (run.derivedFromRunId) {
+        try {
+          const sourceRun = await loadSavedRun(run.derivedFromRunId);
+          if (sourceRun.status === "COMPLETED" && sourceRun.frameCount > 0) {
+            const sourceFrame = await loadWorldFrame(sourceRun.runId, sourceRun.frameCount - 1);
+            const currentFrame = loaded.frames.at(-1);
+            if (currentFrame) {
+              setInjectionComparison(compareRunOutcomes(run.policy, sourceRun, sourceFrame, run, currentFrame));
+            }
+          }
+        } catch {
+          // A comparison is explanatory, not required to replay a valid run.
+          // Older/removed source data therefore must not make the child unloadable.
+          setInjectionComparison(null);
+        }
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const refreshRuns = useCallback(async (preferredRunId?: string) => {
+    const runs = await listSavedRuns();
+    setSavedRuns(runs);
+    const preferred = runs.find((run) => run.runId === preferredRunId);
+    return preferred ?? runs.find((run) => run.status === "COMPLETED") ?? null;
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        setScenarios(await listScenarios());
+        const run = await refreshRuns();
+        if (run) await loadRun(run);
+        else setLoading(false);
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : String(caught));
+        setLoading(false);
+      }
+    })();
+  }, [loadRun, refreshRuns]);
+
+  const runSimulation = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const created = await createSavedRun({ scenarioId, policy, seed, decisionMode, disruptions: injections });
+      const run = await refreshRuns(created.runId) ?? created;
+      await loadRun(run);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      setLoading(false);
+    }
+  }, [decisionMode, injections, loadRun, policy, refreshRuns, scenarioId, seed]);
+
+  const changeInjections = useCallback(async (next: InjectedDisruption[]) => {
+    const additions = next.slice(injections.length);
+    setInjections(next);
+    if (!currentRun || additions.length === 0) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const created = await createDerivedRun(currentRun.runId, additions);
+      const run = await refreshRuns(created.runId) ?? created;
+      await loadRun(run);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      setLoading(false);
+    }
+  }, [currentRun, injections.length, loadRun, refreshRuns]);
+
+  const openParticipant = useCallback(async () => {
+    if (!currentRun || !participantId) return;
+    setError(null);
+    try {
+      const session = await createParticipantSession(currentRun.runId, participantId);
+      window.open(`${PARTICIPANT_WEBSITE_URL}/#harvest_access_token=${encodeURIComponent(session.accessToken)}`, "_blank", "noopener,noreferrer");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }, [currentRun, participantId]);
+
   const handleSelect = useCallback((id: string | null) => {
+    setSelectedAction(null);
     setSelectedId(id);
     if (id) setFocusRegion(id);
+    const mapped = timeline?.scene.participants.find((item) => item.simulationActorId === id);
+    if (mapped?.productActorId) setParticipantId(mapped.productActorId);
+  }, [timeline]);
+
+  const handleSelectAction = useCallback((action: SimulationAgentAction) => {
+    setSelectedId(null);
+    setSelectedAction(action);
+    setFocusRegion(action.simulationActorId);
+    setParticipantId(action.productActorId);
   }, []);
 
-  const showIsland = useCallback(() => {
+  const clearSelection = useCallback(() => {
     setSelectedId(null);
-    setFocusRegion(null);
+    setSelectedAction(null);
   }, []);
 
-  // A new run invalidates any selection: the ids are freshly minted, so a held
-  // id would point at nothing and the inspector would sit empty for no visible
-  // reason.
-  useEffect(() => {
-    setSelectedId(null);
-    setFocusRegion(null);
-  }, [policy, seed, injections]);
-
-  /** Frames up to the playhead, so the feed cannot show the future. */
-  const framesSoFar = useMemo(() => {
-    if (!timeline) return [];
-    return timeline.frames.slice(0, state.frameIndex + 1);
-  }, [timeline, state.frameIndex]);
-
-  /** Disruption instants, drawn on the scrub track as red ticks. */
+  const framesSoFar = useMemo(
+    () => timeline ? timeline.frames.slice(0, state.frameIndex + 1) : [],
+    [timeline, state.frameIndex],
+  );
   const disruptionMarkers = useMemo(() => {
     if (!timeline) return [];
     const seen = new Set<string>();
-    const marks: number[] = [];
-    for (const frame of timeline.frames) {
-      for (const disruption of frame.disruptions) {
-        if (seen.has(disruption.eventId)) continue;
-        seen.add(disruption.eventId);
-        marks.push(Date.parse(disruption.observedAt));
-      }
-    }
-    return marks;
+    return timeline.frames.flatMap((frame) => frame.disruptions.flatMap((disruption) => {
+      if (seen.has(disruption.eventId)) return [];
+      seen.add(disruption.eventId);
+      return [Date.parse(disruption.observedAt)];
+    }));
   }, [timeline]);
 
-  // `state.frame` is nullable until a run exists, so this guard is what makes
-  // it safe to hand a frame to every panel below without each one re-checking.
-  // Bound to a local *before* the guard. Narrowing `state.frame` in place does
-  // not survive the object spread below: the spread reads the declared property
-  // type rather than the narrowed one, so `frame` would come back nullable. A
-  // plain const narrows reliably and keeps the spread honest.
-  const frame = state.frame;
+  const setup = (
+    <div className="run-toolbar">
+      <label>Scenario
+        <select value={scenarioId} onChange={(event) => setScenarioId(event.target.value)}>
+          {scenarios.length === 0 && <option value={DEFAULT_SCENARIO}>Saint Lucia demo</option>}
+          {scenarios.map((scenario) => (
+            <option key={scenario.scenarioId} value={scenario.scenarioId}>{scenario.description}</option>
+          ))}
+        </select>
+      </label>
+      <label>Policy
+        <select value={policy} onChange={(event) => setPolicy(event.target.value as PolicyName)}>
+          <option value="HARVEST">Harvest</option>
+          <option value="BASELINE">Baseline</option>
+        </select>
+      </label>
+      <label>Seed
+        <input type="number" min={0} max={4_294_967_295} value={seed} onChange={(event) => setSeed(Number(event.target.value))} />
+      </label>
+      <label>Decision mode
+        <select value={decisionMode} onChange={(event) => setDecisionMode(event.target.value as DecisionMode)}>
+          <option value="DETERMINISTIC">Deterministic</option>
+          <option value="LLM_ASSISTED">LLM assisted</option>
+        </select>
+      </label>
+      <button type="button" className="run-button" onClick={() => void runSimulation()} disabled={loading}>
+        {loading ? "Generating…" : "Run simulation"}
+      </button>
+      <label>Saved run
+        <select value={currentRun?.runId ?? ""} onChange={(event) => {
+          const run = savedRuns.find((item) => item.runId === event.target.value);
+          if (run) void loadRun(run);
+        }}>
+          <option value="" disabled>Select a run</option>
+          {savedRuns.filter((run) => run.status === "COMPLETED").map((run) => (
+            <option key={run.runId} value={run.runId}>{run.policy} · seed {run.seed} · {run.runId.slice(0, 8)}</option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
 
-  if (built.error || !timeline || !built.data || frame === null) {
-    // Fail visibly. A control room that renders a plausible-looking but empty
-    // world is worse than one that says it could not build the run.
+  const frame = state.frame;
+  if (!timeline || frame === null) {
     return (
-      <main className="control-room">
-        <div className="globe-loading" role="alert">
-          Could not build the scenario: {built.error ?? "the engine returned no timeline."}
-        </div>
+      <main className="control-room launch-screen">
+        <section className="launch-card">
+          <span className="masthead-mark">H</span>
+          <div><h1>Harvest control room</h1><p>Create or load a saved Saint Lucia simulation run.</p></div>
+          {setup}
+          {error && <p className="run-error" role="alert">{error}</p>}
+          <p className="launch-note">Runs are synthetic evidence. Harvest-mode agents use the Product API; baseline runs remain isolated.</p>
+        </section>
       </main>
     );
   }
 
   const { scene } = timeline;
-  // Re-formed with the narrowed frame so the transport bar receives the
-  // non-nullable PlaybackState its props declare.
-  const playbackState = { ...state, frame };
-
+  const selectedParticipant = scene.participants.find((item) => item.productActorId === participantId);
   return (
     <main className="control-room">
       <div className="globe-layer">
-        <CesiumGlobe
-          scene={scene}
-          frame={frame}
-          atMs={state.atMs}
-          selectedId={selectedId}
-          onSelect={handleSelect}
-          focusRegion={focusRegion}
-        />
+        <CesiumGlobe scene={scene} frame={frame} atMs={state.atMs} selectedId={selectedId} onSelect={handleSelect} focusRegion={focusRegion} />
       </div>
-
       <div className="chrome">
         <div className="chrome-header">
-          <Masthead
-            scene={scene}
-            policy={policy}
-            onPolicyChange={setPolicy}
-            seed={seed}
-            onSeedChange={setSeed}
-          />
+          <Masthead scene={scene} />
+          {setup}
+          {error && <p className="run-error" role="alert">{error}</p>}
         </div>
-
         <div className="chrome-left" style={{ display: "grid", gridTemplateRows: "auto auto 1fr", gap: 16, minHeight: 0 }}>
           <MetricsPanel frame={frame} policy={policy} />
           <InjectionPanel
             scene={scene}
             injections={injections}
-            onChange={setInjections}
+            comparison={injectionComparison}
+            onChange={(next) => void changeInjections(next)}
             atMs={state.atMs}
             startMs={state.startMs}
           />
           <section className="panel">
-            <header className="panel-header">
-              <span className="panel-title">Map key</span>
-              {focusRegion && (
-                <button type="button" className="pill" onClick={showIsland} aria-label="Return the camera to the island overview">
-                  View island
-                </button>
-              )}
-            </header>
+            <header className="panel-header"><span className="panel-title">Participants</span></header>
             <div className="panel-body">
+              <select className="speed-select" style={{ width: "100%" }} value={participantId} onChange={(event) => setParticipantId(event.target.value)}>
+                {scene.participants.filter((item) => item.productActorId).map((participant) => (
+                  <option key={participant.simulationActorId} value={participant.productActorId ?? ""}>{participant.displayName} · {participant.role.toLowerCase()}</option>
+                ))}
+              </select>
+              <button type="button" className="run-button participant-button" disabled={!selectedParticipant || policy !== "HARVEST"} onClick={() => void openParticipant()}>
+                Open participant website
+              </button>
+              <p className="panel-help">Opens the participant’s normal workspace in read-only replay mode.</p>
               <Legend />
             </div>
           </section>
         </div>
-
         <div className="chrome-right" style={{ display: "grid", gridTemplateRows: "1fr 1fr", gap: 16, minHeight: 0 }}>
-          <Inspector scene={scene} frame={frame} selectedId={selectedId} onClose={() => setSelectedId(null)} />
-          <section className="panel">
-            <header className="panel-header">
-              <span className="panel-title">What is happening</span>
-            </header>
-            <div className="panel-body">
-              <EventFeed scene={scene} frames={framesSoFar} onSelect={handleSelect} />
-            </div>
-          </section>
+          <Inspector scene={scene} frame={frame} selectedId={selectedId} selectedAction={selectedAction} onClose={clearSelection} />
+          <section className="panel"><header className="panel-header"><span className="panel-title">What is happening</span></header><div className="panel-body"><EventFeed scene={scene} frames={framesSoFar} onSelect={handleSelect} onSelectAction={handleSelectAction} /></div></section>
         </div>
-
-        <div className="chrome-footer">
-          <PlaybackControls state={playbackState} controls={controls} disruptionMarkers={disruptionMarkers} />
-        </div>
+        <div className="chrome-footer"><PlaybackControls state={{ ...state, frame }} controls={controls} disruptionMarkers={disruptionMarkers} /></div>
       </div>
+      {loading && <div className="run-loading" role="status">Generating and saving the simulation…</div>}
     </main>
   );
 }

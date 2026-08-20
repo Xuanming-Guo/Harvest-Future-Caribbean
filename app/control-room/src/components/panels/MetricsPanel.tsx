@@ -1,15 +1,5 @@
 "use client";
 
-/**
- * Headline totals for the run so far.
- *
- * Whole kilograms only: the engine's totals accumulate fractional kilograms
- * from many small allocations, and showing that precision would suggest a
- * confidence the simulation does not have. Rounding here (rather than caching
- * a rounded value) is enough to stop jitter, because `frame.totals` only ever
- * grows as playback advances — the same instant always rounds the same way.
- */
-
 import type { ControlRoomFrame } from "@harvest/simulation";
 
 export interface MetricsPanelProps {
@@ -21,58 +11,64 @@ function wholeKg(kg: number): string {
   return Math.round(kg).toLocaleString("en-US");
 }
 
-export default function MetricsPanel({ frame, policy }: MetricsPanelProps): React.JSX.Element {
-  const { totals } = frame;
+function Metric({ label, value, unit }: { label: string; value: number; unit?: string }) {
+  const formatted = unit === "kg" ? wholeKg(value) : value.toLocaleString("en-US");
+  return (
+    <div className="metric">
+      <div className="metric-label">{label}</div>
+      <div className="metric-value">
+        {formatted}
+        {unit && <span className="metric-unit">{unit}</span>}
+      </div>
+    </div>
+  );
+}
 
+export default function MetricsPanel({ frame, policy }: MetricsPanelProps): React.JSX.Element {
+  if (policy === "HARVEST") {
+    const snapshot = frame.operationsSnapshot;
+    return (
+      <section className="panel">
+        <header className="panel-header">
+          <span className="panel-title">Harvest product outcomes</span>
+        </header>
+        <div className="panel-body">
+          <p className="metrics-source">From run-scoped Product API records at this replay instant.</p>
+          {snapshot ? (
+            <div className="metric-grid">
+              <Metric label="Delivered" value={snapshot.deliveryAcceptedKg} unit="kg" />
+              <Metric label="Total orders" value={snapshot.orderOutcomes.total} />
+              <Metric label="Fulfilled" value={snapshot.orderOutcomes.fulfilled} />
+              <Metric label="Partially fulfilled" value={snapshot.orderOutcomes.partiallyFulfilled} />
+              <Metric label="Unfulfilled" value={snapshot.orderOutcomes.unfulfilled} />
+              <Metric label="Pending" value={snapshot.orderOutcomes.pending} />
+              <Metric label="Approved commitments" value={snapshot.approvedCommitmentCount} />
+              <Metric label="Completed delivery missions" value={snapshot.completedMissionCount} />
+            </div>
+          ) : (
+            <p className="metrics-unavailable">No Product API snapshot is available for this older saved frame.</p>
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  const partial = frame.demands.filter((demand) => demand.status === "PARTIALLY_FULFILLED").length;
+  const pending = frame.demands.filter((demand) => demand.status === "PENDING" || demand.status === "COMMITTED").length;
   return (
     <section className="panel">
       <header className="panel-header">
-        <span className="panel-title">Run totals</span>
+        <span className="panel-title">Fragmented baseline outcomes</span>
       </header>
       <div className="panel-body">
+        <p className="metrics-source">From the physical simulation engine; baseline actors do not use Harvest.</p>
         <div className="metric-grid">
-          <div className="metric">
-            <div className="metric-label">Delivered</div>
-            <div className="metric-value">
-              {wholeKg(totals.acceptedKg)}
-              <span className="metric-unit">kg</span>
-            </div>
-          </div>
-
-          <div className="metric">
-            <div className="metric-label">Substituted</div>
-            <div className="metric-value">
-              {wholeKg(totals.substitutedKg)}
-              <span className="metric-unit">kg</span>
-            </div>
-          </div>
-
-          <div className="metric">
-            <div className="metric-label">Orders met</div>
-            <div className="metric-value">{totals.demandsFullyMet.toLocaleString("en-US")}</div>
-          </div>
-
-          <div className="metric">
-            <div className="metric-label">Orders missed</div>
-            <div className="metric-value">{totals.demandsUnmet.toLocaleString("en-US")}</div>
-          </div>
-
-          <div className="metric">
-            <div className="metric-label">Commitments approved</div>
-            <div className="metric-value">{totals.commitmentsApproved.toLocaleString("en-US")}</div>
-          </div>
-
-          {/*
-           * Grower check-ins are a Harvest-policy concept — the baseline never
-           * asks for them — so showing the metric under baseline would imply a
-           * behaviour that policy does not have.
-           */}
-          {policy === "HARVEST" && (
-            <div className="metric">
-              <div className="metric-label">Check-ins requested</div>
-              <div className="metric-value">{totals.observationRequests.toLocaleString("en-US")}</div>
-            </div>
-          )}
+          <Metric label="Delivered" value={frame.totals.acceptedKg} unit="kg" />
+          <Metric label="Substituted" value={frame.totals.substitutedKg} unit="kg" />
+          <Metric label="Fulfilled" value={frame.totals.demandsFullyMet} />
+          <Metric label="Partially fulfilled" value={partial} />
+          <Metric label="Unfulfilled" value={frame.totals.demandsUnmet} />
+          <Metric label="Pending" value={pending} />
         </div>
       </div>
     </section>

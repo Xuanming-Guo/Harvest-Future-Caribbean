@@ -5,11 +5,11 @@
  *
  * Issue #5 asks for "event injection" alongside the transport controls. Because
  * the control room replays a recorded timeline rather than driving a live
- * engine, injecting an event does not poke a running simulation — it re-runs
- * the scenario with the disruption added and swaps in the new timeline.
+ * engine, injecting an event does not poke a running simulation — it asks the
+ * Product API for a derived saved run with the disruption added.
  *
  * That is a better fit than live poking, and not only because it is simpler.
- * The re-run is deterministic, so an injected world can be reproduced exactly
+ * The derived run is deterministic, so an injected world can be reproduced exactly
  * from its seed plus its injections, and the whole timeline (including the
  * minutes before the disruption) stays scrubbable. Poking a live engine would
  * give an unreproducible one-off that could never be replayed for a judge.
@@ -21,6 +21,8 @@
 
 import { useState } from "react";
 import type { ControlRoomScene, InjectedDisruption } from "@harvest/simulation";
+
+import type { RunOutcomeComparison } from "@/lib/run";
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
@@ -38,9 +40,9 @@ interface InjectionOption {
 /**
  * A short menu of plausible disruptions rather than a free-form builder.
  *
- * A demo needs one click to a legible outcome. An arbitrary-entity form would
- * be more flexible and would mostly produce injections whose effects nobody
- * watching could interpret.
+ * A demo needs one click to a legible event. An arbitrary-entity form would be
+ * more flexible and would mostly produce injections nobody watching could
+ * interpret. A legible event is not a promise that final totals must change.
  */
 const OPTIONS: InjectionOption[] = [
   {
@@ -80,13 +82,14 @@ const OPTIONS: InjectionOption[] = [
 export interface InjectionPanelProps {
   scene: ControlRoomScene;
   injections: InjectedDisruption[];
+  comparison: RunOutcomeComparison | null;
   onChange: (injections: InjectedDisruption[]) => void;
   /** Where the playhead currently sits, used as the default injection time. */
   atMs: number;
   startMs: number;
 }
 
-export default function InjectionPanel({ scene, injections, onChange, atMs, startMs }: InjectionPanelProps) {
+export default function InjectionPanel({ scene, injections, comparison, onChange, atMs, startMs }: InjectionPanelProps) {
   const [pending, setPending] = useState<string>(OPTIONS[0]?.id ?? "road");
 
   // Default to the moment the viewer is looking at, so "inject now" means what
@@ -94,6 +97,8 @@ export default function InjectionPanel({ scene, injections, onChange, atMs, star
   // scheduled exactly at the playhead would already have been recorded as
   // starting before the viewer could see it happen.
   const offsetMs = Math.max(HOUR_MS, atMs - startMs + HOUR_MS);
+  const horizonOffsetMs = Date.parse(scene.endsAt) - startMs;
+  const option = OPTIONS.find((candidate) => candidate.id === pending);
 
   function affectedIdsFor(option: InjectionOption): string[] {
     switch (option.target) {
@@ -110,8 +115,22 @@ export default function InjectionPanel({ scene, injections, onChange, atMs, star
     }
   }
 
+  function targetLabelFor(selected: InjectionOption | undefined): string {
+    switch (selected?.target) {
+      case "roads":
+        return scene.roads[0]?.name ?? "No road available";
+      case "transporters":
+        return scene.transporters[0]?.name ?? "No transporter available";
+      case "farms":
+        return scene.farms[0]?.name ?? "No farm available";
+      case "none":
+        return "Saint Lucia network";
+      default:
+        return "No target available";
+    }
+  }
+
   function inject() {
-    const option = OPTIONS.find((candidate) => candidate.id === pending);
     if (!option) return;
 
     onChange([
@@ -127,6 +146,17 @@ export default function InjectionPanel({ scene, injections, onChange, atMs, star
   }
 
   const dayNumber = Math.floor(offsetMs / DAY_MS) + 1;
+  const affectedIds = option ? affectedIdsFor(option) : [];
+  const canInject = Boolean(option) && affectedIds.length > 0 && offsetMs < horizonOffsetMs;
+  const injectionAt = new Date(startMs + offsetMs).toLocaleString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  });
 
   return (
     <section className="panel">
@@ -162,7 +192,12 @@ export default function InjectionPanel({ scene, injections, onChange, atMs, star
         </select>
 
         <p style={{ margin: "10px 0 12px", fontSize: 12, lineHeight: 1.5, color: "var(--text-muted)" }}>
-          {OPTIONS.find((option) => option.id === pending)?.description}
+          {option?.description}
+        </p>
+
+        <p style={{ margin: "0 0 12px", fontSize: 11, lineHeight: 1.5, color: "var(--text-dim)" }}>
+          <strong>Target:</strong> {targetLabelFor(option)}<br />
+          <strong>Time:</strong> {canInject ? `Day ${dayNumber} - ${injectionAt}` : "Rewind before the scenario ends"}
         </p>
 
         <button
@@ -170,14 +205,39 @@ export default function InjectionPanel({ scene, injections, onChange, atMs, star
           className="transport-button is-primary"
           style={{ width: "100%", height: 34 }}
           onClick={inject}
-          aria-label={`Inject this event on day ${dayNumber} and re-run the scenario`}
+          disabled={!canInject}
+          aria-label={canInject
+            ? `Inject this event on day ${dayNumber} and re-run the scenario`
+            : "Rewind before the final frame to inject an event"}
         >
-          Inject on day {dayNumber}
+          {canInject ? `Inject on day ${dayNumber}` : "Rewind to inject an event"}
         </button>
 
+        {!canInject && (
+          <p role="status" style={{ margin: "10px 0 0", fontSize: 11, lineHeight: 1.5, color: "var(--text-muted)" }}>
+            The scenario has reached its horizon. Rewind the timeline before adding another event.
+          </p>
+        )}
+
+        {comparison && injections.length > 0 && (
+          <div aria-live="polite" style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
+            <div className="metric-label">Impact versus source run</div>
+            {comparison.changes.length === 0 ? (
+              <p style={{ margin: "6px 0 0", fontSize: 11, lineHeight: 1.5, color: "var(--text-muted)" }}>
+                No measurable final-total change; this event did not intersect activity that changed the final results.
+              </p>
+            ) : (
+              <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 11, lineHeight: 1.5, color: "var(--text-muted)" }}>
+                {comparison.changes.map((change) => <li key={change}>{change}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
+
         <p style={{ margin: "10px 0 0", fontSize: 11, lineHeight: 1.5, color: "var(--text-dim)" }}>
-          Injecting re-runs the scenario from the same seed with this event added, so the
-          result stays reproducible and the whole timeline remains scrubbable.
+          The API saves a derived run, so the source stays unchanged and the whole
+          timeline remains reproducible and scrubbable. An event may leave final totals
+          unchanged when it does not overlap relevant crop or delivery activity.
         </p>
       </div>
     </section>

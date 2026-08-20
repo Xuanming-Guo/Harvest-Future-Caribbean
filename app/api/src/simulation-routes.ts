@@ -19,11 +19,13 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 
 import { visibleBatchIds, visibleExceptionRows, visibleOrderIds } from "./access.js";
 import type { AuthActor } from "./auth.js";
-import { requireRole } from "./auth.js";
-import { config } from "./config.js";
+import { requireRole, signDevelopmentToken } from "./auth.js";
+import { operationNow } from "./clock.js";
 import { prisma } from "./db.js";
 import { eventDto } from "./events.js";
 import { assertObjectBody, httpError, idempotent } from "./http.js";
+import { buildOperationsSnapshot } from "./operations-snapshot.js";
+import { runConnectedHarvest } from "./simulation-agents.js";
 
 type JsonObject = Record<string, unknown>;
 type RunScope =
@@ -66,23 +68,9 @@ function readSeed(value: unknown) {
   return Number(value);
 }
 
-function readDecisionMode(value: unknown): "DETERMINISTIC" {
+function readDecisionMode(value: unknown): "DETERMINISTIC" | "LLM_ASSISTED" {
   if (value !== "DETERMINISTIC" && value !== "LLM_ASSISTED") {
     throw httpError(422, "INVALID_DECISION_MODE", "decisionMode must be DETERMINISTIC or LLM_ASSISTED.");
-  }
-  if (value === "LLM_ASSISTED") {
-    if (!config.agentLlmProvider) {
-      throw httpError(
-        409,
-        "LLM_PROVIDER_NOT_CONFIGURED",
-        "LLM_ASSISTED simulation runs require a configured provider. Use DETERMINISTIC until issue #30 adds the agent cycle.",
-      );
-    }
-    throw httpError(
-      409,
-      "LLM_ASSISTED_NOT_IMPLEMENTED",
-      "The provider is configured, but LLM-assisted simulation decisions belong to issue #30 and are not available yet.",
-    );
   }
   return value;
 }
@@ -144,8 +132,8 @@ function readDisruptions(value: unknown, durationDays: number): InjectedDisrupti
     if (!["WEATHER", "ROAD", "VEHICLE", "CROP", "DEMAND"].includes(String(disruption.type))) {
       throw httpError(422, "INVALID_DISRUPTION", `disruptions[${index}].type is not supported.`);
     }
-    if (!Number.isInteger(disruption.offsetMs) || Number(disruption.offsetMs) < 0 || Number(disruption.offsetMs) > horizonMs) {
-      throw httpError(422, "INVALID_DISRUPTION", `disruptions[${index}].offsetMs must fall within the scenario horizon.`);
+    if (!Number.isInteger(disruption.offsetMs) || Number(disruption.offsetMs) < 0 || Number(disruption.offsetMs) >= horizonMs) {
+      throw httpError(422, "INVALID_DISRUPTION", `disruptions[${index}].offsetMs must fall before the scenario horizon.`);
     }
     if (!Number.isInteger(disruption.durationMs) || Number(disruption.durationMs) <= 0) {
       throw httpError(422, "INVALID_DISRUPTION", `disruptions[${index}].durationMs must be a positive integer.`);
@@ -177,6 +165,7 @@ function simulationRunDto(row: SimulationRun) {
     policy: row.policy,
     seed: Number(row.seed),
     decisionMode: row.decisionMode,
+    decisionAdapter: row.decisionAdapter,
     scope: row.scope,
     resolvedIslandIds: row.resolvedIslandIds,
     disruptions: row.disruptions,
@@ -220,7 +209,7 @@ interface SavedRunInput {
   scenarioId: string;
   policy: PolicyName;
   seed: number;
-  decisionMode: "DETERMINISTIC";
+  decisionMode: "DETERMINISTIC" | "LLM_ASSISTED";
   scope: RunScope;
   resolvedIslandIds: string[];
   disruptions: InjectedDisruption[];
@@ -229,33 +218,18 @@ interface SavedRunInput {
 }
 
 async function saveActorMappings(runId: string, scene: ControlRoomScene) {
-  const mappings = [
-    ...scene.farms.map((farm) => ({
-      simulationRunId: runId,
-      simulationActorId: farm.farmId,
-      role: ActorRole.FARMER,
-      displayName: farm.name,
-      islandId: "saint-lucia",
-    })),
-    ...scene.buyers.map((buyer) => ({
-      simulationRunId: runId,
-      simulationActorId: buyer.buyerId,
-      role: ActorRole.BUYER,
-      displayName: buyer.name,
-      islandId: "saint-lucia",
-    })),
-    ...scene.transporters.map((transporter) => ({
-      simulationRunId: runId,
-      simulationActorId: transporter.transporterId,
-      role: ActorRole.TRANSPORTER,
-      displayName: transporter.name,
-      islandId: "saint-lucia",
-    })),
-  ];
+  const mappings = scene.participants.map((participant) => ({
+    simulationRunId: runId,
+    simulationActorId: participant.simulationActorId,
+    productActorId: participant.productActorId,
+    role: participant.role as ActorRole,
+    displayName: participant.displayName,
+    islandId: participant.islandId,
+  }));
   if (mappings.length) await prisma.simulationActorMapping.createMany({ data: mappings });
 }
 
-async function executeAndSaveRun(input: SavedRunInput) {
+async function executeAndSaveRun(server: FastifyInstance, input: SavedRunInput) {
   await prisma.simulationRun.create({
     data: {
       id: input.runId,
@@ -273,16 +247,49 @@ async function executeAndSaveRun(input: SavedRunInput) {
   });
 
   try {
-    const result = runScenario({
-      runId: input.runId,
-      scenarioId: input.scenarioId,
-      policy: input.policy,
-      seed: input.seed,
-      captureFrames: true,
-      injectedDisruptions: input.disruptions,
-    });
-    const timeline = result.timeline;
-    if (!timeline) throw new Error("Simulation completed without a replay timeline.");
+    const connected = input.policy === "HARVEST"
+      ? await runConnectedHarvest(server, input.runId, {
+          scenarioId: input.scenarioId,
+          seed: input.seed,
+          disruptions: input.disruptions,
+        }, input.decisionMode)
+      : (() => {
+          const result = runScenario({
+            runId: input.runId,
+            scenarioId: input.scenarioId,
+            policy: input.policy,
+            seed: input.seed,
+            captureFrames: true,
+            injectedDisruptions: input.disruptions,
+          });
+          if (!result.timeline) throw new Error("Simulation completed without a replay timeline.");
+          return { result, timeline: result.timeline, decisionAdapter: "deterministic", actions: [] };
+        })();
+    const result = connected.result;
+    const timeline = connected.timeline;
+    const finalProductSnapshot = timeline.frames.at(-1)?.operationsSnapshot;
+    const metrics = connected.actions.length
+      ? {
+          ...result.metrics,
+          productActions: {
+            attempted: connected.actions.length,
+            succeeded: connected.actions.filter((action) => action.status === "SUCCEEDED").length,
+            rejected: connected.actions.filter((action) => action.status === "REJECTED").length,
+            domainEventsCreated: connected.actions.reduce((sum, action) => sum + action.eventIds.length, 0),
+            finalCounts: finalProductSnapshot ? {
+              activeListings: finalProductSnapshot.activeListings,
+              openDemands: finalProductSnapshot.openDemands,
+              ordersByStatus: finalProductSnapshot.ordersByStatus,
+              orderOutcomes: finalProductSnapshot.orderOutcomes,
+              deliveryAcceptedKg: finalProductSnapshot.deliveryAcceptedKg,
+              approvedCommitmentCount: finalProductSnapshot.approvedCommitmentCount,
+              completedMissionCount: finalProductSnapshot.completedMissionCount,
+              activeMissions: finalProductSnapshot.activeMissionIds.length,
+              openExceptions: finalProductSnapshot.openExceptionIds.length,
+            } : undefined,
+          },
+        }
+      : result.metrics;
     assertNoTruthLeak({ timeline, decisions: result.decisions }, "saved Product API simulation run");
 
     const completed = await prisma.$transaction(async (tx) => {
@@ -293,8 +300,9 @@ async function executeAndSaveRun(input: SavedRunInput) {
           startedAt: new Date(result.startedAt),
           endedAt: new Date(result.endedAt),
           frameCount: timeline.frames.length,
-          metrics: json(result.metrics),
+          metrics: json(metrics),
           decisions: json(result.decisions),
+          decisionAdapter: connected.decisionAdapter,
           evidenceLabel: result.evidenceLabel,
           provenanceNote: result.provenanceNote,
           determinismDigest: result.digest,
@@ -304,7 +312,7 @@ async function executeAndSaveRun(input: SavedRunInput) {
       });
       return row;
     });
-    await saveActorMappings(input.runId, timeline.scene);
+    if (input.policy === "BASELINE") await saveActorMappings(input.runId, timeline.scene);
     return completed;
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Simulation execution failed.";
@@ -341,10 +349,15 @@ function readRunQueryScope(actor: AuthActor, requestedRunId: unknown) {
 }
 
 async function requireRunExists(runId: string | null) {
-  if (!runId) return;
-  if (!(await prisma.simulationRun.findUnique({ where: { id: runId }, select: { id: true } }))) {
+  if (!runId) return null;
+  const run = await prisma.simulationRun.findUnique({
+    where: { id: runId },
+    select: { id: true, status: true, endedAt: true },
+  });
+  if (!run) {
     throw httpError(404, "SIMULATION_RUN_NOT_FOUND", "Simulation run was not found.");
   }
+  return run;
 }
 
 async function visibleEventEntityIds(actor: AuthActor) {
@@ -412,7 +425,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
         startsAt: scenario.startsAtIso,
         durationDays: scenario.durationDays,
         availablePolicies: ["BASELINE", "HARVEST"],
-        availableDecisionModes: ["DETERMINISTIC"],
+        availableDecisionModes: ["DETERMINISTIC", "LLM_ASSISTED"],
         islands: ISLANDS,
         provenanceNote: scenario.provenanceNote,
       })),
@@ -473,12 +486,12 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
           throw httpError(422, "DERIVED_RUN_REQUIRES_DISRUPTION", "A derived run must add at least one disruption.");
         }
         const disruptions = [...(source.disruptions as unknown as InjectedDisruption[]), ...additions];
-        const row = await executeAndSaveRun({
+        const row = await executeAndSaveRun(server, {
           runId: randomUUID(),
           scenarioId: source.scenarioId,
           policy: readPolicy(source.policy),
           seed: Number(source.seed),
-          decisionMode: "DETERMINISTIC",
+          decisionMode: source.decisionMode,
           scope: source.scope as unknown as RunScope,
           resolvedIslandIds: source.resolvedIslandIds as unknown as string[],
           disruptions,
@@ -496,7 +509,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
       const scenario = readScenario(body.scenarioId);
       const decisionMode = readDecisionMode(body.decisionMode);
       const { scope, resolvedIslandIds } = readScope(body.scope);
-      const row = await executeAndSaveRun({
+      const row = await executeAndSaveRun(server, {
         runId: randomUUID(),
         scenarioId: scenario.scenarioId,
         policy: readPolicy(body.policy),
@@ -517,6 +530,37 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
     const row = await prisma.simulationRun.findUnique({ where: { id: runId } });
     if (!row) throw httpError(404, "SIMULATION_RUN_NOT_FOUND", "Simulation run was not found.");
     return simulationRunDto(row);
+  });
+
+  server.post("/v1/simulation-runs/:runId/participant-sessions", async (request, reply) => {
+    requireRole(request, RUN_ROLES);
+    return idempotent(request, reply, 201, async () => {
+      const { runId } = request.params as { runId: string };
+      const body = assertObjectBody(request.body, ["productActorId"], ["productActorId"]);
+      const productActorId = asString(body.productActorId, "productActorId");
+      const run = await prisma.simulationRun.findUnique({ where: { id: runId } });
+      if (!run) throw httpError(404, "SIMULATION_RUN_NOT_FOUND", "Simulation run was not found.");
+      if (run.status !== "COMPLETED" || run.policy !== "HARVEST") {
+        throw httpError(409, "PARTICIPANT_REPLAY_UNAVAILABLE", "Participant replay requires a completed Harvest run.");
+      }
+      const mapping = await prisma.simulationActorMapping.findFirst({ where: { simulationRunId: runId, productActorId } });
+      const actor = mapping ? await prisma.actor.findUnique({ where: { id: productActorId } }) : null;
+      if (!mapping || !actor || !actor.isSynthetic || actor.simulationRunId !== runId) {
+        throw httpError(404, "SIMULATION_PARTICIPANT_NOT_FOUND", "The mapped synthetic participant was not found.");
+      }
+      return {
+        accessToken: await signDevelopmentToken(actor, "15m"),
+        expiresInSeconds: 900,
+        participant: {
+          simulationActorId: mapping.simulationActorId,
+          productActorId: actor.id,
+          name: actor.name,
+          role: actor.role,
+          simulationRunId: runId,
+          readOnly: true,
+        },
+      };
+    });
   });
 
   server.get("/v1/simulation-runs/:runId/timeline", async (request) => {
@@ -589,7 +633,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
       });
 
       try {
-        const baseline = await executeAndSaveRun({
+        const baseline = await executeAndSaveRun(server, {
           runId: baselineRunId,
           scenarioId: scenario.scenarioId,
           policy: "BASELINE",
@@ -600,7 +644,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
           disruptions,
           createdByActorId: actor.id,
         });
-        const harvest = await executeAndSaveRun({
+        const harvest = await executeAndSaveRun(server, {
           runId: harvestRunId,
           scenarioId: scenario.scenarioId,
           policy: "HARVEST",
@@ -657,7 +701,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
     const actor = requireRole(request, SNAPSHOT_ROLES);
     const query = request.query as JsonObject;
     const runId = readRunQueryScope(actor, query.simulationRunId);
-    await requireRunExists(runId);
+    const selectedRun = await requireRunExists(runId);
     const runWhere = { simulationRunId: runId };
 
     let listingWhere: Prisma.ListingWhereInput = { ...runWhere, status: "ACTIVE" };
@@ -677,21 +721,20 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
       exceptionWhere = { ...exceptionWhere, id: { in: exceptions.map((row) => row.id) } };
     }
 
-    const [activeListings, openDemands, orderGroups, activeMissions, openExceptions] = await Promise.all([
-      prisma.listing.count({ where: listingWhere }),
-      prisma.buyerDemand.count({ where: demandWhere }),
-      prisma.order.groupBy({ by: ["lifecycleStatus"], where: orderWhere, _count: { _all: true } }),
-      prisma.deliveryMission.findMany({ where: missionWhere, select: { id: true } }),
-      prisma.operationalException.findMany({ where: exceptionWhere, select: { id: true } }),
-    ]);
+    const snapshot = await buildOperationsSnapshot({
+      asOf: selectedRun?.status === "COMPLETED" && selectedRun.endedAt
+        ? selectedRun.endedAt
+        : operationNow(),
+      listingWhere,
+      demandWhere,
+      orderWhere,
+      activeMissionWhere: missionWhere,
+      openExceptionWhere: exceptionWhere,
+    });
     return {
       generatedAt: new Date().toISOString(),
       ...(runId ? { simulationRunId: runId } : {}),
-      activeListings,
-      openDemands,
-      ordersByStatus: Object.fromEntries(orderGroups.map((row) => [row.lifecycleStatus, row._count._all])),
-      activeMissionIds: activeMissions.map((row) => row.id),
-      openExceptionIds: openExceptions.map((row) => row.id),
+      ...snapshot,
     };
   });
 

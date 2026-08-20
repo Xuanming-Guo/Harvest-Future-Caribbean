@@ -8,6 +8,7 @@ import {
   type CropStage,
   type RecoveryExplanationPromptInput,
 } from "./prompts.js";
+import { completeStructured, readLlmConfiguration } from "./structured-client.js";
 
 export interface CropObservationDraftResult {
   suggestedCropStage: CropStage | null;
@@ -93,9 +94,68 @@ export class FixtureAgentTextAdapter implements AgentTextAdapter {
   }
 }
 
+function asRecord(value: unknown) {
+  if (!value || typeof value !== "object") throw new Error("The configured LLM returned a non-object response.");
+  return value as Record<string, unknown>;
+}
+
+function confidence(value: unknown, field: string) {
+  if (typeof value !== "number" || value < 0 || value > 1) throw new Error(`${field} must be between 0 and 1.`);
+  return value;
+}
+
+class OpenAiCompatibleTextAdapter implements AgentTextAdapter {
+  readonly name: string;
+
+  constructor() {
+    this.name = readLlmConfiguration().adapter;
+  }
+
+  async extractCropObservation(input: CropObservationPromptInput): Promise<CropObservationDraftResult> {
+    const prompt = buildCropObservationPrompt(input);
+    const result = await completeStructured(prompt.system, { context: prompt.context, outputSchema: prompt.outputSchema }, (value) => {
+      const row = asRecord(value);
+      const stage = row.suggestedCropStage;
+      if (stage !== null && !["GROWING", "FLOWERING", "FRUITING", "HARVEST_READY", "HARVESTED"].includes(String(stage))) throw new Error("suggestedCropStage is invalid.");
+      if (row.suggestedQuantityKg !== null && (typeof row.suggestedQuantityKg !== "number" || row.suggestedQuantityKg < 0)) throw new Error("suggestedQuantityKg must be non-negative or null.");
+      if (row.suggestedNotes !== null && typeof row.suggestedNotes !== "string") throw new Error("suggestedNotes must be a string or null.");
+      const field = asRecord(row.fieldConfidence);
+      if (!Array.isArray(row.warnings) || !row.warnings.every((item) => typeof item === "string")) throw new Error("warnings must be a string array.");
+      return {
+        suggestedCropStage: stage as CropStage | null,
+        suggestedQuantityKg: row.suggestedQuantityKg as number | null,
+        suggestedNotes: row.suggestedNotes as string | null,
+        fieldConfidence: {
+          cropStage: confidence(field.cropStage, "fieldConfidence.cropStage"),
+          estimatedQuantity: confidence(field.estimatedQuantity, "fieldConfidence.estimatedQuantity"),
+          notes: confidence(field.notes, "fieldConfidence.notes"),
+        },
+        confidence: confidence(row.confidence, "confidence"),
+        warnings: row.warnings as string[],
+      };
+    });
+    return { ...result.value, promptId: cropObservationPromptId, adapter: result.adapter };
+  }
+
+  async explainRecovery(input: RecoveryExplanationPromptInput): Promise<RecoveryExplanationResult> {
+    const prompt = buildDelayRecoveryPrompt(input);
+    const result = await completeStructured(prompt.system, { context: prompt.context, outputSchema: prompt.outputSchema }, (value) => {
+      const row = asRecord(value);
+      if (typeof row.summary !== "string" || row.summary.length > 500) throw new Error("summary must be a string of at most 500 characters.");
+      if (!Array.isArray(row.evidence) || !row.evidence.every((item) => typeof item === "string")) throw new Error("evidence must be a string array.");
+      if (!Array.isArray(row.risks) || !row.risks.every((item) => typeof item === "string")) throw new Error("risks must be a string array.");
+      if (typeof row.requiresClarification !== "boolean") throw new Error("requiresClarification must be boolean.");
+      return { summary: row.summary, evidence: row.evidence as string[], risks: row.risks as string[], requiresClarification: row.requiresClarification };
+    });
+    return { ...result.value, promptId: delayRecoveryPromptId, adapter: result.adapter };
+  }
+}
+
 export function createAgentTextAdapter(provider = config.agentLlmProvider): AgentTextAdapter {
-  if (!provider.trim()) return new FixtureAgentTextAdapter();
-  throw new Error(
-    `Unsupported AGENT_LLM_PROVIDER '${provider}'. Leave it blank for the fixture or add and register a provider adapter as documented in docs/agent_workflows.md.`,
-  );
+  if (provider.trim() && provider.trim() !== "openai-compatible") {
+    throw new Error(`Unsupported AGENT_LLM_PROVIDER '${provider}'. Use 'openai-compatible' or leave all LLM variables blank.`);
+  }
+  const llm = readLlmConfiguration();
+  if (llm.mode === "fixture") return new FixtureAgentTextAdapter();
+  return new OpenAiCompatibleTextAdapter();
 }

@@ -284,18 +284,18 @@ describe("participant Product API", () => {
     expect(scenarios.statusCode).toBe(200);
     expect(scenarios.json().items[0]).toMatchObject({
       scenarioId: "saint-lucia-demo-v1",
-      availableDecisionModes: ["DETERMINISTIC"],
+      availableDecisionModes: ["DETERMINISTIC", "LLM_ASSISTED"],
       islands: [{ islandId: "saint-lucia", countryCode: "LC" }],
     });
 
-    const unavailableLlm = await server.inject({
+    const fixtureLlm = await server.inject({
       method: "POST",
       url: "/v1/simulation-runs",
       headers: mutationHeaders("operations-demo", "llm-run"),
       payload: { ...payload, decisionMode: "LLM_ASSISTED" },
     });
-    expect(unavailableLlm.statusCode).toBe(409);
-    expect(unavailableLlm.json().code).toBe("LLM_PROVIDER_NOT_CONFIGURED");
+    expect(fixtureLlm.statusCode).toBe(201);
+    expect(fixtureLlm.json()).toMatchObject({ decisionMode: "LLM_ASSISTED", decisionAdapter: "fixture", status: "COMPLETED" });
 
     const created = await server.inject({ method: "POST", url: "/v1/simulation-runs", headers, payload });
     expect(created.statusCode).toBe(201);
@@ -304,11 +304,13 @@ describe("participant Product API", () => {
       policy: "HARVEST",
       seed: 42,
       decisionMode: "DETERMINISTIC",
+      decisionAdapter: "deterministic",
       status: "COMPLETED",
       resolvedIslandIds: ["saint-lucia"],
       evidenceLabel: expect.stringContaining("SYNTHETIC"),
     });
     expect(created.json().frameCount).toBeGreaterThan(20);
+    expect(created.json()).toMatchObject({ frameCount: 130, metrics: { eventsProcessed: 82 } });
     const runId = created.json().runId as string;
 
     const replayedRequest = await server.inject({ method: "POST", url: "/v1/simulation-runs", headers, payload });
@@ -325,6 +327,12 @@ describe("participant Product API", () => {
     expect(timeline.statusCode).toBe(200);
     expect(timeline.json().frames).toHaveLength(created.json().frameCount);
     expect(timeline.json().scene.runId).toBe(runId);
+    expect(timeline.json().scene.participants.every((participant: { productActorId: string | null }) => participant.productActorId)).toBe(true);
+    expect(timeline.json().frames.some((frame: { agentActions?: unknown[] }) => (frame.agentActions?.length ?? 0) > 0)).toBe(true);
+    expect(timeline.json().frames.every((frame: { operationsSnapshot?: unknown }) => frame.operationsSnapshot)).toBe(true);
+    const finalFrame = timeline.json().frames.at(-1);
+    expect(finalFrame).toMatchObject({ eventType: "RUN_SETTLED", at: created.json().endedAt });
+    expect(finalFrame.operationsSnapshot.orderOutcomes).toMatchObject({ total: 11, fulfilled: 2, partiallyFulfilled: 0, unfulfilled: 8, pending: 1 });
     for (const forbidden of ["potentialYieldKg", "qualityFraction", "dailySpoilageRate", "severity"]) {
       expect(timeline.body).not.toContain(forbidden);
     }
@@ -349,6 +357,70 @@ describe("participant Product API", () => {
     ]);
     expect(storedSecond.determinismDigest).toBe(storedFirst.determinismDigest);
     expect(storedSecond.metrics).toEqual(storedFirst.metrics);
+    const repeatedTimeline = await server.inject({
+      method: "GET",
+      url: `/v1/simulation-runs/${reproducible.json().runId}/timeline`,
+      headers: auth("operations-demo"),
+    });
+    const normalizeFrames = (frames: Array<Record<string, unknown>>) => frames.map((frame) => {
+      const snapshot = frame.operationsSnapshot as {
+        activeListings: number;
+        openDemands: number;
+        ordersByStatus: Record<string, number>;
+        orderOutcomes: Record<string, number>;
+        deliveryAcceptedKg: number;
+        approvedCommitmentCount: number;
+        completedMissionCount: number;
+        activeMissionIds: string[];
+        openExceptionIds: string[];
+      } | undefined;
+      return {
+        at: frame.at,
+        eventType: frame.eventType,
+        actors: frame.actors,
+        missions: frame.missions,
+        batches: frame.batches,
+        demands: frame.demands,
+        disruptions: frame.disruptions,
+        degradedRoadSegmentIds: frame.degradedRoadSegmentIds,
+        newDecisions: frame.newDecisions,
+        totals: frame.totals,
+        agentActions: (frame.agentActions as Array<Record<string, unknown>> | undefined)?.map((action) => ({
+          at: action.at,
+          simulationActorId: action.simulationActorId,
+          role: action.role,
+          toolName: action.toolName,
+          status: action.status,
+          adapter: action.adapter,
+        })) ?? [],
+        operationsSnapshot: snapshot ? {
+          activeListings: snapshot.activeListings,
+          openDemands: snapshot.openDemands,
+          ordersByStatus: snapshot.ordersByStatus,
+          orderOutcomes: snapshot.orderOutcomes,
+          deliveryAcceptedKg: snapshot.deliveryAcceptedKg,
+          approvedCommitmentCount: snapshot.approvedCommitmentCount,
+          completedMissionCount: snapshot.completedMissionCount,
+          activeMissions: snapshot.activeMissionIds.length,
+          openExceptions: snapshot.openExceptionIds.length,
+        } : null,
+      };
+    });
+    expect(normalizeFrames(repeatedTimeline.json().frames)).toEqual(normalizeFrames(timeline.json().frames));
+
+    const connectedCounts = await Promise.all([
+      prisma.actor.count({ where: { simulationRunId: runId } }),
+      prisma.cropObservation.count({ where: { simulationRunId: runId } }),
+      prisma.listing.count({ where: { simulationRunId: runId } }),
+      prisma.order.count({ where: { simulationRunId: runId } }),
+      prisma.approval.count({ where: { simulationRunId: runId } }),
+      prisma.deliveryMission.count({ where: { simulationRunId: runId } }),
+      prisma.deliveryUpdate.count({ where: { simulationRunId: runId } }),
+      prisma.deliveryAcceptance.count({ where: { simulationRunId: runId } }),
+      prisma.domainEvent.count({ where: { simulationRunId: runId } }),
+      prisma.agentTrace.count({ where: { simulationRunId: runId } }),
+    ]);
+    expect(connectedCounts.every((count) => count > 0)).toBe(true);
 
     const derived = await server.inject({
       method: "POST",
@@ -358,8 +430,8 @@ describe("participant Product API", () => {
         derivedFromRunId: runId,
         disruptions: [{
           type: "WEATHER",
-          offsetMs: 432_000_000,
-          durationMs: 86_400_000,
+          offsetMs: 0,
+          durationMs: 1_814_400_000,
           affectedEntityIds: ["all"],
           publicDescription: "Synthetic storm introduced for a derived replay.",
         }],
@@ -369,6 +441,33 @@ describe("participant Product API", () => {
     expect(derived.json()).toMatchObject({ derivedFromRunId: runId, status: "COMPLETED" });
     expect(derived.json().disruptions).toHaveLength(1);
     expect((await prisma.simulationRun.findUniqueOrThrow({ where: { id: runId } })).disruptions).toEqual([]);
+
+    const derivedTimeline = await server.inject({
+      method: "GET",
+      url: `/v1/simulation-runs/${derived.json().runId}/timeline`,
+      headers: auth("operations-demo"),
+    });
+    expect(derivedTimeline.statusCode).toBe(200);
+    const derivedActions = derivedTimeline.json().frames.flatMap((frame: { agentActions?: Array<{ toolName: string }> }) => frame.agentActions ?? []);
+    expect(derivedActions.some((action: { toolName: string }) => action.toolName === "report_exception")).toBe(true);
+
+    const horizonInjection = await server.inject({
+      method: "POST",
+      url: "/v1/simulation-runs",
+      headers: mutationHeaders("operations-demo", "derived-at-horizon"),
+      payload: {
+        derivedFromRunId: runId,
+        disruptions: [{
+          type: "WEATHER",
+          offsetMs: 1_814_400_000,
+          durationMs: 86_400_000,
+          affectedEntityIds: ["all"],
+          publicDescription: "This starts too late to affect the scenario.",
+        }],
+      },
+    });
+    expect(horizonInjection.statusCode).toBe(422);
+    expect(horizonInjection.json()).toMatchObject({ code: "INVALID_DISRUPTION" });
 
     const pair = await server.inject({
       method: "POST",
@@ -386,14 +485,59 @@ describe("participant Product API", () => {
     const list = await server.inject({ method: "GET", url: "/v1/simulation-runs?limit=2", headers: auth("operations-demo") });
     expect(list.statusCode).toBe(200);
     expect(list.json().items).toHaveLength(2);
-    expect(await prisma.simulationActorMapping.count({ where: { simulationRunId: runId } })).toBeGreaterThan(0);
+    expect(await prisma.simulationActorMapping.count({ where: { simulationRunId: runId, productActorId: { not: null } } })).toBeGreaterThan(0);
 
     const realSnapshot = await server.inject({ method: "GET", url: "/v1/operations/snapshot", headers: auth("operations-demo") });
     const runSnapshot = await server.inject({ method: "GET", url: `/v1/operations/snapshot?simulationRunId=${runId}`, headers: auth("operations-demo") });
     expect(realSnapshot.statusCode).toBe(200);
     expect(realSnapshot.json()).not.toHaveProperty("simulationRunId");
-    expect(runSnapshot.json()).toMatchObject({ simulationRunId: runId, activeListings: 0, openDemands: 0 });
-  });
+    const { generatedAt: _generatedAt, ...finalStoredSnapshot } = finalFrame.operationsSnapshot;
+    expect(runSnapshot.json()).toMatchObject({ simulationRunId: runId, ...finalStoredSnapshot });
+    expect(runSnapshot.json().generatedAt).toEqual(expect.any(String));
+    expect(runSnapshot.json().orderOutcomes.total).toBeGreaterThan(0);
+    const outcomes = runSnapshot.json().orderOutcomes;
+    expect(outcomes.fulfilled + outcomes.partiallyFulfilled + outcomes.unfulfilled + outcomes.pending).toBe(outcomes.total);
+    const [acceptedDelivery, approvedCommitments, completedMissions] = await Promise.all([
+      prisma.deliveryAcceptance.aggregate({ where: { simulationRunId: runId }, _sum: { acceptedQuantity: true } }),
+      prisma.allocation.count({ where: { simulationRunId: runId, status: "APPROVED" } }),
+      prisma.deliveryMission.count({ where: { simulationRunId: runId, status: { in: ["DELIVERED", "COMPLETED"] } } }),
+    ]);
+    expect(runSnapshot.json().deliveryAcceptedKg).toBe(acceptedDelivery._sum.acceptedQuantity ?? 0);
+    expect(runSnapshot.json().deliveryAcceptedKg).toBe(created.json().metrics.totalAcceptedKg);
+    expect(runSnapshot.json().approvedCommitmentCount).toBe(approvedCommitments);
+    expect(runSnapshot.json().completedMissionCount).toBe(completedMissions);
+
+    const buyerMapping = await prisma.simulationActorMapping.findFirstOrThrow({ where: { simulationRunId: runId, role: "BUYER", productActorId: { not: null } } });
+    const participantSession = await server.inject({
+      method: "POST",
+      url: `/v1/simulation-runs/${runId}/participant-sessions`,
+      headers: mutationHeaders("operations-demo", "participant-replay"),
+      payload: { productActorId: buyerMapping.productActorId },
+    });
+    expect(participantSession.statusCode).toBe(201);
+    const participantAuth = { authorization: `Bearer ${participantSession.json().accessToken}` };
+    const me = await server.inject({ method: "GET", url: "/v1/me", headers: participantAuth });
+    expect(me.json()).toMatchObject({ role: "BUYER", synthetic: true, simulationRunId: runId, readOnly: true });
+    const blockedMutation = await server.inject({
+      method: "POST",
+      url: "/v1/buyer-demands",
+      headers: { ...participantAuth, "idempotency-key": "blocked-replay-mutation" },
+      payload: { cropType: "CARROT", quantity: { value: 1, unit: "kg" }, neededBy: "2026-09-20T10:00:00Z", deliveryLocation: { latitude: 14, longitude: -61 } },
+    });
+    expect(blockedMutation.statusCode).toBe(409);
+    expect(blockedMutation.json().code).toBe("SIMULATION_RUN_IMMUTABLE");
+
+    const baselineWorkflowCounts = await Promise.all([
+      prisma.actor.count({ where: { simulationRunId: pair.json().baselineRunId } }),
+      prisma.listing.count({ where: { simulationRunId: pair.json().baselineRunId } }),
+      prisma.buyerDemand.count({ where: { simulationRunId: pair.json().baselineRunId } }),
+      prisma.order.count({ where: { simulationRunId: pair.json().baselineRunId } }),
+      prisma.allocation.count({ where: { simulationRunId: pair.json().baselineRunId } }),
+      prisma.deliveryMission.count({ where: { simulationRunId: pair.json().baselineRunId } }),
+      prisma.domainEvent.count({ where: { simulationRunId: pair.json().baselineRunId } }),
+    ]);
+    expect(baselineWorkflowCounts.every((count) => count === 0)).toBe(true);
+  }, 60_000);
 
   it("keeps marketplace records isolated between real users and simulation runs", async () => {
     const runs = await prisma.simulationRun.findMany({ where: { status: "COMPLETED" }, take: 2, orderBy: { createdAt: "asc" } });
@@ -420,9 +564,12 @@ describe("participant Product API", () => {
       const first = await server.inject({ method: "GET", url: "/v1/listings", headers: auth("sim-buyer-0") });
       const second = await server.inject({ method: "GET", url: "/v1/listings", headers: auth("sim-buyer-1") });
       const real = await server.inject({ method: "GET", url: "/v1/listings", headers: auth("buyer-hotel") });
-      expect(first.json().items).toHaveLength(1);
-      expect(second.json().items).toHaveLength(1);
-      expect(first.json().items[0].listingId).not.toBe(second.json().items[0].listingId);
+      const firstIds = first.json().items.map((item: { listingId: string }) => item.listingId);
+      const secondIds = second.json().items.map((item: { listingId: string }) => item.listingId);
+      expect(firstIds).toContain(createdIds[0]);
+      expect(firstIds).not.toContain(createdIds[5]);
+      expect(secondIds).toContain(createdIds[5]);
+      expect(secondIds).not.toContain(createdIds[0]);
       expect(real.json().items.every((item: { listingId: string }) => !createdIds.includes(item.listingId))).toBe(true);
     } finally {
       await prisma.listing.deleteMany({ where: { id: { in: createdIds } } });

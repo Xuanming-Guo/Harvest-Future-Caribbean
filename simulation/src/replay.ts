@@ -38,8 +38,58 @@ export interface ControlRoomScene {
   buyers: Array<{ buyerId: string; name: string; position: GeoPoint }>;
   transporters: Array<{ transporterId: string; name: string; homePosition: GeoPoint; capacityKg: number }>;
   roads: Array<{ roadSegmentId: string; name: string; from: GeoPoint; to: GeoPoint; distanceKm: number }>;
+  /** Run-scoped Product API identities. Baseline participants have no product actor. */
+  participants: SimulationParticipant[];
   /** Repeated here so a consumer cannot render the scene without the label. */
   evidenceLabel: string;
+}
+
+export interface SimulationParticipant {
+  simulationActorId: string;
+  productActorId: string | null;
+  role: 'FARMER' | 'BUYER' | 'TRANSPORTER' | 'COORDINATOR';
+  displayName: string;
+  islandId: string;
+}
+
+export interface SimulationAgentAction {
+  actionId: string;
+  at: string;
+  simulationActorId: string;
+  productActorId: string;
+  role: SimulationParticipant['role'];
+  toolName: string;
+  status: 'SUCCEEDED' | 'REJECTED';
+  summary: string;
+  traceId?: string;
+  entityId?: string;
+  eventIds: string[];
+  adapter: string;
+  /** Whether this tool crossed an approval boundary in the synthetic run. */
+  approval: 'NONE' | 'SYNTHETIC_PARTICIPANT';
+  correlationId?: string;
+  causationId?: string;
+}
+
+export interface SimulationOperationsSnapshot {
+  activeListings: number;
+  openDemands: number;
+  ordersByStatus: Record<string, number>;
+  orderOutcomes: SimulationOrderOutcomes;
+  deliveryAcceptedKg: number;
+  approvedCommitmentCount: number;
+  completedMissionCount: number;
+  activeMissionIds: string[];
+  openExceptionIds: string[];
+}
+
+/** Product API order outcomes as of one observable replay instant. */
+export interface SimulationOrderOutcomes {
+  total: number;
+  fulfilled: number;
+  partiallyFulfilled: number;
+  unfulfilled: number;
+  pending: number;
 }
 
 /** A delivery mission, with the timings needed to animate it. */
@@ -109,6 +159,10 @@ export interface ControlRoomFrame {
   degradedRoadSegmentIds: string[];
   /** Decisions recorded since the previous frame. */
   newDecisions: DecisionRecord[];
+  /** Product API actions performed by simulated participants during this frame. */
+  agentActions?: SimulationAgentAction[];
+  /** Run-scoped Product API state after those actions. */
+  operationsSnapshot?: SimulationOperationsSnapshot;
   totals: ControlRoomTotals;
 }
 

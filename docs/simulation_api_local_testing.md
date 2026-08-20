@@ -1,26 +1,27 @@
-# Saved simulation API: local testing guide
+# Connected simulation: local testing guide
 
-This guide verifies the saved simulation-run foundation provided by the
-Fastify Product API. It is intended for teammates and coding agents testing
-issue #29 or preparing the issue #30 control-room and simulated-agent
-integration.
+This guide verifies Issue #30: Harvest-mode simulation participants use the
+normal Product API, the control room replays saved API runs, and a completed
+participant can be inspected in the normal website read-only.
 
-The current boundary is important:
+Read [`simulation_vision.md`](simulation_vision.md) for the intended experience
+and [`api_info.md`](api_info.md) for endpoint/effect rules.
 
-- The Product API can create, persist, list and replay deterministic runs.
-- The participant website on port `3000` does not contain a simulation page.
-- The control room on port `3002` still runs its temporary browser-local
-  simulation until issue #30 connects it to these endpoints.
-- Saved replay data is synthetic counterfactual evidence, not measured impact.
-- `LLM_ASSISTED` is reserved for issue #30 and does not silently fall back to
-  deterministic execution.
+## What runs where
 
-## Prerequisites and local start
+| Address | Purpose |
+|---|---|
+| <http://localhost:3000> | Normal farmer, buyer, transporter and coordinator website |
+| <http://localhost:3001> | Fastify Product API |
+| <http://localhost:3002> | Separate 3D simulation control room |
+| Docker PostgreSQL | Product and saved-run state |
 
-Requirements:
+The participant website contains no simulation controls. The control room does
+not run the authoritative engine in the browser.
 
-- Node.js 20 or later.
-- Docker Desktop with Docker Compose running.
+## 1. Start the product and control room
+
+Requirements: Node.js 20+, npm and Docker Desktop.
 
 From the repository root:
 
@@ -29,34 +30,32 @@ npm install
 npm run dev
 ```
 
-This starts:
+This starts PostgreSQL, applies migrations, reseeds disposable development
+data, and starts ports `3000` and `3001`. In a second PowerShell window:
 
-- participant website: <http://localhost:3000>;
-- Product API: <http://localhost:3001>;
-- PostgreSQL 16 in Docker.
+```powershell
+npm run control-room
+```
 
-Check the API in a second PowerShell window:
+Open <http://localhost:3002>. Keep both terminal processes running. A root
+`npm run dev` restart reseeds the database, so saved run IDs from an earlier
+session will disappear.
+
+Check the API:
 
 ```powershell
 Invoke-RestMethod http://localhost:3001/health
 ```
 
-Expected fields:
+Expected important fields:
 
 ```text
 status          : ok
 service         : harvest-product-api
-contractVersion : 0.5.0
+contractVersion : 0.7.0
 ```
 
-If the API reports `EADDRINUSE` for port `3001`, another API process is already
-listening there. Stop the older development terminal or process, then run
-`npm run dev` again. Do not start `npm run dev:api` while the root development
-command is already running.
-
-## 1. Sign in as the operations user
-
-Run the remaining commands in the second PowerShell window:
+## 2. Create an operations session
 
 ```powershell
 $base = "http://localhost:3001"
@@ -72,38 +71,31 @@ $auth = @{
 }
 ```
 
-Saved-run administration is intentionally limited to operations and admin
-roles. The development-only `operations-demo` persona provides the required
-role without storing credentials in the repository.
-
-## 2. Check the available scenarios
+## 3. Check the scenario contract
 
 ```powershell
 $scenarios = Invoke-RestMethod `
   -Uri "$base/v1/simulation-scenarios" `
   -Headers $auth
 
-$scenarios.items | Select-Object `
-  scenarioId, durationDays, availablePolicies, availableDecisionModes, islands
+$scenarios.items | Select-Object scenarioId, durationDays,
+  availablePolicies, availableDecisionModes
 ```
 
-Expected current catalogue:
+Expected:
 
-- one scenario: `saint-lucia-demo-v1`;
-- one island: `saint-lucia`;
-- policies: `BASELINE` and `HARVEST`;
-- available decision mode: `DETERMINISTIC`.
+- scenario `saint-lucia-demo-v1`;
+- 21 simulated days;
+- `BASELINE` and `HARVEST` policies;
+- `DETERMINISTIC` and `LLM_ASSISTED` decision modes;
+- Saint Lucia is the only available island until Issue #31.
 
-The scope contract is ready for multiple islands, but issue #31 owns generating
-regional Caribbean scenarios. Supplying another island currently returns a
-validation error rather than pretending that regional data exists.
-
-## 3. Create and save a deterministic run
+## 4. Create a connected deterministic Harvest run
 
 ```powershell
 $runHeaders = @{
   Authorization = "Bearer $($session.accessToken)"
-  "Idempotency-Key" = "manual-run-seed-42-001"
+  "Idempotency-Key" = "connected-harvest-seed-42-001"
 }
 
 $runRequest = @{
@@ -124,89 +116,208 @@ $run = Invoke-RestMethod `
   -ContentType "application/json" `
   -Body $runRequest
 
-$run | Select-Object `
-  runId, scenarioId, policy, seed, decisionMode, status, frameCount,
-  decisionCount, evidenceLabel, metrics
+$run | Select-Object runId, status, policy, decisionMode,
+  decisionAdapter, frameCount, decisionCount, metrics
 ```
 
-For the current engine and seed `42`, the important expected values are:
+Expected stable engine values for seed `42`:
 
 ```text
-scenarioId             saint-lucia-demo-v1
-policy                 HARVEST
-seed                   42
-decisionMode           DETERMINISTIC
-status                 COMPLETED
-frameCount             111
-decisionCount          27
-eventsProcessed        111
-totalDemandedKg        2956
-totalAcceptedKg        414.12
-localProcurementRate   0.140095
-wasteQuantity          2404.39 kg
+status            COMPLETED
+policy            HARVEST
+decisionMode      DETERMINISTIC
+decisionAdapter   deterministic
+frameCount        130
+eventsProcessed    82
+totalDemandedKg   2956
+totalAcceptedKg    359
 ```
 
-`runId` is a new storage UUID and therefore varies. The response must carry the
-synthetic-counterfactual evidence label. It must not claim that these values
-were measured in a deployed system.
+`metrics.productActions` must also exist with positive attempted, succeeded and
+domain-event counts. For the deterministic seed-`42` run, expect:
 
-## 4. Inspect and replay the saved run
+```text
+attempted             154
+succeeded             154
+rejected                0
+domainEventsCreated   242
+activeListings          7
+openDemands             11
+totalOrders             11
+activeMissions           0
+openExceptions           0
+```
 
-The metadata endpoint deliberately omits the large frame sequence:
+The final Product API outcome summary is separate from the physical engine
+metrics above. For deterministic seed `42`, expect:
+
+```text
+total orders              11
+fulfilled                  2
+partially fulfilled        0
+unfulfilled                8
+pending                    1
+approved commitments       8
+completed missions         8
+```
+
+`deliveryAcceptedKg` is the sum of the eight immutable delivery acceptances,
+not the engine's `totalAcceptedKg`. The control room uses this Product API
+quantity for its Harvest **Delivered** card. For seed `42`, both values are
+`359 kg` because the engine applies the Product API delivery acceptances back
+to physical state as each mission arrives.
+
+The `runId` is a fresh UUID. All evidence is explicitly labelled synthetic and
+is not a real-world impact result. Normal Product API permissions and
+validation remain authoritative for every simulated action; a rejection would
+be retained in the replay rather than hidden.
+
+Run creation is synchronous. The physical engine and Product API are
+interleaved: each physical timestamp is advanced, role-safe participants act
+through the normal endpoints in stable order, new Product events are projected
+once into future physical state, and then the replay checkpoint is saved.
+
+## 5. Inspect the replay and connected actions
 
 ```powershell
 $runId = $run.runId
 
-$details = Invoke-RestMethod `
-  -Uri "$base/v1/simulation-runs/$runId" `
-  -Headers $auth
-
-$details | Select-Object `
-  runId, status, frameCount, decisionCount, evidenceLabel, metrics
-```
-
-Load the complete immutable replay and one saved frame:
-
-```powershell
 $timeline = Invoke-RestMethod `
   -Uri "$base/v1/simulation-runs/$runId/timeline" `
   -Headers $auth
 
-$firstFrame = Invoke-RestMethod `
-  -Uri "$base/v1/simulation-runs/$runId/world?frameIndex=0" `
-  -Headers $auth
+$agentFrames = @($timeline.frames | Where-Object {
+  $_.agentActions.Count -gt 0
+})
 
 [pscustomobject]@{
   Frames = $timeline.frames.Count
   Farms = $timeline.scene.farms.Count
   Buyers = $timeline.scene.buyers.Count
   Transporters = $timeline.scene.transporters.Count
-  ActorsInFirstFrame = $firstFrame.frame.actors.Count
-  FirstEvent = $firstFrame.frame.eventType
-  FirstTimestamp = $firstFrame.frame.at
+  Participants = $timeline.scene.participants.Count
+  MappedParticipants = @($timeline.scene.participants | Where-Object {
+    $null -ne $_.productActorId
+  }).Count
+  FramesWithAgentActions = $agentFrames.Count
+  AgentActions = @($timeline.frames.agentActions).Count
 }
 ```
 
 Expected:
 
 ```text
-Frames              111
-Farms               5
-Buyers               3
-Transporters        2
-ActorsInFirstFrame  10
-FirstEvent          WORLD_TICK
-FirstTimestamp      2026-09-01T06:00:00.000Z
+Frames             130
+Farms              5
+Buyers             3
+Transporters       2
+Participants       11
+MappedParticipants 11
 ```
 
-The valid frame indices are `0` through `110`. Requesting `frameIndex=111`
-returns HTTP `422`. Replay reads do not re-run the simulation, call an LLM or
-mutate the saved run.
+`FramesWithAgentActions` and `AgentActions` must be positive. The eleventh
+participant is the run-scoped coordinator. Each action includes role, tool,
+success/rejection, concise summary, adapter, event IDs and optional trace/entity
+IDs. It must not include prompts, secrets or chain-of-thought.
 
-## 5. Verify idempotency and deterministic storage
+The last frame must have `eventType: RUN_SETTLED`, its `at` value must equal
+`scene.endsAt`, and every Harvest frame must carry an `operationsSnapshot`.
+Between participant action cycles the latest snapshot is retained unchanged.
 
-Repeating the same request with the same idempotency key returns the original
-stored run:
+Check the final Product API projection:
+
+```powershell
+$snapshot = Invoke-RestMethod `
+  -Uri "$base/v1/operations/snapshot?simulationRunId=$runId" `
+  -Headers $auth
+
+$snapshot
+```
+
+Unlike the Issue #29 foundation, this is no longer empty. Expect positive
+run-scoped demand/order activity. Its final order outcomes, accepted delivery
+quantity, approved commitments and completed missions must match the last
+timeline frame and the underlying run-scoped Product API records.
+
+## 6. Confirm that Product API records and events are run-scoped
+
+For a streaming view, use:
+
+```powershell
+curl.exe -N `
+  -H "Authorization: Bearer $($session.accessToken)" `
+  "$base/v1/events/stream?simulationRunId=$runId"
+```
+
+Press `Ctrl+C` to stop. Each SSE `id` is an increasing decimal cursor. Event
+JSON uses a UUID `eventId` and contains:
+
+- this `simulationRunId`;
+- a simulated `simulationTime`;
+- synthetic/model provenance as appropriate;
+- actor, entity, trace and correlation IDs.
+
+## 7. Open a participant read-only
+
+Pick a mapped participant (buyer shown here):
+
+```powershell
+$participant = $timeline.scene.participants |
+  Where-Object { $_.role -eq "BUYER" } |
+  Select-Object -First 1
+
+$participantHeaders = @{
+  Authorization = "Bearer $($session.accessToken)"
+  "Idempotency-Key" = "participant-replay-seed-42-001"
+}
+
+$participantSession = Invoke-RestMethod `
+  -Method Post `
+  -Uri "$base/v1/simulation-runs/$runId/participant-sessions" `
+  -Headers $participantHeaders `
+  -ContentType "application/json" `
+  -Body (@{ productActorId = $participant.productActorId } | ConvertTo-Json)
+
+$participantSession.participant
+```
+
+Expected: the selected name/role, this run ID, `readOnly: true`, and
+`expiresInSeconds: 900` in the surrounding response.
+
+The control-room **Open participant website** button performs this call and
+opens port `3000`. Expected website behavior:
+
+- it routes to that role's normal page;
+- a purple `Synthetic simulation replay · read-only` banner is visible;
+- the completed run's run-scoped data is shown;
+- form controls and action buttons are disabled;
+- the token is immediately removed from the URL fragment.
+
+The API is the final enforcement. This command must return HTTP `409` with
+`SIMULATION_RUN_IMMUTABLE`:
+
+```powershell
+$replayAuth = @{
+  Authorization = "Bearer $($participantSession.accessToken)"
+  "Idempotency-Key" = "blocked-replay-demand-001"
+}
+
+try {
+  Invoke-RestMethod `
+    -Method Post `
+    -Uri "$base/v1/buyer-demands" `
+    -Headers $replayAuth `
+    -ContentType "application/json" `
+    -Body '{"cropType":"CARROT","quantity":{"value":1,"unit":"kg"},"neededBy":"2026-09-20T10:00:00Z","deliveryLocation":{"latitude":14,"longitude":-61}}'
+} catch {
+  $_.ErrorDetails.Message
+}
+```
+
+## 8. Verify idempotency and deterministic normalization
+
+Repeating the original request with the same key/body returns the same stored
+run:
 
 ```powershell
 $repeat = Invoke-RestMethod `
@@ -221,227 +332,101 @@ $repeat.runId -eq $run.runId
 
 Expected: `True`.
 
-Reusing that key with a different body returns HTTP `409`. Use a new key to
-store a second run with the same simulation inputs:
+Use a new idempotency key to create another seed-42 run. Run IDs, Product API
+UUIDs and processing timestamps differ, but physical digest/metrics and the
+normalized role/tool/status action sequence are repeatable. Never compare raw
+replay JSON byte-for-byte because run-scoped UUIDs are intentionally new.
 
-```powershell
-$secondHeaders = @{
-  Authorization = "Bearer $($session.accessToken)"
-  "Idempotency-Key" = "manual-run-seed-42-002"
-}
+## 9. Verify baseline isolation
 
-$run2 = Invoke-RestMethod `
-  -Method Post `
-  -Uri "$base/v1/simulation-runs" `
-  -Headers $secondHeaders `
-  -ContentType "application/json" `
-  -Body $runRequest
+Create the same request with `policy = "BASELINE"` and a new key. Its scene has
+the ten engine participants with `productActorId: null`. Its run-scoped
+operations snapshot is empty because baseline actors do not use Harvest's
+marketplace or coordination workflows. This is the intended comparison
+boundary, not a missing integration.
 
-[pscustomobject]@{
-  DifferentRunIds = $run.runId -ne $run2.runId
-  SameMetrics = (
-    ($run.metrics | ConvertTo-Json -Depth 8 -Compress) -eq
-    ($run2.metrics | ConvertTo-Json -Depth 8 -Compress)
-  )
-  SameFrameCount = $run.frameCount -eq $run2.frameCount
-}
-```
+## 10. Verify fixture and configured LLM modes
 
-Expected: all three values are `True`. Storage IDs are unique, while scenario,
-policy, seed, scope and disruptions determine the reproducible observable
-result.
+With all `AGENT_LLM_*` values blank, create a Harvest run with
+`decisionMode = "LLM_ASSISTED"`. Expect `COMPLETED` and
+`decisionAdapter = "fixture"`; replay actions also say `fixture`. No network
+model call occurs.
 
-## 6. Create a disruption-derived run
+To use a real compatible provider, follow
+[`agent_workflows.md`](agent_workflows.md), set all four variables in the
+repository-root `.env`, restart the API, and run again. Expect
+`decisionAdapter = openai-compatible:<model>`. Partial configuration, provider
+errors and invalid structured output fail the run safely. Never commit `.env`
+or a real key.
 
-A derived run inherits the source scenario, policy, seed, decision mode and
-scope. The request contains only the source run and additional disruptions:
+## 11. Test the control room
 
-```powershell
-$derivedHeaders = @{
-  Authorization = "Bearer $($session.accessToken)"
-  "Idempotency-Key" = "manual-derived-seed-42-001"
-}
+At <http://localhost:3002>:
 
-$derivedRequest = @{
-  derivedFromRunId = $runId
-  disruptions = @(
-    @{
-      type = "WEATHER"
-      offsetMs = 86400000
-      durationMs = 21600000
-      affectedEntityIds = @($timeline.scene.farms[0].farmId)
-      publicDescription = "Heavy rain around one farm for six simulated hours."
-    }
-  )
-} | ConvertTo-Json -Depth 8
+1. Choose Harvest, seed `42`, and Deterministic.
+2. Choose the Saint Lucia scenario in **Scenario**.
+3. Select **Run simulation**. A loading overlay is shown until the synchronous
+   API run completes.
+4. Confirm the globe, metrics and playback controls appear. Harvest should say
+   **Harvest product outcomes** and baseline should say
+   **Fragmented baseline outcomes**.
+5. Play, pause, change speed, rewind, scrub and reset. None should create a new
+   run or repeat participant actions.
+6. Select a purple feed item and confirm the inspector shows its participant,
+   role, tool, status, adapter, time, synthetic approval classification and
+   safe trace/entity/event references.
+7. Choose an existing run from **Saved run** and confirm it loads immediately.
+8. Rewind to a point with at least one simulated hour remaining, then inject a
+   road/weather/crop/vehicle event. The panel shows its concrete target and
+   time. A new derived run should be saved; the source run remains unchanged.
+9. Confirm **Impact versus source run** lists changed final totals or says that
+   no measurable final total changed. A no-change result is valid when the
+   disruption did not overlap relevant crop or delivery activity.
+10. Scrub to the final `RUN_SETTLED` frame. The injection button must be
+    disabled and read **Rewind to inject an event**, never **Inject on day 22**.
+11. Select a mapped Harvest participant and choose **Open participant website**.
 
-$derived = Invoke-RestMethod `
-  -Method Post `
-  -Uri "$base/v1/simulation-runs" `
-  -Headers $derivedHeaders `
-  -ContentType "application/json" `
-  -Body $derivedRequest
+The API independently enforces the horizon. For the 21-day Saint Lucia
+scenario, an injected `offsetMs` of `1814400000` must return HTTP `422` with
+`INVALID_DISRUPTION`; the last valid offset is one millisecond earlier.
 
-$derived | Select-Object `
-  runId, derivedFromRunId, scenarioId, policy, seed, status, frameCount,
-  decisionCount, disruptions
-```
+Physical effects remain deterministic and deliberately do not guarantee a
+dramatic score change:
 
-Expected for this example:
+- a matching road closure or vehicle breakdown postpones an overlapping
+  mission;
+- a storm slows overlapping missions and increases spoilage while active;
+- crop damage removes a seeded, capped share of remaining unharvested produce;
+- an event that intersects no relevant work remains visible in replay but can
+  leave all final totals unchanged.
 
-- `status` is `COMPLETED`;
-- `derivedFromRunId` equals the original `$runId`;
-- scenario, policy and seed still equal the source run;
-- the source run remains unchanged;
-- the derived replay has `113` frames and `28` decisions.
+### Verified seed-8675309 disruption example
 
-The caller cannot set hidden severity. The engine derives severity from the
-seed so the disruption remains deterministic and cannot be tuned to manufacture
-a preferred outcome.
+The control-room sequence reported on 20 August 2026 was rechecked with the
+current code using seed `8675309`:
 
-## 7. Create a paired baseline-versus-Harvest run
+| Run | Frames | Delivered | Order outcomes | Commitments / missions | Physical waste |
+| --- | ---: | ---: | --- | ---: | ---: |
+| Clean | 131 | 399.22 kg | 0 fulfilled, 1 partial, 8 unfulfilled, 3 pending | 5 / 5 | 2281.12 kg |
+| Road closure at `910800000` ms | 133 | 399.22 kg | unchanged | 5 / 5 | 2281.12 kg |
+| Plus storm at `1006963200` ms | 136 | 399.22 kg | unchanged | 5 / 5 | 2342.08 kg |
 
-```powershell
-$pairHeaders = @{
-  Authorization = "Bearer $($session.accessToken)"
-  "Idempotency-Key" = "manual-pair-seed-42-001"
-}
+The road closure did not intersect a mission using that selected road, so its
+unchanged totals are correct. The later storm did not overlap a delivery, but
+it did accelerate spoilage, increasing physical waste by `60.96 kg`. Neither
+event fabricated a Product API exception. In the UI, the first derived run says
+that no final total changed; the second lists the physical-waste change against
+its immediate source run.
 
-$pairRequest = @{
-  scenarioId = "saint-lucia-demo-v1"
-  seed = 42
-  decisionMode = "DETERMINISTIC"
-  scope = @{
-    mode = "SELECTED"
-    islandIds = @("saint-lucia")
-  }
-} | ConvertTo-Json -Depth 6
+If port `3001` is unavailable, the control room shows a connection error rather
+than silently running a local substitute.
 
-$pair = Invoke-RestMethod `
-  -Method Post `
-  -Uri "$base/v1/paired-runs" `
-  -Headers $pairHeaders `
-  -ContentType "application/json" `
-  -Body $pairRequest
+## Boundaries
 
-$pair | Select-Object `
-  pairId, status, baselineRunId, harvestRunId, result, evidenceLabel
-```
-
-Expected for seed `42`:
-
-| Metric | Baseline | Harvest | Harvest minus baseline |
-| --- | ---: | ---: | ---: |
-| Local procurement rate | `0.142491` | `0.140095` | `-0.002396` |
-| Fulfilment rate | `0.090909` | `0` | `-0.090909` |
-| Waste | `2370.99 kg` | `2404.39 kg` | `+33.40 kg` |
-
-Both run IDs must be present and different. Both runs use identical initial
-inputs except for policy. The current seed does not show Harvest winning; that
-result is retained honestly and remains synthetic.
-
-## 8. Check the operational snapshot boundary
-
-```powershell
-$snapshot = Invoke-RestMethod `
-  -Uri "$base/v1/operations/snapshot?simulationRunId=$runId" `
-  -Headers $auth
-
-$snapshot
-```
-
-For a run created by issue #29, expect the requested `simulationRunId` with
-`activeListings` and `openDemands` both equal to `0`, empty mission and
-exception ID arrays, and no simulated orders. The saved replay exists, but
-issue #30 has not yet made simulated participants call the Product API to
-create operational records.
-
-An unscoped snapshot reads normal seeded product data instead. Real records,
-one simulation run and another simulation run must never be combined.
-
-## 9. Confirm that LLM mode fails explicitly
-
-```powershell
-$llmHeaders = @{
-  Authorization = "Bearer $($session.accessToken)"
-  "Idempotency-Key" = "manual-llm-seed-42-001"
-}
-
-$llmRequest = @{
-  scenarioId = "saint-lucia-demo-v1"
-  policy = "HARVEST"
-  seed = 42
-  decisionMode = "LLM_ASSISTED"
-  scope = @{ mode = "ALL" }
-} | ConvertTo-Json -Depth 6
-
-try {
-  Invoke-RestMethod `
-    -Method Post `
-    -Uri "$base/v1/simulation-runs" `
-    -Headers $llmHeaders `
-    -ContentType "application/json" `
-    -Body $llmRequest
-} catch {
-  $_.ErrorDetails.Message
-}
-```
-
-With no provider configured, expect HTTP `409` and:
-
-```text
-LLM_PROVIDER_NOT_CONFIGURED
-```
-
-If a provider name is configured before issue #30 is implemented, the API
-instead returns `LLM_ASSISTED_NOT_IMPLEMENTED`. Neither case creates a fake
-LLM-assisted result.
-
-## 10. Inspect the SSE event stream
-
-```powershell
-curl.exe -N `
-  -H "Authorization: Bearer $($session.accessToken)" `
-  "$base/v1/events/stream"
-```
-
-Expected event shape:
-
-```text
-id: <increasing decimal database cursor>
-event: <event type>
-data: {"eventId":"<UUID>", ...}
-```
-
-Press `Ctrl+C` to stop the stream. The SSE `id` is the monotonic cursor used in
-`Last-Event-ID`; the UUID remains inside the event envelope. Consumers resume
-strictly after the last cursor and deduplicate by cursor or UUID.
-
-The unscoped stream contains the seeded product events. A stream selected for
-the new `$runId` can connect but currently has no operational domain events,
-because issue #30 owns simulated participant actions.
-
-## Development-data lifetime
-
-The root `npm run dev` command applies migrations and reseeds disposable local
-development data before starting the servers. Reseeding clears saved runs, so
-run and pair UUIDs from a previous root development session will no longer
-exist. This reset is intentional for a reproducible hackathon environment and
-does not change the API's PostgreSQL persistence while that database state is
-retained.
-
-After the first setup, developers who deliberately want to restart processes
-without reseeding can start `npm run dev:api` and `npm run dev:web` separately.
-Do this only when PostgreSQL is already running and migrations have already
-been applied.
-
-## Source of truth
-
-- [`api_info.md`](api_info.md) defines endpoint consumers, effects and safety
-  boundaries.
-- [`../contracts/openapi.yaml`](../contracts/openapi.yaml) is the canonical
-  wire contract.
-- [`architecture.md`](architecture.md) defines Product API, simulation and
-  control-room ownership.
-- [`../simulation/README.md`](../simulation/README.md) documents engine
-  determinism and hidden truth.
+- Saint Lucia only; regional expansion is Issue #31.
+- No mobile app.
+- No benchmark, Model Lab, Data Room or Judge page is added here.
+- Simulated approvals are synthetic decisions; real commitments still require
+  people.
+- Synthetic results are evidence that the software workflow runs, not evidence
+  of deployed Caribbean impact.

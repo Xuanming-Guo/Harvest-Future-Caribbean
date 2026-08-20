@@ -5,6 +5,16 @@ export const productApiUrl =
 
 const TOKEN_KEY = "harvest.access-token";
 const ACTOR_KEY = "harvest.actor";
+const DEVELOPMENT_PERSONA_FRAGMENT = "#harvest_demo_persona=";
+
+const DEVELOPMENT_PERSONAS = [
+  "farmer-ana",
+  "buyer-hotel",
+  "transporter-daniel",
+  "coordinator-maya",
+] as const;
+
+export type DevelopmentPersona = (typeof DEVELOPMENT_PERSONAS)[number];
 
 export type ProductRole = "FARMER" | "BUYER" | "TRANSPORTER" | "COORDINATOR";
 
@@ -16,6 +26,9 @@ export interface SessionActor {
   synthetic: boolean;
   serviceZone?: string;
   deliveryLocation?: { latitude: number; longitude: number };
+  simulationRunId?: string;
+  simulationRunStatus?: string;
+  readOnly?: boolean;
 }
 
 export class ApiProblem extends Error {
@@ -70,6 +83,52 @@ export async function createDevelopmentSession(persona: string) {
   window.localStorage.setItem(TOKEN_KEY, session.accessToken);
   window.localStorage.setItem(ACTOR_KEY, JSON.stringify(session.actor));
   return session.actor;
+}
+
+export function developmentPersonaFromHash(hash: string): DevelopmentPersona | null {
+  if (!hash.startsWith(DEVELOPMENT_PERSONA_FRAGMENT)) return null;
+  try {
+    const candidate = decodeURIComponent(hash.slice(DEVELOPMENT_PERSONA_FRAGMENT.length));
+    return DEVELOPMENT_PERSONAS.find((persona) => persona === candidate) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function consumeDevelopmentPersona(): Promise<SessionActor | null> {
+  if (typeof window === "undefined" || !window.location.hash.startsWith(DEVELOPMENT_PERSONA_FRAGMENT)) return null;
+  const persona = developmentPersonaFromHash(window.location.hash);
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+  clearDevelopmentSession();
+  if (process.env.NODE_ENV === "production" || !persona) return null;
+  return createDevelopmentSession(persona);
+}
+
+export async function consumeSimulationSession(): Promise<SessionActor | null> {
+  if (typeof window === "undefined" || !window.location.hash.startsWith("#harvest_access_token=")) return null;
+  const token = decodeURIComponent(window.location.hash.slice("#harvest_access_token=".length));
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+  if (!token) throw new ApiProblem("The simulation participant token is missing.", 401, "SIMULATION_TOKEN_MISSING");
+  window.localStorage.setItem(TOKEN_KEY, token);
+  const me = unwrap(await client.GET("/v1/me"));
+  if (!["FARMER", "BUYER", "TRANSPORTER", "COORDINATOR"].includes(me.role)) {
+    clearDevelopmentSession();
+    throw new ApiProblem("This simulation identity cannot open a participant workspace.", 403, "PARTICIPANT_ROLE_REQUIRED");
+  }
+  const actor: SessionActor = {
+    actorId: me.actorId,
+    authSubject: me.authSubject,
+    name: me.name,
+    role: me.role as ProductRole,
+    synthetic: me.synthetic,
+    serviceZone: me.serviceZone,
+    deliveryLocation: me.location,
+    simulationRunId: me.simulationRunId,
+    simulationRunStatus: me.simulationRunStatus,
+    readOnly: me.readOnly,
+  };
+  window.localStorage.setItem(ACTOR_KEY, JSON.stringify(actor));
+  return actor;
 }
 
 async function problemFromResponse(response: Response) {

@@ -47,6 +47,7 @@ model SimulationRun {
   policy            String
   seed              BigInt
   decisionMode      SimulationDecisionMode @map("decision_mode")
+  decisionAdapter   String                 @default("deterministic") @map("decision_adapter")
   scope             Json
   resolvedIslandIds Json                    @map("resolved_island_ids")
   disruptions       Json

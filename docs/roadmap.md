@@ -64,6 +64,6 @@ These are coordination defaults, not hard ownership barriers.
 
 ## Current next step
 
-Convert the approved implementation prompt into focused GitHub issues with
-clear dependencies and acceptance criteria. Do not create deeper source folders
-until the issue that owns them starts.
+Validate the connected Saint Lucia run and control-room demonstration, then
+complete the remaining benchmark/model evidence and regional-scenario work in
+their focused issues. Keep mobile out of scope.
