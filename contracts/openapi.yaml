@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Harvest Product API
-  version: 0.5.0
+  version: 0.7.0
   description: >-
     Canonical operational API for real users, Harvest-mode simulated actors,
     the participant website, and the simulation control room. Operational
@@ -25,6 +25,18 @@ tags:
 security:
   - bearerJwt: []
 paths:
+  /v1/me:
+    get:
+      tags: [Operations]
+      operationId: getCurrentActor
+      summary: Read the authenticated participant and replay mode
+      responses:
+        '200':
+          description: Current role, run scope, and whether this session is read-only.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CurrentActor'}
+        default: {$ref: '#/components/responses/Problem'}
   /v1/crop-observation-intakes:
     post:
       tags: [Crop]
@@ -775,6 +787,10 @@ paths:
                 activeListings: 4
                 openDemands: 2
                 ordersByStatus: {REQUESTED: 1, COMMITTED: 2, IN_DELIVERY: 1, FULFILLED: 8}
+                orderOutcomes: {total: 12, fulfilled: 8, partiallyFulfilled: 0, unfulfilled: 1, pending: 3}
+                deliveryAcceptedKg: 840
+                approvedCommitmentCount: 9
+                completedMissionCount: 8
                 activeMissionIds: [23232323-2323-4323-8323-232323232323]
                 openExceptionIds: []
         default: {$ref: '#/components/responses/Problem'}
@@ -917,6 +933,26 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SimulationTimeline'}
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/simulation-runs/{runId}/participant-sessions:
+    post:
+      tags: [Simulation]
+      operationId: createSimulationParticipantSession
+      summary: Create a short-lived read-only session for a completed synthetic participant
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SimulationParticipantSessionCreate'}
+      responses:
+        '201':
+          description: Fifteen-minute participant replay session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SimulationParticipantSession'}
         default: {$ref: '#/components/responses/Problem'}
   /v1/simulation-runs/{runId}/world:
     get:
@@ -1092,6 +1128,21 @@ components:
             code: VALIDATION_FAILED
             detail: quantity.unit must be kg
   schemas:
+    CurrentActor:
+      type: object
+      additionalProperties: false
+      required: [actorId, authSubject, name, role, synthetic, readOnly]
+      properties:
+        actorId: {type: string, format: uuid}
+        authSubject: {type: string}
+        name: {type: string}
+        role: {$ref: './common.schema.json#/$defs/ActorRole'}
+        synthetic: {type: boolean}
+        serviceZone: {type: string}
+        simulationRunId: {type: string, format: uuid}
+        simulationRunStatus: {enum: [CREATING, COMPLETED, FAILED, UNKNOWN]}
+        readOnly: {type: boolean}
+        location: {$ref: './common.schema.json#/$defs/GeoPoint'}
     CropObservationIntakeCreate:
       type: object
       additionalProperties: false
@@ -1670,15 +1721,29 @@ components:
     OperationsSnapshot:
       type: object
       additionalProperties: false
-      required: [generatedAt, activeListings, openDemands, ordersByStatus, activeMissionIds, openExceptionIds]
+      required: [generatedAt, activeListings, openDemands, ordersByStatus, orderOutcomes, deliveryAcceptedKg, approvedCommitmentCount, completedMissionCount, activeMissionIds, openExceptionIds]
       properties:
         generatedAt: {type: string, format: date-time}
         simulationRunId: {type: string, format: uuid}
         activeListings: {type: integer, minimum: 0}
         openDemands: {type: integer, minimum: 0}
         ordersByStatus: {type: object, additionalProperties: {type: integer, minimum: 0}}
+        orderOutcomes: {$ref: '#/components/schemas/OrderOutcomeSummary'}
+        deliveryAcceptedKg: {type: number, minimum: 0}
+        approvedCommitmentCount: {type: integer, minimum: 0}
+        completedMissionCount: {type: integer, minimum: 0}
         activeMissionIds: {type: array, items: {type: string, format: uuid}}
         openExceptionIds: {type: array, items: {type: string, format: uuid}}
+    OrderOutcomeSummary:
+      type: object
+      additionalProperties: false
+      required: [total, fulfilled, partiallyFulfilled, unfulfilled, pending]
+      properties:
+        total: {type: integer, minimum: 0}
+        fulfilled: {type: integer, minimum: 0}
+        partiallyFulfilled: {type: integer, minimum: 0}
+        unfulfilled: {type: integer, minimum: 0}
+        pending: {type: integer, minimum: 0}
     TraceStep:
       type: object
       additionalProperties: false
@@ -1728,7 +1793,7 @@ components:
         startsAt: {type: string, format: date-time}
         durationDays: {type: integer, minimum: 1}
         availablePolicies: {type: array, items: {enum: [BASELINE, HARVEST]}}
-        availableDecisionModes: {type: array, items: {const: DETERMINISTIC}}
+        availableDecisionModes: {type: array, items: {enum: [DETERMINISTIC, LLM_ASSISTED]}}
         islands: {type: array, minItems: 1, items: {$ref: '#/components/schemas/SimulationIsland'}}
         provenanceNote: {type: string, minLength: 1}
     SimulationScenarioPage:
@@ -1755,7 +1820,10 @@ components:
       required: [type, offsetMs, durationMs, affectedEntityIds, publicDescription]
       properties:
         type: {enum: [WEATHER, ROAD, VEHICLE, CROP, DEMAND]}
-        offsetMs: {type: integer, minimum: 0}
+        offsetMs:
+          type: integer
+          minimum: 0
+          description: Milliseconds after scenario start; must be strictly before that scenario's horizon.
         durationMs: {type: integer, minimum: 1}
         affectedEntityIds: {type: array, minItems: 1, items: {type: string, minLength: 1}}
         publicDescription: {type: string, minLength: 1, maxLength: 500}
@@ -1799,6 +1867,29 @@ components:
         missionsCancelled: {type: integer, minimum: 0}
         observationRequests: {type: integer, minimum: 0}
         eventsProcessed: {type: integer, minimum: 0}
+        productActions:
+          type: object
+          additionalProperties: false
+          required: [attempted, succeeded, rejected, domainEventsCreated]
+          properties:
+            attempted: {type: integer, minimum: 0}
+            succeeded: {type: integer, minimum: 0}
+            rejected: {type: integer, minimum: 0}
+            domainEventsCreated: {type: integer, minimum: 0}
+            finalCounts:
+              type: object
+              additionalProperties: false
+              required: [activeListings, openDemands, ordersByStatus, orderOutcomes, deliveryAcceptedKg, approvedCommitmentCount, completedMissionCount, activeMissions, openExceptions]
+              properties:
+                activeListings: {type: integer, minimum: 0}
+                openDemands: {type: integer, minimum: 0}
+                ordersByStatus: {type: object, additionalProperties: {type: integer, minimum: 0}}
+                orderOutcomes: {$ref: '#/components/schemas/OrderOutcomeSummary'}
+                deliveryAcceptedKg: {type: number, minimum: 0}
+                approvedCommitmentCount: {type: integer, minimum: 0}
+                completedMissionCount: {type: integer, minimum: 0}
+                activeMissions: {type: integer, minimum: 0}
+                openExceptions: {type: integer, minimum: 0}
     SimulationRunError:
       type: object
       additionalProperties: false
@@ -1809,13 +1900,14 @@ components:
     SimulationRun:
       type: object
       additionalProperties: false
-      required: [runId, scenarioId, policy, seed, decisionMode, scope, resolvedIslandIds, disruptions, status, frameCount, decisionCount, createdAt, updatedAt]
+      required: [runId, scenarioId, policy, seed, decisionMode, decisionAdapter, scope, resolvedIslandIds, disruptions, status, frameCount, decisionCount, createdAt, updatedAt]
       properties:
         runId: {type: string, format: uuid}
         scenarioId: {type: string, minLength: 1}
         policy: {enum: [BASELINE, HARVEST]}
         seed: {type: integer, minimum: 0, maximum: 4294967295}
         decisionMode: {enum: [DETERMINISTIC, LLM_ASSISTED]}
+        decisionAdapter: {type: string, minLength: 1}
         scope: {$ref: '#/components/schemas/SimulationScope'}
         resolvedIslandIds: {type: array, minItems: 1, items: {type: string}}
         disruptions: {type: array, items: {$ref: '#/components/schemas/InjectedDisruption'}}
@@ -1873,10 +1965,54 @@ components:
         kind: {type: string}
         summary: {type: string}
         evidence: {type: object, additionalProperties: {type: [string, number, boolean]}}
+    SimulationParticipant:
+      type: object
+      additionalProperties: false
+      required: [simulationActorId, productActorId, role, displayName, islandId]
+      properties:
+        simulationActorId: {type: string, format: uuid}
+        productActorId: {type: [string, 'null'], format: uuid}
+        role: {enum: [FARMER, BUYER, TRANSPORTER, COORDINATOR]}
+        displayName: {type: string, minLength: 1}
+        islandId: {type: string, minLength: 1}
+    SimulationAgentAction:
+      type: object
+      additionalProperties: false
+      required: [actionId, at, simulationActorId, productActorId, role, toolName, status, summary, eventIds, adapter]
+      properties:
+        actionId: {type: string, format: uuid}
+        at: {type: string, format: date-time}
+        simulationActorId: {type: string, format: uuid}
+        productActorId: {type: string, format: uuid}
+        role: {enum: [FARMER, BUYER, TRANSPORTER, COORDINATOR]}
+        toolName: {type: string, minLength: 1}
+        status: {enum: [SUCCEEDED, REJECTED]}
+        summary: {type: string, minLength: 1}
+        traceId: {type: string, format: uuid}
+        entityId: {type: string, format: uuid}
+        eventIds: {type: array, items: {type: string, format: uuid}}
+        adapter: {type: string, minLength: 1}
+        approval: {enum: [NONE, SYNTHETIC_PARTICIPANT]}
+        correlationId: {type: string, format: uuid}
+        causationId: {type: string, format: uuid}
+    SimulationOperationsSnapshot:
+      type: object
+      additionalProperties: false
+      required: [activeListings, openDemands, ordersByStatus, orderOutcomes, deliveryAcceptedKg, approvedCommitmentCount, completedMissionCount, activeMissionIds, openExceptionIds]
+      properties:
+        activeListings: {type: integer, minimum: 0}
+        openDemands: {type: integer, minimum: 0}
+        ordersByStatus: {type: object, additionalProperties: {type: integer, minimum: 0}}
+        orderOutcomes: {$ref: '#/components/schemas/OrderOutcomeSummary'}
+        deliveryAcceptedKg: {type: number, minimum: 0}
+        approvedCommitmentCount: {type: integer, minimum: 0}
+        completedMissionCount: {type: integer, minimum: 0}
+        activeMissionIds: {type: array, items: {type: string, format: uuid}}
+        openExceptionIds: {type: array, items: {type: string, format: uuid}}
     ReplayScene:
       type: object
       additionalProperties: false
-      required: [runId, scenarioId, policy, seed, startsAt, endsAt, farms, buyers, transporters, roads, evidenceLabel]
+      required: [runId, scenarioId, policy, seed, startsAt, endsAt, farms, buyers, transporters, roads, participants, evidenceLabel]
       properties:
         runId: {type: string, format: uuid}
         scenarioId: {type: string}
@@ -1912,6 +2048,7 @@ components:
             additionalProperties: false
             required: [roadSegmentId, name, from, to, distanceKm]
             properties: {roadSegmentId: {type: string, format: uuid}, name: {type: string}, from: {$ref: './common.schema.json#/$defs/GeoPoint'}, to: {$ref: './common.schema.json#/$defs/GeoPoint'}, distanceKm: {type: number, minimum: 0}}
+        participants: {type: array, items: {$ref: '#/components/schemas/SimulationParticipant'}}
         evidenceLabel: {type: string}
     ReplayFrame:
       type: object
@@ -1928,7 +2065,33 @@ components:
         disruptions: {type: array, items: {$ref: '#/components/schemas/ObservableDisruption'}}
         degradedRoadSegmentIds: {type: array, items: {type: string, format: uuid}}
         newDecisions: {type: array, items: {$ref: '#/components/schemas/ReplayDecision'}}
+        agentActions: {type: array, items: {$ref: '#/components/schemas/SimulationAgentAction'}}
+        operationsSnapshot: {$ref: '#/components/schemas/SimulationOperationsSnapshot'}
         totals: {type: object, additionalProperties: {type: number}}
+    SimulationParticipantSessionCreate:
+      type: object
+      additionalProperties: false
+      required: [productActorId]
+      properties:
+        productActorId: {type: string, format: uuid}
+    SimulationParticipantSession:
+      type: object
+      additionalProperties: false
+      required: [accessToken, expiresInSeconds, participant]
+      properties:
+        accessToken: {type: string, minLength: 1}
+        expiresInSeconds: {type: integer, const: 900}
+        participant:
+          type: object
+          additionalProperties: false
+          required: [simulationActorId, productActorId, name, role, simulationRunId, readOnly]
+          properties:
+            simulationActorId: {type: string, format: uuid}
+            productActorId: {type: string, format: uuid}
+            name: {type: string}
+            role: {enum: [FARMER, BUYER, TRANSPORTER, COORDINATOR]}
+            simulationRunId: {type: string, format: uuid}
+            readOnly: {const: true}
     SimulationTimeline:
       type: object
       additionalProperties: false

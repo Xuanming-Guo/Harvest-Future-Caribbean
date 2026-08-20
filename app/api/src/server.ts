@@ -8,6 +8,7 @@ import { actorRunScope, canAccessBatch, canAccessOrder, visibleBatchIds, visible
 import { createAgentCoordinator } from "./agents/coordinator.js";
 import type { ObservationSourceType } from "./agents/prompts.js";
 import { registerAuthentication, requireRole, signDevelopmentToken, type AuthActor } from "./auth.js";
+import { operationNow, registerOperationClock } from "./clock.js";
 import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { recordEvent } from "./events.js";
@@ -121,15 +122,52 @@ async function approvalContext(row: { subjectType: string; subjectId: string; re
 export async function buildServer() {
   const agentCoordinator = createAgentCoordinator();
   const server = Fastify({ logger: true, bodyLimit: 1_000_000 });
+  registerOperationClock(server);
   await server.register(cors, {
-    origin: config.websiteOrigin,
+    origin: [config.websiteOrigin, config.controlRoomOrigin],
     allowedHeaders: ["Authorization", "Content-Type", "Idempotency-Key", "Last-Event-ID"],
     exposedHeaders: ["Content-Type"],
   });
   await registerAuthentication(server);
+  server.addHook("preHandler", async (request) => {
+    if (request.headers["x-harvest-simulation-time"] !== undefined && !request.actor?.isSynthetic) {
+      throw httpError(403, "SIMULATION_CLOCK_FORBIDDEN", "Only a run-scoped synthetic participant may supply simulation time.");
+    }
+    if (!["POST", "PUT", "PATCH", "DELETE"].includes(request.method) || !request.actor?.isSynthetic || !request.actor.simulationRunId) return;
+    const run = await prisma.simulationRun.findUnique({
+      where: { id: request.actor.simulationRunId },
+      select: { status: true },
+    });
+    if (run?.status === "COMPLETED" || run?.status === "FAILED") {
+      throw httpError(409, "SIMULATION_RUN_IMMUTABLE", "Completed simulation participants are available for read-only replay only.");
+    }
+  });
   server.setErrorHandler((error, _request, reply) => sendProblem(reply, error));
 
-  server.get("/health", async () => ({ status: "ok", service: "harvest-product-api", contractVersion: "0.5.0", adapters: { model: config.modelAdapter, agentText: agentCoordinator.textAdapterName } }));
+  server.get("/health", async () => ({ status: "ok", service: "harvest-product-api", contractVersion: "0.7.0", adapters: { model: config.modelAdapter, agentText: agentCoordinator.textAdapterName } }));
+
+  server.get("/v1/me", async (request) => {
+    const actor = requireRole(request, [...productRoles]);
+    const run = actor.simulationRunId
+      ? await prisma.simulationRun.findUnique({ where: { id: actor.simulationRunId }, select: { status: true } })
+      : null;
+    return {
+      actorId: actor.id,
+      authSubject: actor.authSubject,
+      name: actor.name,
+      role: actor.role,
+      synthetic: actor.isSynthetic,
+      ...(actor.serviceZone ? { serviceZone: actor.serviceZone } : {}),
+      ...(actor.simulationRunId ? {
+        simulationRunId: actor.simulationRunId,
+        simulationRunStatus: run?.status ?? "UNKNOWN",
+        readOnly: run?.status === "COMPLETED" || run?.status === "FAILED",
+      } : { readOnly: false }),
+      ...(actor.defaultLatitude !== null && actor.defaultLongitude !== null
+        ? { location: { latitude: actor.defaultLatitude, longitude: actor.defaultLongitude } }
+        : {}),
+    };
+  });
 
   server.post("/dev/session", async (request, reply) => {
     if (!config.enableDevAuth) throw httpError(404, "NOT_FOUND", "Development authentication is disabled.");
@@ -205,7 +243,7 @@ export async function buildServer() {
     });
     const intakeId = randomUUID();
     const traceId = randomUUID();
-    const createdAt = new Date();
+    const createdAt = operationNow();
     const row = await prisma.$transaction(async (tx) => {
       await tx.agentTrace.create({
         data: { id: traceId, subjectType: "CROP_BATCH", subjectId: cropBatchId, workflowType: "CROP_INTELLIGENCE", stage: "DRAFT_READY", status: "AWAITING_HUMAN", summary: "Extracted a non-binding crop update draft for human review.", simulationRunId: actor.simulationRunId },
@@ -278,7 +316,7 @@ export async function buildServer() {
     const observationId = randomUUID();
     const traceId = intake?.traceId ?? randomUUID();
     const observedAt = asDate(body.observedAt, "observedAt");
-    const recordedAt = new Date();
+    const recordedAt = operationNow();
     const estimatedQuantity = body.estimatedQuantity === undefined ? null : readQuantity(body.estimatedQuantity, "estimatedQuantity");
     const observationEvent = await prisma.$transaction(async (tx) => {
       if (intake) {
@@ -334,7 +372,7 @@ export async function buildServer() {
     const traceId = trace?.id ?? randomUUID();
     if (!trace) await prisma.agentTrace.create({ data: { id: traceId, subjectType: "CROP_BATCH", subjectId: cropBatchId, status: "RUNNING", summary: "Requested a refreshed crop forecast." } });
     const result = await agentCoordinator.refreshCropIntelligence(cropBatchId, actor.id, traceId);
-    return { forecastRequestId: result.requestId, cropBatchId, status: "COMPLETED", requestedAt: new Date().toISOString() };
+    return { forecastRequestId: result.requestId, cropBatchId, status: "COMPLETED", requestedAt: operationNow().toISOString() };
   }));
 
   server.get("/v1/yield-predictions/:predictionId", async (request) => {
@@ -489,7 +527,7 @@ export async function buildServer() {
     const row = await prisma.$transaction(async (tx) => {
       const order = await tx.order.create({ data: { id: orderId, buyerId: actor.id, cropType: asString(body.cropType, "cropType").toUpperCase(), requestedQuantity, acceptedQuantity: 0, neededBy: asDate(body.neededBy, "neededBy"), latitude: location.latitude, longitude: location.longitude, listingIds, lifecycleStatus: "REQUESTED", atRisk: false, activeExceptionIds: [], traceId, simulationRunId: actor.simulationRunId } });
       await tx.agentTrace.create({ data: { id: traceId, subjectType: "ORDER", subjectId: orderId, workflowType: "ORDER_FULFILMENT", stage: "ORDER_REQUESTED", status: "RUNNING", summary: "Validating safe supply for a buyer order.", simulationRunId: actor.simulationRunId } });
-      await tx.traceStep.create({ data: { traceId, recordedAt: new Date(), kind: "INPUT", agentName: "Market Balance Agent", toolName: "read-order-request", provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, summary: `Buyer requested ${requestedQuantity} kg of ${order.cropType}.`, simulationRunId: actor.simulationRunId } });
+      await tx.traceStep.create({ data: { traceId, recordedAt: operationNow(), kind: "INPUT", agentName: "Market Balance Agent", toolName: "read-order-request", provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, summary: `Buyer requested ${requestedQuantity} kg of ${order.cropType}.`, simulationRunId: actor.simulationRunId } });
       await recordEvent(tx, { eventType: "ORDER_REQUESTED", actorId: actor.id, entityId: orderId, traceId, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, simulationRunId: actor.simulationRunId, payload: { orderId, cropType: order.cropType, requestedQuantity: quantity(requestedQuantity), status: "REQUESTED" } });
       return order;
     });
@@ -694,7 +732,7 @@ export async function buildServer() {
     const observation = await prisma.cropObservation.findUnique({ where: { id: task.subjectId } });
     const traceId = observation?.traceId ?? randomUUID();
     const row = await prisma.$transaction(async (tx) => {
-      const updated = await tx.verificationTask.update({ where: { id: taskId }, data: { status, resolvedBy: actor.id, resolvedAt: new Date(), note: typeof body.note === "string" ? body.note : null } });
+      const updated = await tx.verificationTask.update({ where: { id: taskId }, data: { status, resolvedBy: actor.id, resolvedAt: operationNow(), note: typeof body.note === "string" ? body.note : null } });
       await recordEvent(tx, {
         eventType: "VERIFICATION_DECIDED",
         actorId: actor.id,
@@ -756,7 +794,7 @@ export async function buildServer() {
       ? await agentCoordinator.explainDelayRecovery({
           exceptionType: "DELAY",
           severity: asString(body.severity, "severity"),
-          reportedAt: new Date().toISOString(),
+          reportedAt: operationNow().toISOString(),
           description: asString(body.description, "description"),
           missionId: delayedMission.id,
           missionStatus: delayedMission.status,
@@ -769,7 +807,7 @@ export async function buildServer() {
     const exceptionId = randomUUID();
     const approvalId = delayedMission ? randomUUID() : null;
     const traceId = randomUUID();
-    const reportedAt = new Date();
+    const reportedAt = operationNow();
     const row = await prisma.$transaction(async (tx) => {
       const exception = await tx.operationalException.create({
         data: {
@@ -831,7 +869,7 @@ export async function buildServer() {
     if (!["ACCEPTED", "PARTIALLY_ACCEPTED", "REJECTED"].includes(outcome)) throw httpError(422, "INVALID_DELIVERY_OUTCOME", "The delivery outcome is not supported.");
     const lifecycleStatus = outcome === "ACCEPTED" ? "FULFILLED" : outcome === "PARTIALLY_ACCEPTED" ? "PARTIALLY_FULFILLED" : "REJECTED";
     const acceptanceId = randomUUID();
-    const acceptedAt = new Date();
+    const acceptedAt = operationNow();
     if (!Array.isArray(body.lineOutcomes) || body.lineOutcomes.length === 0) throw httpError(400, "VALIDATION_FAILED", "lineOutcomes must contain each committed crop batch.");
     const allocation = await prisma.allocation.findFirst({ where: { orderId: order.id, status: "APPROVED" }, orderBy: { createdAt: "desc" } });
     if (!allocation) throw httpError(409, "ALLOCATION_NOT_FOUND", "The committed allocation was not found.");

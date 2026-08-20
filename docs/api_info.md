@@ -17,20 +17,22 @@ actor-targeted approval, vehicle, verification, delivery mission, exception and
 delivery-acceptance operations described below. Issue #6 adds the in-process
 agent coordinator, editable observation intake, and safe trace read operation.
 
-Issue #29 adds saved deterministic simulation runs, immutable replay timelines,
-paired runs, role/run-scoped operational snapshots, and cursor-based SSE to the
-same Fastify Product API. The Product API executes the existing TypeScript
-simulation engine in process and stores only observable replay artefacts. Issue
-#30 will connect simulated participant cycles and the control-room interface to
-these operations; the participant website does not expose a simulation page.
+Saved runs execute the TypeScript engine and, for Harvest policy, an
+interleaved participant cycle. After each actionable physical event, synthetic
+farmers, buyers, transporters and the coordinator use the existing
+authenticated Product API operations. Product events are consumed in cursor
+order and change only later physical commitments, routes, timings and outcomes;
+their run-scoped state, traces and concise actions are saved with the safe
+replay. The separate control room creates and loads these runs. The participant
+website has no simulation controls, but it can display one completed synthetic
+participant in an explicitly read-only replay session.
 Use [`simulation_api_local_testing.md`](simulation_api_local_testing.md) for the
-copy-ready localhost requests, expected seed-42 values and current issue #29/#30
-boundary.
+copy-ready localhost requests and expected seed-42 behavior.
 
 ## Canonical architecture
 
 ```text
-Website / future Harvest-mode simulated actor
+Website / Harvest-mode simulated actor
                     |
                     | REST command/query
                     v
@@ -43,7 +45,7 @@ Website / future Harvest-mode simulated actor
           |                   |
           v                   v
       SSE clients       TypeScript simulation engine
- Website / future      deterministic run execution
+ Website / control     deterministic run execution
  3D Control Room               |
                                v
                     Immutable observable replay
@@ -77,7 +79,7 @@ scenario event makes them observable.
 - People use a Supabase-compatible bearer JWT. Middleware derives `actorId`
   and one of `FARMER`, `BUYER`, `TRANSPORTER`, `COORDINATOR`, `OPERATIONS`, or
   `ADMIN`; a request body cannot override that identity.
-- A future Harvest-mode simulated user is given a synthetic `actorId`, human role,
+- A Harvest-mode simulated user is given a synthetic `actorId`, human role,
   and `simulationRunId` by authentication middleware. It then sends exactly the
   same public request body as the corresponding real user.
 - A baseline-mode actor never calls Harvest coordination operations. Baseline
@@ -535,7 +537,17 @@ scope, not only the role name.
 - Request: optional `simulationRunId`. A run-scoped actor is always forced to
   its authenticated run. Only operations/admin may explicitly select a run.
 - Response: generation time and role-filtered counts/IDs for supply, demand,
-  order states, active missions, and open exceptions.
+  raw order states, active missions, and open exceptions. It also returns a
+  deadline-aware order outcome summary, summed accepted delivery kilograms,
+  approved commitment count, and completed mission count.
+- Outcome rules: `FULFILLED` and `PARTIALLY_FULFILLED` retain those outcomes;
+  rejected/cancelled orders and incomplete orders at or past `neededBy` are
+  unfulfilled; other incomplete orders are pending. Every visible order is in
+  exactly one category.
+- Connected runs capture the control-room copy through a synthetic,
+  run-scoped operations observer. That observer makes no participant decisions
+  and is not shown on the map; it exists only so the saved projection has the
+  same complete run visibility as this operations endpoint.
 - Product state/event: none.
 - Simulation effect: none.
 - Consumers: operations dashboard and initial control-room projection.
@@ -597,8 +609,12 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
   inherits immutable inputs and never edits its source.
 - Consumers: 3D control room and benchmark setup.
 - Rules/failures: seed/scenario/policy/scope are immutable. `LLM_ASSISTED`
-  returns a clear configuration/not-implemented conflict until issue #30; it
-  never silently runs deterministic policy.
+  uses a labelled predetermined fixture when all four LLM settings are blank.
+  A complete `openai-compatible` configuration calls that provider; partial,
+  failed or invalid output fails safely before unchecked tools execute. An
+  injected disruption must start strictly before the scenario horizon; an
+  offset at or after the horizon returns `422 INVALID_DISRUPTION` because no
+  simulated time remains in which it could occur.
 
 #### `GET /v1/simulation-runs/{runId}`
 
@@ -618,6 +634,10 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
   ordered observable frame array.
 - Product state/simulation effect: none. Playback position, pause, speed,
   rewind and reset are local array navigation and never API commands.
+- Replay consistency: the engine appends a `RUN_SETTLED` frame at the exact
+  scenario horizon after physical demand settlement. Harvest frames retain the
+  latest run-scoped Product API snapshot between participant action cycles, so
+  the final replay frame, saved-run metrics and operations endpoint agree.
 - Rules/failures: only completed runs are replayable.
 
 #### `GET /v1/simulation-runs/{runId}/world`
@@ -630,6 +650,25 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
 - Consumers: 3D map/control room.
 - Rules/failures: schema rejects hidden yields, quality, readiness, future
   disruptions, actor plans, and future event queues.
+
+#### `POST /v1/simulation-runs/{runId}/participant-sessions`
+
+- Callers: operations/admin/control-room operator.
+- Request: a mapped `productActorId` from the completed Harvest replay scene.
+- Response: a 15-minute bearer token plus the participant role, run and
+  explicit read-only status.
+- Product state/simulation effect: none; it creates access to already-completed
+  run-scoped records and never resumes the run.
+- Rules/failures: baseline, incomplete, unrelated and non-synthetic actors are
+  rejected. Every mutation attempted with the completed participant identity
+  returns `SIMULATION_RUN_IMMUTABLE`.
+
+#### `GET /v1/me`
+
+- Callers: every authenticated Product API role.
+- Response: current identity, role, synthetic flag, optional run scope/location,
+  run status and `readOnly` flag.
+- Consumers: website session bootstrap and replay banner/routing.
 
 #### `POST /v1/paired-runs`
 
@@ -664,7 +703,7 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
 | Buyer website | Listings, owned demand/orders, relevant approval and delivery | Buyer demand, order, own approval decision, delivery acceptance | Demand/allocation/mission/delivery/order outcomes |
 | Transporter website | Available and assigned mission detail | Mission acceptance, delivery updates, exception | Mission/update/exception/recovery/order outcome |
 | Coordinator website | Permitted crops, relevant orders, targeted approvals and exceptions | Approval decision, verified update, exception escalation | Scoped operational events |
-| Future 3D control room | Saved runs, timelines, individual frames and snapshot | Create run, derived run or paired run | Run-scoped operational events |
+| 3D control room | Saved runs, timelines, individual frames, participants and snapshots | Create run, derived run or paired run; open replay participant | Run-scoped operational events |
 | Future benchmark view | Paired-run status/result | Create paired run | Benchmark result and run progress |
 | Future trace/evidence view | Agent trace and relevant entity detail | None | Trace-linked events |
 | Harvest simulated farmer | Same crop/listing/approval operations as farmer | Same request bodies as farmer | Run-scoped events |
@@ -736,7 +775,9 @@ crop observation -> forecast -> listing -> buyer demand/order
 
 ## Simulation event-handler rules
 
-For each SSE event, the simulation must:
+For each Product event, whether read from SSE by a separate consumer or from
+the in-process outbox during synchronous saved-run execution, the simulation
+must:
 
 1. Validate the envelope and event-specific payload.
 2. Ignore an already-applied `eventId`.
@@ -749,11 +790,31 @@ For each SSE event, the simulation must:
 7. Publish only allow-listed operational events through the authenticated
    Product API operations used by the simulated participant.
 
-On disconnect, reconnect with `Last-Event-ID`. If an event arrives again, step
+An external consumer reconnects with `Last-Event-ID`. If an event arrives again, step
 2 prevents a second schedule/metric mutation. If retention has expired and the
 API returns `409`, load the observable snapshot/world, transactionally replace
-the public projection and cursor, then resume. The simulation never queries or
-modifies the Product API database.
+the public projection and cursor, then resume. The engine never queries or
+modifies Product API storage. The in-process coordinator builds role context
+through authenticated Product API queries; only the API-owned bootstrap and
+outbox adapter touch Prisma.
+
+### Connected execution order
+
+`EXTERNAL_PRODUCT_API` mode disables the engine's internal Harvest allocation,
+approval and recovery policy. The saved-run coordinator then repeats:
+
+1. advance to the next seeded physical event;
+2. expose only the resulting observable frame;
+3. execute the relevant role-safe tools in stable actor order;
+4. consume every emitted Product event in monotonic cursor order;
+5. deduplicate its UUID and suppress physical-action echoes;
+6. apply validated effects only to future physical work;
+7. checkpoint the actions and run-scoped Product snapshot.
+
+Product event UUIDs are never used as physical commitment or mission IDs. The
+engine consumes its seeded ID stream for those records, so database-generated
+identifiers cannot change the deterministic digest. Past frames, hidden crop
+truth and undisclosed disruption severity are immutable.
 
 ## Yield model interface and ATP
 

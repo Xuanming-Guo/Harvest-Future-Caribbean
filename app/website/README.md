@@ -4,9 +4,9 @@ This responsive Next.js website is the interface used by Harvest participants:
 farmers, buyers, transporters and coordinators. It calls the shared Product API
 and has no website-specific database or private backend.
 
-It is deliberately not the simulation/control-room website. Benchmark charts,
-world maps, model evidence, raw traces and judge controls belong to a separate
-future frontend, whose development port is reserved as `3002`.
+It is deliberately not the simulation/control-room website. The separate saved-
+run control room is on `3002`; benchmark charts, model evidence, raw traces and
+judge controls do not belong in participant pages.
 
 ## Run it
 
@@ -21,6 +21,18 @@ Open `http://localhost:3000`. The Product API defaults to
 `http://localhost:3001`; override it with `NEXT_PUBLIC_PRODUCT_API_URL` when
 needed. The root page provides a development-only role sign-in backed by
 `POST /dev/session`.
+
+Windows users can instead double-click a role in the repository's
+[`launchers/`](../../launchers/) folder. The shortcut starts the normal local
+stack if needed and opens the selected role automatically. It passes one of
+the four allowlisted seeded personas in a short-lived URL fragment, which the
+website removes before requesting the same development session used by the
+role picker. The fragment is ignored in production and does not change
+production authentication or the Product API contract.
+
+Role shortcuts use the browser's normal shared local storage, so they are
+intended for one role at a time. Opening another role replaces the active
+Harvest session; close older Harvest tabs before continuing in the new role.
 
 ## First-session tutorial
 
@@ -39,6 +51,15 @@ by the Product API; the current hackathon build uses the seeded demo personas.
 The guide never performs an operational action. It points to the same controls a
 participant uses, while crop updates, listings, demands, orders, approvals,
 verification, and mission changes continue to go through the shared Product API.
+
+## Synthetic participant replay
+
+The control room can open a mapped participant from a completed Harvest run.
+It passes a 15-minute token in the URL fragment; the website consumes and
+immediately removes that fragment, loads the actor from `GET /v1/me`, routes to
+the normal role page, and shows a purple synthetic/read-only banner. Workspace
+form controls are disabled and the API independently rejects every mutation
+with `SIMULATION_RUN_IMMUTABLE`. The tutorial is not shown during replay.
 
 ## Product routes
 

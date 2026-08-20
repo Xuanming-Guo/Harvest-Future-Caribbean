@@ -47,14 +47,14 @@ function actorView(actor: Actor, _payload: JWTPayload): AuthActor {
   };
 }
 
-export async function signDevelopmentToken(actor: Actor) {
+export async function signDevelopmentToken(actor: Actor, expiresIn = "12h") {
   return new SignJWT({ role: actor.role, synthetic: actor.isSynthetic })
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
     .setSubject(actor.authSubject)
     .setIssuer("harvest-local")
     .setAudience("authenticated")
     .setIssuedAt()
-    .setExpirationTime("12h")
+    .setExpirationTime(expiresIn)
     .sign(localSecret);
 }
 

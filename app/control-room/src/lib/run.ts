@@ -1,96 +1,195 @@
-/**
- * Producing a replay timeline for the control room.
- *
- * The simulation currently runs IN THE BROWSER. Issue #29 added persisted run
- * and timeline endpoints to the Product API; issue #30 owns switching this
- * temporary seam to those endpoints.
- *
- *   - A twenty-one-day run costs a few milliseconds, so there is nothing to
- *     offload. A network round trip would be slower than the computation.
- *   - Scrubbing backwards is a hard requirement of the issue ("play, pause,
- *     speed, reset"). A live engine cannot run in reverse; a recorded timeline
- *     can be indexed in either direction.
- *   - Changing seed, policy or injected disruption becomes instantaneous, which
- *     is what makes the paired comparison demonstrable rather than described.
- *
- * The engine is pure TypeScript with no Node dependencies, so it runs unchanged
- * here. This module is the seam: `buildTimeline` will create/load a saved run
- * through the Product API and return its immutable timeline without changing
- * the playback components above it.
- */
+/** Saved-run Product API client for the separate simulation control room. */
 
-import { runScenario, type InjectedDisruption, type ReplayTimeline, type RunResult } from '@harvest/simulation';
+import { createHarvestClient, newIdempotencyKey, type ApiSchema } from "@harvest/shared";
+import type { ControlRoomFrame, InjectedDisruption, ReplayTimeline } from "@harvest/simulation";
 
-export const DEFAULT_SCENARIO = 'saint-lucia-demo-v1';
+export const DEFAULT_SCENARIO = "saint-lucia-demo-v1";
 export const DEFAULT_SEED = 8675309;
+export const PRODUCT_API_URL = process.env.NEXT_PUBLIC_PRODUCT_API_URL ?? "http://localhost:3001";
+export const PARTICIPANT_WEBSITE_URL = process.env.NEXT_PUBLIC_WEBSITE_URL ?? "http://localhost:3000";
 
-export type PolicyName = 'BASELINE' | 'HARVEST';
+export type PolicyName = "BASELINE" | "HARVEST";
+export type DecisionMode = "DETERMINISTIC" | "LLM_ASSISTED";
+export type SavedRun = ApiSchema<"SimulationRun">;
+export type SimulationScenario = ApiSchema<"SimulationScenario">;
 
-export interface TimelineRequest {
-  scenarioId?: string;
+export interface RunOutcomeComparison {
+  sourceRunId: string;
+  changes: string[];
+}
+
+let accessToken: string | null = null;
+
+const client = createHarvestClient({ baseUrl: PRODUCT_API_URL, getAccessToken: () => accessToken });
+
+function apiError(result: { error?: unknown; response: Response }) {
+  const problem = result.error as { detail?: string; code?: string } | undefined;
+  return new Error(problem?.detail ?? `${problem?.code ?? "Product API error"} (HTTP ${result.response.status}).`);
+}
+
+function unwrap<T>(result: { data?: T; error?: unknown; response: Response }): T {
+  if (result.error !== undefined || result.data === undefined) throw apiError(result);
+  return result.data;
+}
+
+export async function ensureOperationsSession() {
+  if (accessToken) return;
+  const response = await fetch(`${PRODUCT_API_URL}/dev/session`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ persona: "operations-demo" }),
+  });
+  if (!response.ok) throw new Error(`Could not start the local operations session (HTTP ${response.status}).`);
+  const session = await response.json() as { accessToken: string };
+  accessToken = session.accessToken;
+}
+
+export async function listSavedRuns() {
+  await ensureOperationsSession();
+  const page = unwrap(await client.GET("/v1/simulation-runs", { params: { query: { limit: 50 } } }));
+  return page.items;
+}
+
+export async function listScenarios() {
+  await ensureOperationsSession();
+  return unwrap(await client.GET("/v1/simulation-scenarios")).items;
+}
+
+export async function loadSavedRun(runId: string) {
+  await ensureOperationsSession();
+  return unwrap(await client.GET("/v1/simulation-runs/{runId}", { params: { path: { runId } } }));
+}
+
+export async function createSavedRun(input: {
+  scenarioId: string;
   policy: PolicyName;
   seed: number;
-  injectedDisruptions?: InjectedDisruption[];
+  decisionMode: DecisionMode;
+  disruptions?: InjectedDisruption[];
+}) {
+  await ensureOperationsSession();
+  return unwrap(await client.POST("/v1/simulation-runs", {
+    params: { header: { "Idempotency-Key": newIdempotencyKey("control-room-run") } },
+    body: {
+      scenarioId: input.scenarioId,
+      policy: input.policy,
+      seed: input.seed,
+      decisionMode: input.decisionMode,
+      scope: { mode: "SELECTED", islandIds: ["saint-lucia"] },
+      disruptions: input.disruptions,
+    },
+  }));
 }
 
-export interface TimelineResult {
-  timeline: ReplayTimeline;
-  result: RunResult;
+export async function createDerivedRun(runId: string, disruptions: InjectedDisruption[]) {
+  await ensureOperationsSession();
+  return unwrap(await client.POST("/v1/simulation-runs", {
+    params: { header: { "Idempotency-Key": newIdempotencyKey("control-room-derived") } },
+    body: { derivedFromRunId: runId, disruptions },
+  }));
 }
 
-/**
- * Runs a scenario and returns its recorded timeline.
- *
- * Throws rather than returning a partial result: a control room showing a
- * half-built world is worse than one showing an error, because nothing on
- * screen would indicate which half was missing.
- */
-export function buildTimeline(request: TimelineRequest): TimelineResult {
-  const result = runScenario({
-    scenarioId: request.scenarioId ?? DEFAULT_SCENARIO,
-    policy: request.policy,
-    seed: request.seed,
-    captureFrames: true,
-    injectedDisruptions: request.injectedDisruptions,
-  });
+export async function loadTimeline(runId: string): Promise<ReplayTimeline> {
+  await ensureOperationsSession();
+  const response = unwrap(await client.GET("/v1/simulation-runs/{runId}/timeline", { params: { path: { runId } } }));
+  return { scene: response.scene, frames: response.frames } as unknown as ReplayTimeline;
+}
 
-  if (!result.timeline) {
-    throw new Error('The engine returned no timeline despite frame capture being requested.');
+export async function loadWorldFrame(runId: string, frameIndex: number): Promise<ControlRoomFrame> {
+  await ensureOperationsSession();
+  const response = unwrap(await client.GET("/v1/simulation-runs/{runId}/world", {
+    params: { path: { runId }, query: { frameIndex } },
+  }));
+  return response.frame as unknown as ControlRoomFrame;
+}
+
+function displayNumber(value: number): string {
+  return Number.isInteger(value)
+    ? value.toLocaleString("en-US")
+    : value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+}
+
+function changedTotal(label: string, before: number, after: number, unit = ""): string | null {
+  if (Math.abs(after - before) < 0.005) return null;
+  const suffix = unit ? ` ${unit}` : "";
+  return `${label}: ${displayNumber(before)}${suffix} -> ${displayNumber(after)}${suffix}`;
+}
+
+/** Compares only final, judge-visible totals; replay timing can still differ. */
+export function compareRunOutcomes(
+  policy: PolicyName,
+  sourceRun: SavedRun,
+  sourceFrame: ControlRoomFrame,
+  currentRun: SavedRun,
+  currentFrame: ControlRoomFrame,
+): RunOutcomeComparison {
+  const changes: Array<string | null> = [];
+  if (policy === "HARVEST" && sourceFrame.operationsSnapshot && currentFrame.operationsSnapshot) {
+    const before = sourceFrame.operationsSnapshot;
+    const after = currentFrame.operationsSnapshot;
+    changes.push(
+      changedTotal("Delivered", before.deliveryAcceptedKg, after.deliveryAcceptedKg, "kg"),
+      changedTotal("Fulfilled orders", before.orderOutcomes.fulfilled, after.orderOutcomes.fulfilled),
+      changedTotal("Partially fulfilled orders", before.orderOutcomes.partiallyFulfilled, after.orderOutcomes.partiallyFulfilled),
+      changedTotal("Unfulfilled orders", before.orderOutcomes.unfulfilled, after.orderOutcomes.unfulfilled),
+      changedTotal("Pending orders", before.orderOutcomes.pending, after.orderOutcomes.pending),
+      changedTotal("Approved commitments", before.approvedCommitmentCount, after.approvedCommitmentCount),
+      changedTotal("Completed delivery missions", before.completedMissionCount, after.completedMissionCount),
+    );
+  } else {
+    changes.push(
+      changedTotal("Delivered", sourceFrame.totals.acceptedKg, currentFrame.totals.acceptedKg, "kg"),
+      changedTotal("Fulfilled demands", sourceFrame.totals.demandsFullyMet, currentFrame.totals.demandsFullyMet),
+      changedTotal("Unfulfilled demands", sourceFrame.totals.demandsUnmet, currentFrame.totals.demandsUnmet),
+    );
   }
 
-  return { timeline: result.timeline, result };
+  const sourceWaste = sourceRun.metrics?.wasteQuantity.value;
+  const currentWaste = currentRun.metrics?.wasteQuantity.value;
+  if (sourceWaste !== undefined && currentWaste !== undefined) {
+    changes.push(changedTotal("Physical waste", sourceWaste, currentWaste, "kg"));
+  }
+
+  return {
+    sourceRunId: sourceRun.runId,
+    changes: changes.filter((change): change is string => change !== null),
+  };
 }
 
-/** Human wording for an engine event type, for the feed and the inspector. */
+export async function createParticipantSession(runId: string, productActorId: string) {
+  await ensureOperationsSession();
+  return unwrap(await client.POST("/v1/simulation-runs/{runId}/participant-sessions", {
+    params: {
+      path: { runId },
+      header: { "Idempotency-Key": newIdempotencyKey("participant-replay") },
+    },
+    body: { productActorId },
+  }));
+}
+
+/** Human wording for an engine or connected-agent event, used by the feed. */
 const EVENT_LABELS: Record<string, string> = {
-  WORLD_TICK: 'Daily world update',
-  FARMER_OBSERVATION: 'Grower reported on a crop',
-  BUYER_DEMAND: 'Buyer placed an order',
-  PLAN_ALLOCATION: 'Supply matched to an order',
-  APPROVAL_GATE: 'Commitment reached human approval',
-  MISSION_DEPART: 'Vehicle collected and departed',
-  MISSION_ARRIVE: 'Delivery arrived',
-  DISRUPTION_START: 'Disruption became visible',
-  DISRUPTION_END: 'Disruption cleared',
-  DEMAND_DEADLINE: 'Order deadline passed',
+  WORLD_TICK: "Daily world update",
+  FARMER_OBSERVATION: "Grower reported on a crop",
+  BUYER_DEMAND: "Buyer placed an order",
+  PLAN_ALLOCATION: "Supply matched to an order",
+  APPROVAL_GATE: "Commitment reached approval",
+  MISSION_DEPART: "Vehicle collected and departed",
+  MISSION_ARRIVE: "Delivery arrived",
+  DISRUPTION_START: "Disruption became visible",
+  DISRUPTION_END: "Disruption cleared",
+  DEMAND_DEADLINE: "Order deadline passed",
+  RUN_SETTLED: "Run settled at the scenario horizon",
 };
 
 export function describeEvent(eventType: string): string {
-  return EVENT_LABELS[eventType] ?? eventType.toLowerCase().replace(/_/g, ' ');
+  return EVENT_LABELS[eventType] ?? eventType.toLowerCase().replace(/_/g, " ");
 }
 
-/**
- * Whether an event is worth surfacing in the feed.
- *
- * `WORLD_TICK` fires daily and says nothing on its own; letting it through
- * would bury the events that matter under routine noise, which is exactly the
- * "understandable without reading raw logs" criterion failing.
- */
 export function isNotableEvent(eventType: string): boolean {
-  return eventType !== 'WORLD_TICK';
+  return eventType !== "WORLD_TICK";
 }
 
-/** Events that should read as problems rather than progress. */
 export function isAlertEvent(eventType: string): boolean {
-  return eventType === 'DISRUPTION_START' || eventType === 'DEMAND_DEADLINE';
+  return eventType === "DISRUPTION_START" || eventType === "DEMAND_DEADLINE";
 }

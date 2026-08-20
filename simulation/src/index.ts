@@ -9,7 +9,18 @@
  */
 
 export { SimulationEngine, runScenario } from './engine.js';
-export type { EngineOptions, InjectedDisruption, PolicyName, RunMetrics, RunResult, RunStatus } from './engine.js';
+export type {
+  CoordinationMode,
+  DisruptionMissionImpact,
+  EngineOptions,
+  InjectedDisruption,
+  PolicyName,
+  ProductEffectResult,
+  ProductSimulationEffect,
+  RunMetrics,
+  RunResult,
+  RunStatus,
+} from './engine.js';
 
 export { frameAt, interpolateAlongPath, missionPositionAt } from './replay.js';
 export type {
@@ -20,6 +31,10 @@ export type {
   ControlRoomScene,
   ControlRoomTotals,
   ReplayTimeline,
+  SimulationAgentAction,
+  SimulationOperationsSnapshot,
+  SimulationOrderOutcomes,
+  SimulationParticipant,
 } from './replay.js';
 
 export { EventQueue, Priority } from './core/queue.js';

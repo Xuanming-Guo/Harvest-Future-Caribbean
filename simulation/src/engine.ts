@@ -40,11 +40,14 @@ import type {
   ControlRoomMission,
   ControlRoomScene,
   ReplayTimeline,
+  SimulationAgentAction,
+  SimulationOperationsSnapshot,
 } from './replay.js';
 import type {
   BuyerDemand,
   Commitment,
   DeliveryMission,
+  GeoPoint,
   HiddenCropTruth,
   ObservedCropBatch,
   ScheduledDisruption,
@@ -53,6 +56,65 @@ import type {
 
 export type PolicyName = 'BASELINE' | 'HARVEST';
 export type RunStatus = 'READY' | 'RUNNING' | 'PAUSED' | 'COMPLETED' | 'FAILED';
+export type CoordinationMode = 'INTERNAL_POLICY' | 'EXTERNAL_PRODUCT_API';
+
+interface ProductEffectEnvelope {
+  /** Product API domain-event UUID. Used only for deduplication, never as a seeded world identity. */
+  eventId: string;
+  /** Monotonic Product API outbox cursor, represented as decimal text for JSON safety. */
+  cursor: string;
+  /** Effective simulation instant for this already-validated Product API event. */
+  atMs: SimulationInstant;
+  /** Physical echoes are recorded as consumed but cannot mutate the world twice. */
+  origin?: 'PRODUCT' | 'PHYSICAL_ECHO';
+}
+
+export type ProductSimulationEffect =
+  | (ProductEffectEnvelope & {
+      type: 'NO_PHYSICAL_EFFECT' | 'OBSERVATION_BOUND' | 'ORDER_BOUND';
+    })
+  | (ProductEffectEnvelope & {
+      type: 'ALLOCATION_APPROVED';
+      demandId: string;
+      allocations: Array<{ batchId: string; quantityKg: number }>;
+    })
+  | (ProductEffectEnvelope & {
+      type: 'MISSION_ACCEPTED';
+      productMissionId: string;
+      demandId: string;
+      transporterId: string;
+      path: GeoPoint[];
+      plannedDepartureAt: SimulationInstant;
+      plannedArrivalAt: SimulationInstant;
+    })
+  | (ProductEffectEnvelope & {
+      type: 'MISSION_DELAYED';
+      productMissionId: string;
+      plannedArrivalAt: SimulationInstant;
+    })
+  | (ProductEffectEnvelope & {
+      type: 'DELIVERY_ACCEPTED';
+      productMissionId: string;
+      demandId: string;
+      acceptedKg: number;
+      rejectedKg: number;
+    })
+  | (ProductEffectEnvelope & {
+      type: 'ALLOCATION_INVALIDATED' | 'ORDER_CANCELLED';
+      demandId: string;
+    });
+
+export interface ProductEffectResult {
+  applied: boolean;
+  reason: 'APPLIED' | 'DUPLICATE' | 'PHYSICAL_ECHO' | 'IGNORED' | 'REJECTED';
+  simulationMissionId?: string;
+}
+
+/** Observable causal link used by the connected Product API bridge. */
+export interface DisruptionMissionImpact {
+  disruptionId: string;
+  missionId: string;
+}
 
 export interface EngineOptions {
   /**
@@ -74,6 +136,12 @@ export interface EngineOptions {
    * for a few hundred frames of projection per run.
    */
   captureFrames?: boolean;
+  /**
+   * In connected Harvest runs the Product API owns coordination. The engine
+   * still produces biology, weather, demand and disruptions, but it waits for
+   * validated Product events before creating commitments or routes.
+   */
+  coordinationMode?: CoordinationMode;
   /**
    * Extra disruptions injected into the scenario before it starts.
    *
@@ -157,6 +225,12 @@ const HEAVY_RAIN_MM = 45;
 /** How long a buyer waits past the deadline before sourcing elsewhere. */
 const SUBSTITUTION_GRACE_MS = 12 * HOUR_MS;
 
+/** Maximum extra journey time produced by the hidden severity of a storm. */
+const MAX_STORM_TRAVEL_DELAY_MS = 4 * HOUR_MS;
+
+/** Maximum share of an unharvested crop that one crop incident can destroy. */
+const MAX_CROP_DAMAGE_FRACTION = 0.3;
+
 interface DisruptionRuntime {
   disruption: ScheduledDisruption;
   active: boolean;
@@ -181,9 +255,18 @@ export class SimulationEngine {
   private readonly planAttempts = new Map<string, number>();
   private observationRequestCount = 0;
   private readonly captureFrames: boolean;
+  private readonly coordinationMode: CoordinationMode;
   private readonly frames: ControlRoomFrame[] = [];
   /** How many decisions had been recorded when the previous frame was taken. */
   private decisionsAtLastFrame = 0;
+  private readonly appliedProductEventIds = new Set<string>();
+  private lastProductCursor = 0n;
+  private readonly commitmentByDemandId = new Map<string, string>();
+  private readonly missionByProductId = new Map<string, string>();
+  /** Safe causal facts for the Product bridge; severity and other truth stay private. */
+  private readonly disruptionMissionImpacts: DisruptionMissionImpact[] = [];
+  private readonly disruptionMissionImpactKeys = new Set<string>();
+  private settled = false;
 
   private clock: SimulationInstant;
   private readonly startsAt: SimulationInstant;
@@ -203,6 +286,7 @@ export class SimulationEngine {
     this.seed = options.seed;
     this.maxEvents = options.maxEvents ?? 250_000;
     this.captureFrames = options.captureFrames ?? false;
+    this.coordinationMode = options.coordinationMode ?? 'INTERNAL_POLICY';
 
     this.random = new RandomSource(options.seed);
     // Identifiers come from their own stream so that adding an entity does not
@@ -229,7 +313,7 @@ export class SimulationEngine {
       const injectionStream = this.random.stream('injected:disruptions');
       for (const injected of options.injectedDisruptions) {
         const startsAt = this.startsAt + injected.offsetMs;
-        if (startsAt > this.endsAt) continue;
+        if (startsAt >= this.endsAt) continue;
         this.world.truth.disruptions.push({
           disruptionId: this.ids.next(),
           type: injected.type,
@@ -260,6 +344,32 @@ export class SimulationEngine {
     // asserts the allow-list was not widened by accident.
     assertNoTruthLeak(view, 'observable world projection');
     return view;
+  }
+
+  /** Static, observable scene used to bootstrap Product API participants. */
+  get controlRoomScene(): ControlRoomScene {
+    return this.buildScene();
+  }
+
+  /** Scenario horizon for deterministic day stepping. */
+  get horizon(): { startsAt: SimulationInstant; endsAt: SimulationInstant } {
+    return { startsAt: this.startsAt, endsAt: this.endsAt };
+  }
+
+  /** Next queued physical instant, or null once only horizon settlement remains. */
+  get nextEventAt(): SimulationInstant | null {
+    return this.queue.peek()?.at ?? null;
+  }
+
+  /**
+   * Missions whose physical schedule was changed by an observed disruption.
+   *
+   * This is intentionally narrower than hidden disruption truth. The connected
+   * Product API uses it to report a delivery exception only after the engine
+   * has established a real causal effect.
+   */
+  get observedDisruptionMissionImpacts(): readonly DisruptionMissionImpact[] {
+    return this.disruptionMissionImpacts.map((impact) => ({ ...impact }));
   }
 
   // ------------------------------------------------------------------
@@ -306,36 +416,74 @@ export class SimulationEngine {
   // ------------------------------------------------------------------
 
   run(): RunResult {
-    this.status = 'RUNNING';
+    this.start();
+    return this.finish();
+  }
+
+  /** Starts a stepped run without consuming the future queue. */
+  start(): void {
+    if (this.status === 'READY') this.status = 'RUNNING';
+    if (this.status !== 'RUNNING') throw new Error(`Cannot start a simulation in ${this.status} state.`);
+  }
+
+  /**
+   * Processes every physical event through `targetAt`, returning only the new
+   * observable frames. External callers can then execute one Product API cycle
+   * before advancing into the next day.
+   */
+  advanceTo(targetAt: SimulationInstant): ControlRoomFrame[] {
+    this.start();
+    if (!Number.isFinite(targetAt)) throw new RangeError('Simulation target time must be finite.');
+    if (targetAt < this.clock) throw new RangeError('Simulation time cannot move backwards.');
+    const target = Math.min(targetAt, this.endsAt);
+    const frameStart = this.frames.length;
 
     try {
-      while (!this.queue.isEmpty) {
+      while (!this.queue.isEmpty && (this.queue.peek() as ScheduledEvent).at <= target) {
         const event = this.queue.pop() as ScheduledEvent;
-        if (event.at > this.endsAt) break;
-
         this.eventsProcessed += 1;
         if (this.eventsProcessed > this.maxEvents) {
           throw new Error(
             `Run exceeded ${this.maxEvents} events, which means a handler is scheduling faster than the clock advances.`,
           );
         }
-
-        // Time only ever moves forward. The queue guarantees ordering; this
-        // guards against a handler mutating the clock directly.
         this.clock = Math.max(this.clock, event.at);
         this.handle(event);
         if (this.captureFrames) this.recordFrame(event.type);
       }
-
-      // Settle anything still outstanding at the horizon.
-      this.clock = this.endsAt;
-      this.settleOutstandingDemand();
-      this.status = 'COMPLETED';
+      this.clock = Math.max(this.clock, target);
     } catch (error) {
       this.status = 'FAILED';
       throw error;
     }
 
+    return this.frames.slice(frameStart);
+  }
+
+  /** Adds a safe replay checkpoint after one external Product API cycle. */
+  checkpoint(
+    eventType: string,
+    agentActions: SimulationAgentAction[] = [],
+    operationsSnapshot?: SimulationOperationsSnapshot,
+  ): ControlRoomFrame {
+    if (this.status !== 'RUNNING') throw new Error(`Cannot checkpoint a simulation in ${this.status} state.`);
+    const frame = this.createFrame(eventType);
+    if (agentActions.length) frame.agentActions = structuredClone(agentActions);
+    if (operationsSnapshot) frame.operationsSnapshot = structuredClone(operationsSnapshot);
+    if (this.captureFrames) this.frames.push(frame);
+    return frame;
+  }
+
+  /** Completes a stepped run at the horizon. */
+  finish(): RunResult {
+    if (this.status === 'COMPLETED') return this.result();
+    this.advanceTo(this.endsAt);
+    if (!this.settled) {
+      this.settleOutstandingDemand();
+      this.settled = true;
+      if (this.captureFrames) this.recordFrame('RUN_SETTLED');
+    }
+    this.status = 'COMPLETED';
     return this.result();
   }
 
@@ -373,6 +521,12 @@ export class SimulationEngine {
   private onWorldTick(): void {
     const today = formatDate(this.clock);
     const rainfallMm = this.world.truth.rainfallMmByDate.get(today) ?? 0;
+    const stormSeverity = Math.max(
+      0,
+      ...[...this.disruptionRuntimes.values()]
+        .filter((runtime) => runtime.active && runtime.disruption.type === 'WEATHER')
+        .map((runtime) => runtime.disruption.severity),
+    );
 
     // Rain degrades sensitive roads. This is observable: a driver can see a
     // flooded road, so it is allowed to reach the observed world.
@@ -398,7 +552,10 @@ export class SimulationEngine {
         const daysReady = Math.max(0, (this.clock - crop.readyAt) / DAY_MS);
         if (daysReady > 0) {
           const remaining = Math.max(0, crop.potentialYieldKg - crop.harvestedKg - crop.lostKg);
-          const lostToday = remaining * crop.dailySpoilageRate;
+          // A visible storm accelerates deterioration, but multiple overlapping
+          // fronts do not compound into an implausible exponential penalty.
+          // The strongest active seeded severity sets the multiplier.
+          const lostToday = Math.min(remaining, remaining * crop.dailySpoilageRate * (1 + stormSeverity));
           crop.lostKg += lostToday;
 
           if (crop.potentialYieldKg - crop.harvestedKg - crop.lostKg <= 0.5) {
@@ -426,6 +583,130 @@ export class SimulationEngine {
     return false;
   }
 
+  private recordDisruptionMissionImpact(disruptionId: string, missionId: string): void {
+    const key = `${disruptionId}:${missionId}`;
+    if (this.disruptionMissionImpactKeys.has(key)) return;
+    this.disruptionMissionImpactKeys.add(key);
+    this.disruptionMissionImpacts.push({ disruptionId, missionId });
+  }
+
+  private missionUsesAffectedRoad(mission: DeliveryMission, disruption: ScheduledDisruption): boolean {
+    const affected = new Set(disruption.affectedEntityIds);
+    const commitment = this.world.observed.commitments.get(mission.commitmentId);
+    if (!commitment) return false;
+    return commitment.allocations.some((allocation) => {
+      const farm = this.world.farms.get(allocation.farmId);
+      return farm ? affected.has(farm.roadSegmentId) : false;
+    });
+  }
+
+  private replaceMissionSchedule(mission: DeliveryMission, includeDeparture: boolean): void {
+    this.queue.removeWhere((event) => {
+      const queuedMissionId = (event.payload as { missionId?: string }).missionId;
+      return queuedMissionId === mission.missionId &&
+        (event.type === 'MISSION_ARRIVE' || (includeDeparture && event.type === 'MISSION_DEPART'));
+    });
+    if (includeDeparture) {
+      this.schedule(mission.plannedDepartureAt, 'MISSION_DEPART', Priority.Actor, { missionId: mission.missionId });
+    }
+    this.schedule(mission.plannedArrivalAt, 'MISSION_ARRIVE', Priority.World, { missionId: mission.missionId });
+  }
+
+  private postponeMissionUntil(
+    mission: DeliveryMission,
+    availableAt: SimulationInstant,
+    disruptionId: string,
+  ): boolean {
+    if (mission.status === 'COMPLETED' || mission.status === 'CANCELLED' || mission.plannedArrivalAt <= this.clock) {
+      return false;
+    }
+
+    if (mission.plannedDepartureAt >= this.clock) {
+      if (mission.plannedDepartureAt >= availableAt) return false;
+      const delayMs = availableAt - mission.plannedDepartureAt;
+      mission.plannedDepartureAt = availableAt;
+      mission.plannedArrivalAt += delayMs;
+      this.replaceMissionSchedule(mission, true);
+    } else {
+      const delayedArrival = Math.max(mission.plannedArrivalAt, availableAt);
+      if (delayedArrival <= mission.plannedArrivalAt) return false;
+      mission.plannedArrivalAt = delayedArrival;
+      mission.status = 'DELAYED';
+      this.replaceMissionSchedule(mission, false);
+    }
+
+    this.recordDisruptionMissionImpact(disruptionId, mission.missionId);
+    return true;
+  }
+
+  private slowMission(
+    mission: DeliveryMission,
+    delayMs: number,
+    disruptionId: string,
+  ): boolean {
+    if (
+      delayMs <= 0 ||
+      mission.status === 'COMPLETED' ||
+      mission.status === 'CANCELLED' ||
+      mission.plannedArrivalAt <= this.clock
+    ) {
+      return false;
+    }
+    mission.plannedArrivalAt += delayMs;
+    if (mission.plannedDepartureAt < this.clock) mission.status = 'DELAYED';
+    this.replaceMissionSchedule(mission, false);
+    this.recordDisruptionMissionImpact(disruptionId, mission.missionId);
+    return true;
+  }
+
+  private applyDisruptionToMission(runtime: DisruptionRuntime, mission: DeliveryMission): boolean {
+    const { disruption } = runtime;
+    if (mission.plannedDepartureAt >= disruption.endsAt || mission.plannedArrivalAt <= disruption.startsAt) {
+      return false;
+    }
+
+    switch (disruption.type) {
+      case 'ROAD':
+        return this.missionUsesAffectedRoad(mission, disruption)
+          ? this.postponeMissionUntil(mission, disruption.endsAt, disruption.disruptionId)
+          : false;
+      case 'VEHICLE':
+        return disruption.affectedEntityIds.includes(mission.transporterId)
+          ? this.postponeMissionUntil(mission, disruption.endsAt, disruption.disruptionId)
+          : false;
+      case 'WEATHER':
+        return this.slowMission(
+          mission,
+          Math.round(disruption.severity * MAX_STORM_TRAVEL_DELAY_MS),
+          disruption.disruptionId,
+        );
+      case 'CROP':
+      case 'DEMAND':
+        return false;
+    }
+  }
+
+  private applyActiveDisruptionsToMission(mission: DeliveryMission): void {
+    for (const runtime of [...this.disruptionRuntimes.values()].sort((left, right) =>
+      left.disruption.disruptionId.localeCompare(right.disruption.disruptionId))) {
+      if (!runtime.active) continue;
+      this.applyDisruptionToMission(runtime, mission);
+    }
+  }
+
+  private applyCropDamage(disruption: ScheduledDisruption): void {
+    const affected = new Set(disruption.affectedEntityIds);
+    for (const batch of [...this.world.observed.batches.values()].sort((left, right) =>
+      left.batchId.localeCompare(right.batchId))) {
+      if (!affected.has(batch.farmId) && !affected.has(batch.batchId)) continue;
+      const crop = this.world.truth.crops.get(batch.batchId);
+      if (!crop || crop.stage === 'HARVESTED' || crop.stage === 'SPOILED') continue;
+      const remaining = Math.max(0, crop.potentialYieldKg - crop.harvestedKg - crop.lostKg);
+      crop.lostKg += remaining * disruption.severity * MAX_CROP_DAMAGE_FRACTION;
+      if (crop.potentialYieldKg - crop.harvestedKg - crop.lostKg <= 0.5) crop.stage = 'SPOILED';
+    }
+  }
+
   private onDisruptionStart(disruptionId: string): void {
     const runtime = this.disruptionRuntimes.get(disruptionId);
     if (!runtime) return;
@@ -447,8 +728,20 @@ export class SimulationEngine {
       }
     }
 
+    if (runtime.disruption.type === 'CROP') this.applyCropDamage(runtime.disruption);
+
+    for (const mission of [...this.world.observed.missions.values()].sort((left, right) =>
+      left.missionId.localeCompare(right.missionId))) {
+      this.applyDisruptionToMission(runtime, mission);
+    }
+
     const observed = this.world.observed.disruptions.at(-1);
     if (!observed) return;
+
+    // Connected Harvest runs hand the visible disruption to Product API
+    // participants. The physical engine must not independently choose a
+    // recovery as well, or two coordinators would reschedule the same mission.
+    if (this.coordinationMode === 'EXTERNAL_PRODUCT_API') return;
 
     // Hand it to the policy. The proposal is advisory; the engine applies it.
     assertNoTruthLeak(observed, 'disruption handed to policy');
@@ -581,9 +874,12 @@ export class SimulationEngine {
     };
     this.world.observed.demands.set(demand.demandId, demand);
 
-    // Planning happens shortly after the order lands, not instantly: a
-    // coordinator is not sitting on the keyboard at 3am.
-    this.schedule(this.clock + 30 * MINUTE_MS, 'PLAN_ALLOCATION', Priority.Actor, { demandId: demand.demandId });
+    // In a connected run, the matching/approval workflow happens through the
+    // Product API and returns as validated Product events. Internal policy
+    // planning remains unchanged for headless and baseline comparisons.
+    if (this.coordinationMode === 'INTERNAL_POLICY') {
+      this.schedule(this.clock + 30 * MINUTE_MS, 'PLAN_ALLOCATION', Priority.Actor, { demandId: demand.demandId });
+    }
     this.schedule(neededBy + SUBSTITUTION_GRACE_MS, 'DEMAND_DEADLINE', Priority.Observation, { demandId: demand.demandId });
 
     // The buyer orders again later in the run.
@@ -837,6 +1133,7 @@ export class SimulationEngine {
 
     this.schedule(departAt, 'MISSION_DEPART', Priority.Actor, { missionId: mission.missionId });
     this.schedule(arriveAt, 'MISSION_ARRIVE', Priority.World, { missionId: mission.missionId });
+    this.applyActiveDisruptionsToMission(mission);
   }
 
   private onMissionDepart(missionId: string): void {
@@ -878,18 +1175,6 @@ export class SimulationEngine {
     const vehicle = this.world.transporters.get(mission.transporterId);
     mission.loadedKg = Math.min(loaded, vehicle?.capacityKg ?? loaded);
     mission.status = 'ACTIVE';
-
-    // A degraded road on the route slows the run. Both policies suffer it; only
-    // Harvest gets a chance to react, and only once it is observable.
-    const anyDegraded = this.world.observed.degradedRoadSegmentIds.size > 0;
-    if (anyDegraded) {
-      const extraMs = 2 * HOUR_MS;
-      mission.plannedArrivalAt += extraMs;
-      this.queue.removeWhere(
-        (queued) => queued.type === 'MISSION_ARRIVE' && (queued.payload as { missionId: string }).missionId === missionId,
-      );
-      this.schedule(mission.plannedArrivalAt, 'MISSION_ARRIVE', Priority.World, { missionId });
-    }
   }
 
   private onMissionArrive(missionId: string): void {
@@ -904,6 +1189,12 @@ export class SimulationEngine {
     mission.status = 'COMPLETED';
     mission.actualArrivalAt = this.clock;
     this.missionsCompleted += 1;
+
+    // Arrival is a physical fact. In connected mode the transporter posts the
+    // actual picked-up amount and the buyer accepts it through the Product API;
+    // only that resulting event may settle the commitment and buyer demand.
+    if (this.coordinationMode === 'EXTERNAL_PRODUCT_API') return;
+
     commitment.status = 'DELIVERED';
     this.commitmentsDelivered += 1;
 
@@ -926,6 +1217,195 @@ export class SimulationEngine {
     }
 
     this.updateDemandStatus(demand);
+  }
+
+  // ------------------------------------------------------------------
+  // Validated Product API effects for connected Harvest execution
+  // ------------------------------------------------------------------
+
+  /**
+   * Applies one already-validated Product event exactly once.
+   *
+   * Product UUIDs live only in the dedupe/mapping layer. Physical commitments
+   * and missions always consume the seeded `IdFactory`, preserving repeatable
+   * world identities and digests across database instances.
+   */
+  applyProductEffect(effect: ProductSimulationEffect): ProductEffectResult {
+    if (this.coordinationMode !== 'EXTERNAL_PRODUCT_API') {
+      return { applied: false, reason: 'REJECTED' };
+    }
+    if (this.status !== 'RUNNING' || effect.atMs !== this.clock) {
+      return { applied: false, reason: 'REJECTED' };
+    }
+    if (this.appliedProductEventIds.has(effect.eventId)) {
+      return { applied: false, reason: 'DUPLICATE' };
+    }
+    if (!/^\d+$/.test(effect.cursor)) return { applied: false, reason: 'REJECTED' };
+    const cursor = BigInt(effect.cursor);
+    if (cursor <= this.lastProductCursor) return { applied: false, reason: 'REJECTED' };
+
+    this.appliedProductEventIds.add(effect.eventId);
+    this.lastProductCursor = cursor;
+    if (effect.origin === 'PHYSICAL_ECHO') return { applied: false, reason: 'PHYSICAL_ECHO' };
+
+    switch (effect.type) {
+      case 'NO_PHYSICAL_EFFECT':
+      case 'OBSERVATION_BOUND':
+      case 'ORDER_BOUND':
+        return { applied: false, reason: 'IGNORED' };
+      case 'ALLOCATION_APPROVED':
+        return this.applyAllocationApproved(effect);
+      case 'MISSION_ACCEPTED':
+        return this.applyMissionAccepted(effect);
+      case 'MISSION_DELAYED':
+        return this.applyMissionDelayed(effect);
+      case 'DELIVERY_ACCEPTED':
+        return this.applyDeliveryAccepted(effect);
+      case 'ALLOCATION_INVALIDATED':
+      case 'ORDER_CANCELLED':
+        return this.cancelDemandWork(effect.demandId);
+    }
+  }
+
+  private applyAllocationApproved(
+    effect: Extract<ProductSimulationEffect, { type: 'ALLOCATION_APPROVED' }>,
+  ): ProductEffectResult {
+    const demand = this.world.observed.demands.get(effect.demandId);
+    if (!demand || demand.status !== 'PENDING' || this.commitmentByDemandId.has(effect.demandId)) {
+      return { applied: false, reason: 'REJECTED' };
+    }
+
+    const allocations: Commitment['allocations'] = [];
+    for (const requested of effect.allocations) {
+      if (!Number.isFinite(requested.quantityKg) || requested.quantityKg <= 0) continue;
+      const batch = this.world.observed.batches.get(requested.batchId);
+      if (!batch) continue;
+      allocations.push({
+        batchId: batch.batchId,
+        farmId: batch.farmId,
+        quantityKg: Number(requested.quantityKg.toFixed(2)),
+      });
+    }
+    if (allocations.length === 0) return { applied: false, reason: 'REJECTED' };
+
+    const commitment: Commitment = {
+      commitmentId: this.ids.next(),
+      demandId: effect.demandId,
+      allocations,
+      committedAt: this.clock,
+      approvedAt: this.clock,
+      status: 'APPROVED',
+    };
+    this.world.observed.commitments.set(commitment.commitmentId, commitment);
+    this.commitmentByDemandId.set(effect.demandId, commitment.commitmentId);
+    demand.status = 'COMMITTED';
+    this.commitmentsProposed += 1;
+    this.commitmentsApproved += 1;
+    this.totalPromisedKg += allocations.reduce((sum, allocation) => sum + allocation.quantityKg, 0);
+    return { applied: true, reason: 'APPLIED' };
+  }
+
+  private applyMissionAccepted(
+    effect: Extract<ProductSimulationEffect, { type: 'MISSION_ACCEPTED' }>,
+  ): ProductEffectResult {
+    const commitmentId = this.commitmentByDemandId.get(effect.demandId);
+    const commitment = commitmentId ? this.world.observed.commitments.get(commitmentId) : undefined;
+    const transporter = this.world.transporters.get(effect.transporterId);
+    if (!commitment || commitment.status !== 'APPROVED' || !transporter || effect.path.length < 2) {
+      return { applied: false, reason: 'REJECTED' };
+    }
+    const existingMissionId = this.missionByProductId.get(effect.productMissionId);
+    if (existingMissionId) {
+      return { applied: false, reason: 'DUPLICATE', simulationMissionId: existingMissionId };
+    }
+
+    const departure = Math.max(this.clock + MINUTE_MS, effect.plannedDepartureAt);
+    const arrival = Math.max(departure + MINUTE_MS, effect.plannedArrivalAt);
+    const mission: DeliveryMission = {
+      missionId: this.ids.next(),
+      commitmentId: commitment.commitmentId,
+      transporterId: transporter.transporterId,
+      status: 'PLANNED',
+      path: effect.path.map((point) => ({ latitude: point.latitude, longitude: point.longitude })),
+      plannedDepartureAt: departure,
+      plannedArrivalAt: arrival,
+      actualArrivalAt: null,
+      loadedKg: 0,
+    };
+    this.world.observed.missions.set(mission.missionId, mission);
+    this.missionByProductId.set(effect.productMissionId, mission.missionId);
+    this.schedule(departure, 'MISSION_DEPART', Priority.Actor, { missionId: mission.missionId });
+    this.schedule(arrival, 'MISSION_ARRIVE', Priority.World, { missionId: mission.missionId });
+    this.applyActiveDisruptionsToMission(mission);
+    return { applied: true, reason: 'APPLIED', simulationMissionId: mission.missionId };
+  }
+
+  private applyMissionDelayed(
+    effect: Extract<ProductSimulationEffect, { type: 'MISSION_DELAYED' }>,
+  ): ProductEffectResult {
+    const missionId = this.missionByProductId.get(effect.productMissionId);
+    const mission = missionId ? this.world.observed.missions.get(missionId) : undefined;
+    if (!mission || mission.status === 'COMPLETED' || mission.status === 'CANCELLED') {
+      return { applied: false, reason: 'REJECTED' };
+    }
+    // Recovery may add coordination time, but it cannot make the vehicle arrive
+    // earlier than the physical engine already permits after a closure, storm
+    // or breakdown.
+    const arrival = Math.max(this.clock + MINUTE_MS, mission.plannedArrivalAt, effect.plannedArrivalAt);
+    mission.status = 'DELAYED';
+    mission.plannedArrivalAt = arrival;
+    this.queue.removeWhere(
+      (event) => event.type === 'MISSION_ARRIVE' && (event.payload as { missionId: string }).missionId === mission.missionId,
+    );
+    this.schedule(arrival, 'MISSION_ARRIVE', Priority.World, { missionId: mission.missionId });
+    return { applied: true, reason: 'APPLIED', simulationMissionId: mission.missionId };
+  }
+
+  private applyDeliveryAccepted(
+    effect: Extract<ProductSimulationEffect, { type: 'DELIVERY_ACCEPTED' }>,
+  ): ProductEffectResult {
+    const missionId = this.missionByProductId.get(effect.productMissionId);
+    const mission = missionId ? this.world.observed.missions.get(missionId) : undefined;
+    const commitmentId = this.commitmentByDemandId.get(effect.demandId);
+    const commitment = commitmentId ? this.world.observed.commitments.get(commitmentId) : undefined;
+    const demand = this.world.observed.demands.get(effect.demandId);
+    if (!mission || mission.status !== 'COMPLETED' || !commitment || !demand) {
+      return { applied: false, reason: 'REJECTED' };
+    }
+    const accepted = Math.max(0, Math.min(effect.acceptedKg, mission.loadedKg));
+    const rejected = Math.max(0, Math.min(effect.rejectedKg, mission.loadedKg - accepted));
+    demand.acceptedKg = Number((demand.acceptedKg + accepted).toFixed(2));
+    if (rejected > 0) {
+      const first = commitment.allocations[0];
+      const truth = first ? this.world.truth.crops.get(first.batchId) : undefined;
+      if (truth) truth.lostKg += rejected;
+    }
+    commitment.status = 'DELIVERED';
+    this.commitmentsDelivered += 1;
+    this.updateDemandStatus(demand);
+    return { applied: true, reason: 'APPLIED', simulationMissionId: mission.missionId };
+  }
+
+  private cancelDemandWork(demandId: string): ProductEffectResult {
+    const commitmentId = this.commitmentByDemandId.get(demandId);
+    const commitment = commitmentId ? this.world.observed.commitments.get(commitmentId) : undefined;
+    if (!commitment || commitment.status === 'DELIVERED' || commitment.status === 'CANCELLED') {
+      return { applied: false, reason: 'IGNORED' };
+    }
+    commitment.status = 'CANCELLED';
+    for (const mission of this.world.observed.missions.values()) {
+      if (mission.commitmentId !== commitment.commitmentId || mission.status === 'COMPLETED') continue;
+      mission.status = 'CANCELLED';
+      this.missionsCancelled += 1;
+      this.queue.removeWhere(
+        (event) =>
+          (event.type === 'MISSION_DEPART' || event.type === 'MISSION_ARRIVE') &&
+          (event.payload as { missionId: string }).missionId === mission.missionId,
+      );
+    }
+    const demand = this.world.observed.demands.get(demandId);
+    if (demand && demand.status === 'COMMITTED') demand.status = 'PENDING';
+    return { applied: true, reason: 'APPLIED' };
   }
 
   /**
@@ -990,7 +1470,7 @@ export class SimulationEngine {
    * shorter and would publish hidden truth the first time somebody added a
    * field to `HiddenCropTruth`, so the verbosity is the point.
    */
-  private recordFrame(eventType: string): void {
+  private createFrame(eventType: string): ControlRoomFrame {
     const missions: ControlRoomMission[] = [...this.world.observed.missions.values()].map((mission) => ({
       missionId: mission.missionId,
       commitmentId: mission.commitmentId,
@@ -1036,7 +1516,7 @@ export class SimulationEngine {
 
     const projection = toObservableWorld(this.runId, this.clock, this.world);
 
-    this.frames.push({
+    return {
       atMs: this.clock,
       at: formatInstant(this.clock),
       eventType,
@@ -1056,7 +1536,11 @@ export class SimulationEngine {
         commitmentsApproved: this.commitmentsApproved,
         observationRequests: this.observationRequestCount,
       },
-    });
+    };
+  }
+
+  private recordFrame(eventType: string): void {
+    this.frames.push(this.createFrame(eventType));
   }
 
   private buildScene(): ControlRoomScene {
@@ -1090,6 +1574,29 @@ export class SimulationEngine {
         to: road.to,
         distanceKm: road.distanceKm,
       })),
+      participants: [
+        ...[...this.world.farms.values()].map((farm) => ({
+          simulationActorId: farm.farmId,
+          productActorId: null,
+          role: 'FARMER' as const,
+          displayName: farm.name,
+          islandId: 'saint-lucia',
+        })),
+        ...[...this.world.buyers.values()].map((buyer) => ({
+          simulationActorId: buyer.buyerId,
+          productActorId: null,
+          role: 'BUYER' as const,
+          displayName: buyer.name,
+          islandId: 'saint-lucia',
+        })),
+        ...[...this.world.transporters.values()].map((transporter) => ({
+          simulationActorId: transporter.transporterId,
+          productActorId: null,
+          role: 'TRANSPORTER' as const,
+          displayName: transporter.name,
+          islandId: 'saint-lucia',
+        })),
+      ],
       evidenceLabel: EVIDENCE_LABEL,
     };
   }

@@ -32,10 +32,17 @@ Normal validated TypeScript owns quantities, ATP, matching, prices,
 reservations, approval checks, routes, deadline changes, permissions, and state
 transitions. The yield model adapter owns prediction output, not an LLM.
 
-Only two operations use the provider-neutral text adapter:
+The normal participant workflow uses the provider-neutral text adapter for:
 
 1. Extract an editable crop-observation draft from unstructured text.
 2. Explain a delay recovery already calculated by deterministic code.
+
+Connected `LLM_ASSISTED` simulation runs also use the shared structured client
+to select from the current participant role's fixed tool allow-list. The call
+is made at most once per participant per simulated day and only when that role
+has an actionable cycle. The Product API still validates permissions,
+visibility, run scope, quantities and lifecycle state before executing a tool.
+An LLM cannot invent a tool or bypass a rejection.
 
 The text adapter cannot save an observation, reserve supply, approve a
 proposal, change a route, or change a deadline. Every stored trace contains a
@@ -86,8 +93,7 @@ coordinator approves it.
 
 ## Provider configuration
 
-No live provider is selected in issue #6. These entries intentionally remain
-blank in `.env.example`:
+The default remains intentionally blank in `.env.example`:
 
 ```dotenv
 AGENT_LLM_PROVIDER=
@@ -96,23 +102,60 @@ AGENT_LLM_BASE_URL=
 AGENT_LLM_API_KEY=
 ```
 
-A blank provider selects the deterministic fixture. This is the supported
-local and test configuration and requires no account, API key, network call,
-or provider SDK. A non-empty unregistered provider fails startup with a clear
-message instead of silently sending data somewhere unexpected.
+A fully blank configuration selects the labelled `fixture`. It requires no
+account, key or network and provides predetermined tool choices and concise
+text. It must never be described as a real model call.
 
-When the team selects a provider:
+To use a compatible provider, create a repository-root `.env` (gitignored) and
+set all four values:
 
-1. Add one adapter implementing `AgentTextAdapter` in `app/api/src/agents`.
-2. Keep the two task-specific methods and return types unchanged.
-3. Build messages from the versioned prompt builders and request strict
-   structured output.
-4. Validate every provider response before returning it to the coordinator.
-5. Register the chosen lowercase provider name in `createAgentTextAdapter`.
-6. Install only that provider's required dependency, if any.
-7. Set the provider/model/base URL/key locally; never commit the real key.
-8. Add tests for malformed output, timeout/error handling, secret-safe logs,
-   and both prompt contracts before enabling the adapter outside development.
+```dotenv
+AGENT_LLM_PROVIDER=openai-compatible
+AGENT_LLM_MODEL=your-model-name
+AGENT_LLM_BASE_URL=https://your-provider.example/v1
+AGENT_LLM_API_KEY=your-local-secret
+```
+
+The base URL must expose `POST /chat/completions` with OpenAI-compatible
+messages and JSON response format. Native server-side `fetch` is used, so no
+provider SDK is required. The key never enters browser bundles, events, replay
+frames or committed files.
+
+All four values must be blank or all four must be present. Partial
+configuration, an unsupported provider name, timeout, non-2xx response,
+missing content, invalid JSON or schema-invalid output produces a clear failure
+and no unchecked action. Restart `npm run dev` after changing `.env`.
 
 Changing provider must not change Product API payloads, deterministic business
 rules, human approvals, or fixture-mode behaviour.
+
+## Connected simulation decision context
+
+The role prompt contains the synthetic participant's role, display name,
+island, current simulated date, fixed allow-list and a compact role-safe
+snapshot: owned batch/ATP state for a farmer, active supply and own orders for a
+buyer, owned vehicles and visible missions for a transporter, or permitted
+tasks/approvals/exceptions for a coordinator. Operational payload values remain
+constructed by deterministic code from that actor's visible Product API state.
+Those compact snapshots are loaded through the same permission-aware query
+routes as the website, not by reading Product tables from the simulation
+coordinator. A role decision is cached at most once per actor per simulated day,
+even though physical and Product events are interleaved more frequently.
+The response is exactly:
+
+```json
+{
+  "toolNames": ["place_order"],
+  "summary": "Place the currently observable demand through the normal order workflow."
+}
+```
+
+Allowed tools are farmer observation/listing/approval; buyer demand/order/
+approval/acceptance; transporter mission/progress/exception; and coordinator
+verification/approval. Unknown tools are rejected before any API call. Short
+summaries may be shown in the control room; private chain-of-thought is never
+requested or stored.
+
+Synthetic approvals are labelled `SYNTHETIC_PARTICIPANT` in replay actions.
+That proves the run crossed the same stored approval boundary; it does not turn
+an AI decision into authorisation for a real commitment.

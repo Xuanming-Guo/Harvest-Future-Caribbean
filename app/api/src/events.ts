@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import type { Prisma, Provenance } from "@prisma/client";
 
+import { currentSimulationTime } from "./clock.js";
+
 export interface EventInput {
   eventType: string;
   actorId: string;
@@ -21,7 +23,7 @@ export async function recordEvent(client: Prisma.TransactionClient, input: Event
       id: randomUUID(),
       eventType: input.eventType,
       occurredAt: new Date(),
-      simulationTime: input.simulationTime ?? null,
+      simulationTime: input.simulationTime ?? currentSimulationTime(),
       simulationRunId: input.simulationRunId ?? null,
       actorId: input.actorId,
       entityId: input.entityId,

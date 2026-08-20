@@ -10,6 +10,14 @@ Hidden simulation truth is never a payload field. Simulation-originated events
 contain only facts that actors or the Harvest system could observe at that
 simulation time.
 
+During a synchronous connected run, the in-process adapter consumes the same
+ordered event records that SSE would expose. `ALLOCATION_APPROVED`,
+`DELIVERY_MISSION_ACCEPTED`, `RECOVERY_APPROVED` and `DELIVERY_ACCEPTED` alter
+only future physical commitments, schedules or outcomes. Delivery updates that
+were themselves caused by a physical departure/arrival are consumed as echoes
+and never advance the engine twice. Product UUIDs are dedupe/correlation keys,
+not seeded physical-world identifiers.
+
 The schema's `x-harvest-event-examples` extension contains one complete,
 schema-validated envelope for every event type below.
 

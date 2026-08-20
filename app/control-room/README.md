@@ -9,33 +9,56 @@ which is a role-facing product interface rather than an operations console.
 npm run control-room          # from the repository root
 ```
 
-Then open <http://localhost:3002>. Nothing else needs to be running — no
-database, no Product API.
+Keep the root `npm run dev` process running, then open <http://localhost:3002>.
+The control room uses the Product API on `3001` and PostgreSQL to create and
+load saved runs.
 
-## Why the simulation runs in the browser
+## Saved API runs and local playback
 
-The engine is pure TypeScript with no Node dependencies, so the control room
-runs it directly and replays the recorded frames. That is a deliberate choice
-rather than a shortcut:
+The control room never creates authoritative simulation state in the browser.
+Selecting **Run simulation** calls the Product API, which completes and stores
+the run before returning. The browser then loads the saved observable timeline
+and handles play, pause, speed, rewind, scrub and reset locally:
 
-- **A full run costs a few milliseconds.** A network round trip to a simulation
-  service would be slower than the computation it was avoiding.
-- **Scrubbing backwards is a requirement.** Issue #5 asks for play, pause,
-  speed and reset. A live engine cannot run in reverse; a recorded timeline can
-  be indexed in either direction.
-- **Changing seed, policy or injected disruption is instantaneous**, which is
-  what makes the baseline-versus-Harvest comparison something you can
-  demonstrate rather than describe.
+- replay never repeats Product API actions or LLM calls;
+- saved runs can be selected and replayed instantly;
+- injecting a disruption creates a new derived run and preserves the source;
+- Harvest agent actions and adapter provenance appear in purple in the feed;
+- selecting a purple action opens its role, tool, status, approval class and
+  safe trace/event references in the Inspector;
+- a mapped participant can be opened in the normal website, read-only.
 
-`src/lib/run.ts` is the seam. Issue #29 now provides saved-run and timeline
-endpoints on the Product API; issue #30 will make `buildTimeline` call those
-endpoints without changing the playback components above it.
+The scenario selector is populated by `GET /v1/simulation-scenarios`; Saint
+Lucia is currently the only option, so the UI is ready for later scenarios
+without pretending regional expansion is already implemented.
+
+### Reading the outcome cards
+
+Harvest and baseline cards intentionally use different, clearly labelled
+sources because only Harvest participants use the Product API:
+
+- **Harvest product outcomes** come from the same run-scoped Product API
+  records shown in participant workspaces: orders, approved commitments,
+  completed missions and delivery acceptances.
+- **Fragmented baseline outcomes** come from the physical simulation engine.
+  Baseline actors do not call Harvest, so an empty Product API scope is the
+  comparison boundary rather than missing data.
+
+Engine frames still drive both policies' crops, weather, roads, spoilage and
+disruptions. In connected Harvest runs, Product events schedule later physical
+commitments/routes and the actual engine pickup quantity is sent back through
+the Product delivery workflow. A final `RUN_SETTLED` frame at the scenario horizon makes the last
+playback position agree with the stored result. These figures demonstrate a
+synthetic end-to-end software workflow; they are not deployed impact.
+
+`src/lib/run.ts` is the generated-client seam for run creation, saved-run
+listing, timeline loading, derived disruptions and participant sessions.
 
 The issue #29 backend can be tested independently using
 [`docs/simulation_api_local_testing.md`](../../docs/simulation_api_local_testing.md).
-Until issue #30 lands, an empty run-scoped operational snapshot and an idle
-run-scoped SSE stream are expected because simulated participants are not yet
-calling the Product API.
+Harvest runs contain run-scoped participant actors, crops, marketplace work,
+orders, approvals, missions, events and safe traces. Baseline runs remain
+engine-only and deliberately do not create those Product API records.
 
 ## Event injection
 
@@ -47,6 +70,26 @@ including the period before the disruption — remains scrubbable.
 Severity is deliberately not adjustable. It is hidden simulation truth, and
 letting whoever is driving the demo choose how bad a storm is would let them
 dial the outcome. The engine draws it from a seeded stream instead.
+
+The four control-room choices have deterministic physical meanings:
+
+- a road closure postpones overlapping missions that collect from farms on
+  that road;
+- a vehicle breakdown postpones overlapping missions assigned to that vehicle;
+- a storm adds seeded travel delay and accelerates spoilage while it is active;
+- crop damage removes a seeded, capped share of the remaining unharvested crop
+  at the selected farm.
+
+These rules do not guarantee that a headline total changes. A closure that
+misses every relevant route, or crop damage after the crop has already been
+harvested, is an honest no-effect event. For a derived run, the panel compares
+the final judge-visible totals with its immediate source run and says explicitly
+when none changed. Product API exceptions are created only for delivery
+missions whose physical schedule the engine actually changed.
+
+An injection is scheduled one simulated hour after the current playhead. At or
+too close to the final horizon the button is disabled and asks the viewer to
+rewind; the API independently rejects an event starting exactly at the horizon.
 
 ## The globe
 

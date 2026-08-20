@@ -40,6 +40,13 @@ See [`app/api/README.md`](app/api/README.md) and
 details. The copy-ready saved-run API checks and their expected seed-42 values
 are in [`docs/simulation_api_local_testing.md`](docs/simulation_api_local_testing.md).
 
+On Windows, the clickable shortcuts in [`launchers/`](launchers/) provide the
+same local startup without typing npm commands. Choose Farmer, Buyer,
+Transporter or Coordinator to start the stack when necessary and open that
+role directly. The Simulation Control Room shortcut additionally starts and
+opens port `3002`. Docker Desktop must already be running; see the
+[`launcher instructions`](launchers/README.md) for prerequisites and shutdown.
+
 The website on `3000` is only the real-user product interface. The separate
 simulation control room lives on port `3002` and is started on its own:
 
@@ -47,12 +54,13 @@ simulation control room lives on port `3002` and is started on its own:
 npm run control-room
 ```
 
-It needs no database and no Product API — it runs the simulation in the browser
-and replays the result. Issue #29 has added saved-run Product API endpoints for
-issue #30 to connect to this interface. See
-[`app/control-room/README.md`](app/control-room/README.md) for the current UI and
+Keep `npm run dev` running when using it: the control room authenticates as the
+local operations persona, creates or loads saved runs through the Product API,
+and replays their immutable frames. Harvest-mode simulated participants use the
+same Product API workflows as the website. See
+[`app/control-room/README.md`](app/control-room/README.md) for the UI and
 [`docs/simulation_api_local_testing.md`](docs/simulation_api_local_testing.md)
-for the API foundation that will replace its browser-run seam.
+for copy-ready API checks.
 
 To run a scenario headlessly instead, without any interface:
 

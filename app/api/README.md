@@ -1,7 +1,7 @@
 # Harvest Product API
 
 The Product API is the single operational backend for the Next.js website and
-future Harvest-mode simulated actors. It runs on Fastify and owns
+Harvest-mode simulated actors. It runs on Fastify and owns
 PostgreSQL state; clients never query the database directly.
 
 ## Local start
@@ -74,21 +74,27 @@ the corresponding event transactionally. Every POST requires
 contract-valid prediction evidence. A later model issue can replace it with an
 HTTP adapter without changing website payloads.
 
-Agent text assistance is separately provider-neutral. Leave
+Agent and simulation text assistance is provider-neutral. Leave
 `AGENT_LLM_PROVIDER`, `AGENT_LLM_MODEL`, `AGENT_LLM_BASE_URL`, and
-`AGENT_LLM_API_KEY` blank to use the deterministic fixture. No live provider
-SDK is installed. Provider selection and adapter instructions are in
+`AGENT_LLM_API_KEY` blank to use the labelled fixture. Set all four and use
+`AGENT_LLM_PROVIDER=openai-compatible` to call a compatible chat-completions
+endpoint through native `fetch`; partial configuration fails clearly. No live
+provider SDK is installed. Instructions are in
 [`../../docs/agent_workflows.md`](../../docs/agent_workflows.md).
 
-Issue #29 serves deterministic saved runs, disruption-derived runs, immutable
+The API serves saved runs, disruption-derived runs, immutable
 timelines and frames, paired comparisons, run-scoped operations snapshots, and
 cursor-based SSE from this Fastify service. It imports the TypeScript simulation
 package directly; there is no Docker container, Python service, run-command
 endpoint, internal ingestion endpoint, or port `8001`.
 
-`LLM_ASSISTED` remains an explicit reserved decision mode. It returns a clear
-conflict until issue #30 provides the simulated-agent decision cycle and a text
-provider is configured; it never silently falls back to deterministic mode.
+Harvest-mode runs bootstrap synthetic participants and use their normal Product
+API endpoints after relevant physical events in a stable interleaved cycle.
+Approved allocations create future physical commitments, accepted missions
+schedule physical routes, and recorded physical pickup quantities determine the
+later Product delivery outcome. `LLM_ASSISTED` uses either the labelled
+fixture or a completely configured compatible provider to select from a strict
+role tool allow-list; Product API validation remains authoritative.
 
 The canonical wire contract is [`../../contracts/openapi.yaml`](../../contracts/openapi.yaml),
 with behaviour and deterministic effects in
@@ -100,6 +106,8 @@ The P0 API includes privacy-safe listing evidence and market opportunities,
 profile-backed buyer delivery defaults, transporter-owned vehicles, explicit
 coordinator verification tasks, aggregated order details, chronological
 mission updates, concrete exception recovery proposals, and per-crop delivery
-outcomes. Normal records use a null run scope. Future simulated participants
+outcomes. Normal records use a null run scope. Simulated participants
 inherit `simulationRunId` from authentication, and all created operational
 records and events retain that scope so real data and separate runs cannot mix.
+After completion, short-lived participant sessions expose the same pages
+read-only and the API rejects every attempted mutation.

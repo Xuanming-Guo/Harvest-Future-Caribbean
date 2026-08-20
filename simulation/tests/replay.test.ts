@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { runScenario } from '../src/engine.js';
+import { SimulationEngine, runScenario, type InjectedDisruption } from '../src/engine.js';
 import { assertNoTruthLeak } from '../src/world/observable.js';
 import { frameAt, interpolateAlongPath, missionPositionAt, type ControlRoomMission } from '../src/replay.js';
 import { saintLuciaDemoV1 } from '../src/scenario/saint-lucia-demo-v1.js';
@@ -20,14 +20,18 @@ describe('replay capture', () => {
     expect(result.timeline).toBeUndefined();
   });
 
-  it('records a frame per event, in non-decreasing time order', () => {
+  it('records every event plus a settled horizon frame, in non-decreasing time order', () => {
     const result = runScenario({ scenarioId: SCENARIO, policy: 'HARVEST', seed: 8675309, captureFrames: true });
     const timeline = result.timeline;
     expect(timeline).toBeDefined();
     if (!timeline) return;
 
-    expect(timeline.frames.length).toBe(result.metrics.eventsProcessed);
+    expect(timeline.frames.length).toBe(result.metrics.eventsProcessed + 1);
     expect(timeline.frames.length).toBeGreaterThan(20);
+    expect(timeline.frames.at(-1)).toMatchObject({
+      at: timeline.scene.endsAt,
+      eventType: 'RUN_SETTLED',
+    });
 
     for (let index = 1; index < timeline.frames.length; index += 1) {
       const previous = timeline.frames[index - 1];
@@ -95,6 +99,23 @@ describe('replay capture', () => {
 });
 
 describe('injected disruptions', () => {
+  function execute(injection: InjectedDisruption) {
+    const engine = new SimulationEngine({
+      scenarioId: SCENARIO,
+      policy: 'HARVEST',
+      seed: 500,
+      captureFrames: true,
+      injectedDisruptions: [injection],
+    });
+    return { engine, result: engine.run() };
+  }
+
+  function disruptionId(result: ReturnType<SimulationEngine['run']>, description: string) {
+    return result.timeline?.frames
+      .flatMap((frame) => frame.disruptions)
+      .find((disruption) => disruption.description === description)?.eventId;
+  }
+
   it('adds an injected disruption to the run', () => {
     const base = runScenario({ scenarioId: SCENARIO, policy: 'HARVEST', seed: 500 });
     const injected = runScenario({
@@ -129,6 +150,93 @@ describe('injected disruptions', () => {
     const b = runScenario({ scenarioId: SCENARIO, policy: 'HARVEST', seed: 61, injectedDisruptions: injection });
 
     expect(b.digest).toBe(a.digest);
+  });
+
+  it('delays only missions that use an affected road', () => {
+    const probe = new SimulationEngine({ scenarioId: SCENARIO, policy: 'HARVEST', seed: 500 });
+    const allRoads = probe.controlRoomScene.roads.map((road) => road.roadSegmentId);
+    const description = 'Every farm road is closed for this test.';
+    const affected = execute({
+      type: 'ROAD',
+      offsetMs: 0,
+      durationMs: 21 * DAY_MS,
+      affectedEntityIds: allRoads,
+      publicDescription: description,
+    });
+    const affectedDisruptionId = disruptionId(affected.result, description);
+    expect(affectedDisruptionId).toBeDefined();
+    expect(affected.engine.observedDisruptionMissionImpacts.some((impact) =>
+      impact.disruptionId === affectedDisruptionId)).toBe(true);
+
+    const unrelatedDescription = 'A road outside every route is closed.';
+    const unrelated = execute({
+      type: 'ROAD',
+      offsetMs: 0,
+      durationMs: 21 * DAY_MS,
+      affectedEntityIds: ['not-a-scenario-road'],
+      publicDescription: unrelatedDescription,
+    });
+    const unrelatedDisruptionId = disruptionId(unrelated.result, unrelatedDescription);
+    expect(unrelated.engine.observedDisruptionMissionImpacts.some((impact) =>
+      impact.disruptionId === unrelatedDisruptionId)).toBe(false);
+  });
+
+  it('limits a vehicle breakdown to the affected fleet', () => {
+    const probe = new SimulationEngine({ scenarioId: SCENARIO, policy: 'HARVEST', seed: 500 });
+    const description = 'The full test fleet is unavailable.';
+    const affected = execute({
+      type: 'VEHICLE',
+      offsetMs: 0,
+      durationMs: 21 * DAY_MS,
+      affectedEntityIds: probe.controlRoomScene.transporters.map((item) => item.transporterId),
+      publicDescription: description,
+    });
+    const affectedDisruptionId = disruptionId(affected.result, description);
+    expect(affected.engine.observedDisruptionMissionImpacts.some((impact) =>
+      impact.disruptionId === affectedDisruptionId)).toBe(true);
+
+    const unrelatedDescription = 'An unrelated vehicle is unavailable.';
+    const unrelated = execute({
+      type: 'VEHICLE',
+      offsetMs: 0,
+      durationMs: 21 * DAY_MS,
+      affectedEntityIds: ['not-a-scenario-vehicle'],
+      publicDescription: unrelatedDescription,
+    });
+    const unrelatedDisruptionId = disruptionId(unrelated.result, unrelatedDescription);
+    expect(unrelated.engine.observedDisruptionMissionImpacts.some((impact) =>
+      impact.disruptionId === unrelatedDisruptionId)).toBe(false);
+  });
+
+  it('makes storms slow overlapping missions and accelerate spoilage', () => {
+    const base = runScenario({ scenarioId: SCENARIO, policy: 'HARVEST', seed: 500 });
+    const description = 'A full-horizon test storm.';
+    const storm = execute({
+      type: 'WEATHER',
+      offsetMs: 0,
+      durationMs: 21 * DAY_MS,
+      affectedEntityIds: ['saint-lucia'],
+      publicDescription: description,
+    });
+    const stormId = disruptionId(storm.result, description);
+
+    expect(storm.engine.observedDisruptionMissionImpacts.some((impact) => impact.disruptionId === stormId)).toBe(true);
+    expect(storm.result.metrics.wasteQuantity.value).toBeGreaterThan(base.metrics.wasteQuantity.value);
+  });
+
+  it('damages only remaining crops at the affected farms', () => {
+    const base = runScenario({ scenarioId: SCENARIO, policy: 'HARVEST', seed: 500 });
+    const probe = new SimulationEngine({ scenarioId: SCENARIO, policy: 'HARVEST', seed: 500 });
+    const damaged = execute({
+      type: 'CROP',
+      offsetMs: 0,
+      durationMs: DAY_MS,
+      affectedEntityIds: probe.controlRoomScene.farms.map((farm) => farm.farmId),
+      publicDescription: 'All test farms report crop damage.',
+    });
+
+    expect(damaged.result.metrics.wasteQuantity.value).toBeGreaterThan(base.metrics.wasteQuantity.value);
+    expect(damaged.engine.observedDisruptionMissionImpacts).toEqual([]);
   });
 
   it('ignores an injection scheduled past the horizon', () => {

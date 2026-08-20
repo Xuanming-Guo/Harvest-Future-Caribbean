@@ -30,6 +30,11 @@ twenty-one-day run takes a few milliseconds.
 | `src/policy/` | `baseline` and `harvest` coordination policies |
 | `src/engine.ts` | Clock, handlers, validation, metrics |
 
+`SimulationEngine` also exposes `start`, `advanceTo`, `applyProductEffect`,
+`checkpoint` and `finish` for connected saved runs. Normal `run()` delegates to
+the same stepping implementation, so headless and baseline behaviour do not
+fork into a second engine.
+
 ### Determinism
 
 Reproducibility is an acceptance criterion, not a nicety, so the package is
@@ -57,6 +62,16 @@ on the object it received. `assertNoTruthLeak` backs this at runtime for
 dynamically assembled payloads.
 
 A policy's advantage must come from coordination, never from foresight.
+
+### Disruption effects
+
+Injected disruptions follow the same physical rules as scenario disruptions.
+Road closures and vehicle breakdowns postpone only overlapping, matching
+missions; storms add seeded travel delay and increase active spoilage; crop
+incidents remove a seeded, capped portion of affected unharvested crops. The
+engine records only the safe disruption-to-mission causal link for the Product
+API bridge, never hidden severity. An event may correctly leave final totals
+unchanged when it does not intersect relevant activity.
 
 ## Honest status of the baseline-versus-Harvest comparison
 
@@ -86,6 +101,23 @@ Two causes have been identified so far, both worth addressing in #11:
 
 Neither is a defect in the engine; both are policy and scheduling questions the
 benchmark issue should answer with repeated seeds and reported distributions.
+
+## Control-room outcome boundary
+
+The engine remains authoritative for the simulated physical world: crop
+observations, weather, roads, spoilage, disruptions and the isolated baseline
+policy. After outstanding physical demand is settled, it records a final
+`RUN_SETTLED` frame at the exact scenario horizon.
+
+For a connected Harvest run, operational headline figures do not come from
+the engine's older policy counters. The internal Harvest coordination policy is
+disabled. Simulated participants call the normal Product API, and approved
+allocations and mission acceptance schedule future engine commitments, pickup
+and arrival. The engine decides what is physically ready and loaded; that
+quantity is returned through transporter progress and buyer acceptance. The
+Product API's run-scoped orders, allocations, missions and delivery acceptances
+determine the Harvest outcome cards. This proves the real product workflow ran
+without pretending the current policy already beats the baseline.
 
 ## Evidence status
 
@@ -120,11 +152,13 @@ Communication with the Product API follows [`contracts/`](../contracts/).
 ## Integration guide
 
 Use [`docs/api_info.md`](../docs/api_info.md) for the public operations used by
-future Harvest-mode simulated actors, saved-run/control-room operations, SSE
+Harvest-mode simulated actors, saved-run/control-room operations, SSE
 replay rules, and deterministic effects. Fastify imports this package directly;
-there is no separate simulation HTTP service or port. Event consumers must
-deduplicate UUID event IDs, persist the monotonic `Last-Event-ID` cursor,
-schedule future effects, and never expose or rewrite hidden truth.
+there is no separate simulation HTTP service or port. Event consumers
+deduplicate UUID event IDs, apply monotonic cursors, suppress physical-action
+echoes, schedule only future effects, and never expose or rewrite hidden truth.
+Product UUIDs stay outside deterministic physical world identity; commitments
+and missions use the seeded engine ID stream.
 
 For a complete localhost Product API walkthrough, including the exact expected
 seed-42 replay and paired-run values, use

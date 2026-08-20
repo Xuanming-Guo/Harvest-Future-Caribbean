@@ -22,13 +22,14 @@
  */
 
 import { useMemo } from "react";
-import type { ControlRoomBatch, ControlRoomDemand, ControlRoomFrame, ControlRoomMission, ControlRoomScene } from "@harvest/simulation";
+import type { ControlRoomBatch, ControlRoomDemand, ControlRoomFrame, ControlRoomMission, ControlRoomScene, SimulationAgentAction } from "@harvest/simulation";
 import { describeEvent, isAlertEvent, isNotableEvent } from "@/lib/run";
 
 export interface EventFeedProps {
   scene: ControlRoomScene;
   frames: ControlRoomFrame[];
   onSelect: (id: string | null) => void;
+  onSelectAction: (action: SimulationAgentAction) => void;
   maxItems?: number;
 }
 
@@ -221,7 +222,7 @@ function describeFrame(frame: ControlRoomFrame, previous: ControlRoomFrame | und
   return { text: describeEvent(frame.eventType), entityId: null };
 }
 
-export default function EventFeed({ scene, frames, onSelect, maxItems = 40 }: EventFeedProps): React.JSX.Element {
+export default function EventFeed({ scene, frames, onSelect, onSelectAction, maxItems = 40 }: EventFeedProps): React.JSX.Element {
   const names = useMemo(() => buildNameLookup(scene), [scene]);
 
   const notable: Array<{ frame: ControlRoomFrame; previous: ControlRoomFrame | undefined }> = [];
@@ -230,7 +231,20 @@ export default function EventFeed({ scene, frames, onSelect, maxItems = 40 }: Ev
     if (isNotableEvent(frame.eventType)) notable.push({ frame, previous: frames[index - 1] });
   }
 
-  const items = notable.slice(-maxItems).reverse();
+  const physicalItems = notable.map(({ frame, previous }) => ({
+    kind: "physical" as const,
+    at: frame.atMs,
+    frame,
+    previous,
+  }));
+  const agentItems = frames.flatMap((frame) => (frame.agentActions ?? []).map((action) => ({
+    kind: "agent" as const,
+    at: Date.parse(action.at),
+    action,
+  })));
+  const items = [...physicalItems, ...agentItems]
+    .sort((left, right) => right.at - left.at)
+    .slice(0, maxItems);
 
   if (items.length === 0) {
     return <p className="empty-state">Nothing notable has happened yet.</p>;
@@ -238,7 +252,25 @@ export default function EventFeed({ scene, frames, onSelect, maxItems = 40 }: Ev
 
   return (
     <div className="feed">
-      {items.map(({ frame, previous }) => {
+      {items.map((item) => {
+        if (item.kind === "agent") {
+          const participant = scene.participants.find((candidate) => candidate.simulationActorId === item.action.simulationActorId);
+          return (
+            <button
+              key={item.action.actionId}
+              type="button"
+              className={`feed-item is-agent${item.action.status === "REJECTED" ? " is-alert" : ""}`}
+              onClick={() => onSelectAction(item.action)}
+            >
+              <span className="feed-time">{formatTime(item.at)}</span>
+              <span>
+                <span className="feed-kind">{participant?.displayName ?? item.action.role} · {item.action.adapter}</span>
+                <span className="feed-text">{item.action.summary}</span>
+              </span>
+            </button>
+          );
+        }
+        const { frame, previous } = item;
         const entry = describeFrame(frame, previous, names);
         const alert = isAlertEvent(frame.eventType);
         const decided = frame.newDecisions.length > 0;

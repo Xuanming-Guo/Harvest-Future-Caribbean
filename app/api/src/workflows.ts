@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { Prisma, Provenance } from "@prisma/client";
 
+import { operationNow } from "./clock.js";
 import { prisma } from "./db.js";
 import { recordEvent } from "./events.js";
 import { httpError } from "./http.js";
@@ -78,7 +79,7 @@ async function buildDeliveryRoute(
   }
   if (pickups.length) distanceKm += haversineKm(pickups[pickups.length - 1].location, buyer);
   const durationMinutes = Math.ceil(distanceKm / 30 * 60 + pickups.length * 15);
-  const estimatedArrival = new Date(Date.now() + durationMinutes * 60_000);
+  const estimatedArrival = new Date(operationNow().getTime() + durationMinutes * 60_000);
   const stops = [
     ...pickups.map((pickup, index) => ({
       sequence: index + 1,
@@ -124,7 +125,7 @@ export async function produceFixturePrediction(
   const q90 = Math.max(q50, estimate + Math.round(estimate * 0.1));
   const predictionId = randomUUID();
   const requestId = randomUUID();
-  const generatedAt = new Date();
+  const generatedAt = operationNow();
   const start = new Date(generatedAt);
   start.setUTCDate(start.getUTCDate() + 1);
   const end = new Date(start);
@@ -225,7 +226,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
       cropType: order.cropType,
       status: "ACTIVE",
       availableFrom: { lte: order.neededBy },
-      availableUntil: { gte: new Date() },
+      availableUntil: { gte: operationNow() },
       simulationRunId: order.simulationRunId,
       ...(requestedIds.length ? { id: { in: requestedIds } } : {}),
     },
@@ -259,7 +260,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
       await tx.traceStep.create({
         data: {
           traceId,
-          recordedAt: new Date(),
+          recordedAt: operationNow(),
           kind: "EVIDENCE",
           agentName: "Market Balance Agent",
           toolName: "read-safe-supply",
@@ -289,7 +290,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
         subjectId: allocationId,
         requestedFromActorId,
         status: "PENDING",
-        requestedAt: new Date(),
+        requestedAt: operationNow(),
         simulationRunId: order.simulationRunId,
       })),
     });
@@ -301,7 +302,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
     await tx.traceStep.create({
       data: {
         traceId,
-        recordedAt: new Date(),
+        recordedAt: operationNow(),
         kind: "EVIDENCE",
         agentName: "Market Balance Agent",
         toolName: "read-safe-supply",
@@ -313,7 +314,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
     await tx.traceStep.create({
       data: {
         traceId,
-        recordedAt: new Date(),
+        recordedAt: operationNow(),
         kind: "DECISION",
         agentName: "Matching Agent",
         toolName: "propose-allocation",
@@ -326,7 +327,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
     await tx.traceStep.create({
       data: {
         traceId,
-        recordedAt: new Date(),
+        recordedAt: operationNow(),
         kind: "APPROVAL",
         agentName: "Commitment Agent",
         toolName: "request-human-approval",
@@ -376,7 +377,7 @@ export async function approveAllocation(
         throw httpError(409, "STALE_APPROVAL", "The order is no longer awaiting this approval.");
       }
       const lines = await tx.allocationLine.findMany({ where: { allocationId: allocation.id } });
-      const decidedAt = new Date();
+      const decidedAt = operationNow();
       const updatedApproval = await tx.approval.update({
         where: { id: approvalId },
         data: { status: "APPROVED", decidedBy: actorId, decidedAt, reason },
@@ -539,7 +540,7 @@ async function approveRecovery(
   if (Number.isNaN(proposedDeadline.valueOf())) throw httpError(409, "RECOVERY_INVALID", "The stored recovery deadline is invalid.");
   const mission = await tx.deliveryMission.findUnique({ where: { id: changes.missionId } });
   if (!mission || ["DELIVERED", "CANCELLED"].includes(mission.status)) throw httpError(409, "STALE_APPROVAL", "The delivery mission can no longer be rescheduled.");
-  const decidedAt = new Date();
+  const decidedAt = operationNow();
   await tx.approval.update({ where: { id: approval.id }, data: { status: "APPROVED", decidedBy: actorId, decidedAt, reason } });
   await tx.deliveryMission.update({ where: { id: mission.id }, data: { deadline: proposedDeadline } });
   await tx.operationalException.update({ where: { id: exception.id }, data: { status: "RESOLVED" } });
@@ -588,7 +589,7 @@ export async function rejectApproval(approvalId: string, actorId: string, reason
     if (!approval) throw httpError(404, "APPROVAL_NOT_FOUND", "Approval was not found.");
     if (approval.status !== "PENDING") throw httpError(409, "APPROVAL_ALREADY_DECIDED", "This approval already has a final decision.");
     if (approval.requestedFromActorId !== actorId) throw httpError(403, "APPROVAL_FORBIDDEN", "This decision belongs to another participant.");
-    const decidedAt = new Date();
+    const decidedAt = operationNow();
     const updated = await tx.approval.update({ where: { id: approvalId }, data: { status: "REJECTED", decidedBy: actorId, decidedAt, reason } });
     if (approval.subjectType === "ALLOCATION") {
       const allocation = await tx.allocation.update({ where: { id: approval.subjectId }, data: { status: "REJECTED" } });

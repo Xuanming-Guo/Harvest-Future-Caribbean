@@ -1,13 +1,18 @@
 import { render, screen } from "@testing-library/react";
 import React from "react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Badge } from "@/components/ui";
-import { roleHome } from "@/lib/api";
+import { consumeDevelopmentPersona, currentActor, developmentPersonaFromHash, roleHome } from "@/lib/api";
 import { compactId, formatPercent, titleCase } from "@/lib/format";
 import { clearOnboardingStatus, readOnboardingStatus, roleTutorials, writeOnboardingStatus } from "@/lib/onboarding";
 
-beforeEach(() => window.localStorage.clear());
+beforeEach(() => {
+  window.localStorage.clear();
+  window.history.replaceState(null, "", "/");
+});
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("website presentation helpers", () => {
   it("formats contract statuses without changing their value", () => {
@@ -26,6 +31,51 @@ describe("website presentation helpers", () => {
     expect(roleHome("BUYER")).toBe("/buyer");
     expect(roleHome("TRANSPORTER")).toBe("/transporter");
     expect(roleHome("COORDINATOR")).toBe("/coordinator");
+  });
+
+  it("accepts only the four seeded website launcher personas", () => {
+    expect(developmentPersonaFromHash("#harvest_demo_persona=farmer-ana")).toBe("farmer-ana");
+    expect(developmentPersonaFromHash("#harvest_demo_persona=buyer-hotel")).toBe("buyer-hotel");
+    expect(developmentPersonaFromHash("#harvest_demo_persona=transporter-daniel")).toBe("transporter-daniel");
+    expect(developmentPersonaFromHash("#harvest_demo_persona=coordinator-maya")).toBe("coordinator-maya");
+    expect(developmentPersonaFromHash("#harvest_demo_persona=operations-demo")).toBeNull();
+    expect(developmentPersonaFromHash("#harvest_demo_persona=unknown-person")).toBeNull();
+  });
+
+  it("consumes a launcher persona, removes it from the URL and stores the normal session", async () => {
+    const actor = {
+      actorId: "actor-farmer-ana",
+      authSubject: "farmer-ana",
+      name: "Ana Joseph",
+      role: "FARMER" as const,
+      synthetic: true,
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ accessToken: "local-demo-token", actor }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState(null, "", "/#harvest_demo_persona=farmer-ana");
+
+    await expect(consumeDevelopmentPersona()).resolves.toEqual(actor);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3001/dev/session",
+      expect.objectContaining({ body: JSON.stringify({ persona: "farmer-ana" }) }),
+    );
+    expect(window.location.hash).toBe("");
+    expect(currentActor()).toEqual(actor);
+  });
+
+  it("removes an invalid launcher persona without calling development authentication", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    window.localStorage.setItem("harvest.actor", JSON.stringify({ role: "BUYER" }));
+    window.history.replaceState(null, "", "/#harvest_demo_persona=operations-demo");
+
+    await expect(consumeDevelopmentPersona()).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe("");
+    expect(currentActor()).toBeNull();
   });
 
   it("stores the tutorial choice separately for each signed-in identity", () => {

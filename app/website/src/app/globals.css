@@ -21,6 +21,12 @@ html, body { min-height: 100%; }
 body { margin: 0; color: var(--ink); background: var(--cream); font-family: "DM Sans", sans-serif; }
 button, input, select, textarea { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
+.workspace-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.simulation-replay-banner { padding: 9px 20px; color: #fff; background: #6f3fa0; font-size: 12px; font-weight: 800; letter-spacing: .03em; text-align: center; }
+.workspace-fieldset:disabled button,
+.workspace-fieldset:disabled input,
+.workspace-fieldset:disabled select,
+.workspace-fieldset:disabled textarea { cursor: not-allowed; }
 a { color: inherit; text-decoration: none; }
 h1, h2, h3, p { margin-top: 0; }
 h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }

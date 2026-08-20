@@ -1,3 +1,9 @@
+try {
+  process.loadEnvFile(new URL("../../../.env", import.meta.url));
+} catch (error) {
+  if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
+}
+
 export const config = {
   port: Number(process.env.PRODUCT_API_PORT ?? 3001),
   host: process.env.PRODUCT_API_HOST ?? "0.0.0.0",
@@ -5,6 +11,7 @@ export const config = {
     process.env.DATABASE_URL ??
     "postgresql://harvest:harvest-local-only@localhost:5432/harvest?schema=public",
   websiteOrigin: process.env.WEBSITE_ORIGIN ?? "http://localhost:3000",
+  controlRoomOrigin: process.env.CONTROL_ROOM_ORIGIN ?? "http://localhost:3002",
   devJwtSecret:
     process.env.DEV_JWT_SECRET ?? "harvest-local-development-secret-change-me",
   supabaseJwksUrl: process.env.SUPABASE_JWKS_URL,

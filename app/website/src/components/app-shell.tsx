@@ -100,6 +100,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
       <div className="main-column">
+        {actor.readOnly && (
+          <div className="simulation-replay-banner" role="status">
+            Synthetic simulation replay · read-only · run {actor.simulationRunId?.slice(0, 8)}
+          </div>
+        )}
         <header className="topbar">
           <button className="icon-button mobile-menu" onClick={() => setOpen((value) => !value)} aria-label="Toggle navigation">
             {open ? <X /> : <Menu />}
@@ -112,9 +117,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <LogOut size={17} />Sign out
           </button>
         </header>
-        <main>{children}</main>
+        <fieldset className="workspace-fieldset" disabled={Boolean(actor.readOnly)}><main>{children}</main></fieldset>
       </div>
-      <OnboardingGuide actor={actor} restartSignal={tutorialRequest} />
+      {!actor.readOnly && <OnboardingGuide actor={actor} restartSignal={tutorialRequest} />}
     </div>
   );
 }

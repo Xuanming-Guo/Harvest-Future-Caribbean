@@ -5,6 +5,8 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 import {
   clearDevelopmentSession,
+  consumeDevelopmentPersona,
+  consumeSimulationSession,
   createDevelopmentSession,
   currentActor,
   type SessionActor,
@@ -27,8 +29,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    setActor(currentActor());
-    setReady(true);
+    void (async () => {
+      try {
+        const launchedActor = await consumeDevelopmentPersona();
+        setActor(launchedActor ?? await consumeSimulationSession() ?? currentActor());
+      } finally {
+        setReady(true);
+      }
+    })();
   }, []);
 
   const value = useMemo<SessionContextValue>(() => ({
