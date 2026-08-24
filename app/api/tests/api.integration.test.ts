@@ -39,6 +39,20 @@ beforeAll(async () => {
 afterAll(async () => server.close());
 
 describe("participant Product API", () => {
+  it("accepts the loopback spelling used by the local control-room preview", async () => {
+    const response = await server.inject({
+      method: "OPTIONS",
+      url: "/dev/session",
+      headers: {
+        origin: "http://127.0.0.1:3002",
+        "access-control-request-method": "POST",
+      },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.headers["access-control-allow-origin"]).toBe("http://127.0.0.1:3002");
+  });
+
   it("scopes participant data and exposes the P0 read projections", async () => {
     const buyerSession = await signIn("buyer-hotel");
     expect(buyerSession.actor.serviceZone).toBe("Castries");

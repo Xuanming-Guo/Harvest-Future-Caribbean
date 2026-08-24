@@ -119,12 +119,23 @@ async function approvalContext(row: { subjectType: string; subjectId: string; re
   };
 }
 
+/** A browser may use either spelling for the same local development host. */
+function localOriginAliases(origin: string): string[] {
+  const url = new URL(origin);
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") return [url.origin];
+  return ["localhost", "127.0.0.1"].map((hostname) => `${url.protocol}//${hostname}${url.port ? `:${url.port}` : ""}`);
+}
+
 export async function buildServer() {
   const agentCoordinator = createAgentCoordinator();
   const server = Fastify({ logger: true, bodyLimit: 1_000_000 });
   registerOperationClock(server);
+  const allowedOrigins = [...new Set([
+    ...localOriginAliases(config.websiteOrigin),
+    ...localOriginAliases(config.controlRoomOrigin),
+  ])];
   await server.register(cors, {
-    origin: [config.websiteOrigin, config.controlRoomOrigin],
+    origin: allowedOrigins,
     allowedHeaders: ["Authorization", "Content-Type", "Idempotency-Key", "Last-Event-ID"],
     exposedHeaders: ["Content-Type"],
   });
