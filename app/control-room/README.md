@@ -27,6 +27,10 @@ and handles play, pause, speed, rewind, scrub and reset locally:
 
 - replay never repeats Product API actions or LLM calls;
 - saved runs can be selected and replayed instantly;
+- licensed public reference places appear as quieter category markers, with
+  labels only at close range and full provenance in the Inspector;
+- source and licence attribution remains visible whenever reference places are
+  present;
 - injecting a disruption creates a new derived run and preserves the source;
 - Harvest agent actions and adapter provenance appear in purple in the feed;
 - selecting a purple action opens its role, tool, status, approval class and
@@ -195,9 +199,11 @@ a long debugging detour once already.
 
 ## Evidence status
 
-Everything on screen is **synthetic**. The Saint Lucian geography is real and
-the satellite imagery is real, but every farm, buyer, order, yield and delivery
-is invented. The synthetic-simulation badge in the masthead is deliberately not
+Everything operational on screen is **synthetic**. Satellite imagery and the
+named OpenStreetMap reference places are public geographic context, but every
+farm, buyer, order, yield and delivery is invented. Selecting a reference shows
+its source, licence, retrieval metadata and the explicit statement that it is
+not a Harvest participant or customer. The synthetic-simulation badge in the masthead is deliberately not
 dismissible: a screenshot must not be able to separate a claim from its label.
 
 Nothing shown here is measured impact from a deployed system, and it must never

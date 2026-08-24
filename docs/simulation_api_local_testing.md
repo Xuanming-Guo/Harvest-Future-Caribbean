@@ -52,7 +52,7 @@ Expected important fields:
 ```text
 status          : ok
 service         : harvest-product-api
-contractVersion : 0.7.0
+contractVersion : 0.8.0
 ```
 
 ## 2. Create an operations session
@@ -202,6 +202,12 @@ $agentFrames = @($timeline.frames | Where-Object {
   MappedParticipants = @($timeline.scene.participants | Where-Object {
     $null -ne $_.productActorId
   }).Count
+  ReferencePlaces = $timeline.scene.referencePlaces.Count
+  ReferenceSources = $timeline.scene.referenceDataSources.Count
+  ReferencedActors = @(
+    $timeline.scene.farms + $timeline.scene.buyers + $timeline.scene.transporters |
+      Where-Object { $null -ne $_.referencePlaceId }
+  ).Count
   FramesWithAgentActions = $agentFrames.Count
   AgentActions = @($timeline.frames.agentActions).Count
 }
@@ -216,12 +222,22 @@ Buyers             3
 Transporters       2
 Participants       11
 MappedParticipants 11
+ReferencePlaces    13
+ReferenceSources    1
+ReferencedActors    4
 ```
 
 `FramesWithAgentActions` and `AgentActions` must be positive. The eleventh
 participant is the run-scoped coordinator. Each action includes role, tool,
 success/rejection, concise summary, adapter, event IDs and optional trace/entity
 IDs. It must not include prompts, secrets or chain-of-thought.
+
+The reference count is the licensed offline snapshot for the selected Saint
+Lucia scope. The linked actors remain generically named synthetic actors;
+their `referencePlaceId` provides nearby map context only. Open any reference
+marker in the control room and confirm its Inspector includes the feature URL,
+retrieval date, licence and the statement that it is not a Harvest participant
+or customer. `© OpenStreetMap contributors` must remain visible on the map.
 
 The last frame must have `eventType: RUN_SETTLED`, its `at` value must equal
 `scene.endsAt`, and every Harvest frame must carry an `operationsSnapshot`.

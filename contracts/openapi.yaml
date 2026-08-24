@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Harvest Product API
-  version: 0.7.0
+  version: 0.8.0
   description: >-
     Canonical operational API for real users, Harvest-mode simulated actors,
     the participant website, and the simulation control room. Operational
@@ -2036,10 +2036,42 @@ components:
         completedMissionCount: {type: integer, minimum: 0}
         activeMissionIds: {type: array, items: {type: string, format: uuid}}
         openExceptionIds: {type: array, items: {type: string, format: uuid}}
+    ReferencePlace:
+      type: object
+      additionalProperties: false
+      required: [referencePlaceId, islandId, name, category, position, sourceId, sourceFeatureId, sourceUrl, sourceRevision, retrievedAt, evidenceType, warnings]
+      properties:
+        referencePlaceId: {type: string, minLength: 1}
+        islandId: {type: string, minLength: 1}
+        name: {type: string, minLength: 1}
+        category: {enum: [AGRICULTURAL_AREA, HOTEL_RESORT, RESTAURANT, SUPERMARKET_MARKET, PORT_FERRY_TERMINAL]}
+        position: {$ref: './common.schema.json#/$defs/GeoPoint'}
+        sourceId: {type: string, minLength: 1}
+        sourceFeatureId: {type: string, minLength: 1}
+        sourceUrl: {type: string, format: uri}
+        sourceRevision: {type: string, minLength: 1}
+        retrievedAt: {type: string, format: date}
+        evidenceType: {enum: [PUBLIC_REFERENCE_POINT, PUBLIC_FEATURE_CENTROID, APPROXIMATE_PUBLIC_AREA_CENTROID]}
+        warnings: {type: array, items: {type: string, minLength: 1}}
+    ReferenceDataSource:
+      type: object
+      additionalProperties: false
+      required: [sourceId, title, publisher, sourceUrl, licenceName, licenceUrl, attribution, retrievedAt, revision, limitations]
+      properties:
+        sourceId: {type: string, minLength: 1}
+        title: {type: string, minLength: 1}
+        publisher: {type: string, minLength: 1}
+        sourceUrl: {type: string, format: uri}
+        licenceName: {type: string, minLength: 1}
+        licenceUrl: {type: string, format: uri}
+        attribution: {type: string, minLength: 1}
+        retrievedAt: {type: string, format: date}
+        revision: {type: string, minLength: 1}
+        limitations: {type: array, items: {type: string, minLength: 1}}
     ReplayScene:
       type: object
       additionalProperties: false
-      required: [runId, scenarioId, policy, seed, startsAt, endsAt, farms, buyers, transporters, roads, participants, evidenceLabel]
+      required: [runId, scenarioId, policy, seed, startsAt, endsAt, farms, buyers, transporters, roads, referencePlaces, referenceDataSources, participants, evidenceLabel]
       properties:
         runId: {type: string, format: uuid}
         scenarioId: {type: string}
@@ -2052,29 +2084,53 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [farmId, name, position]
-            properties: {farmId: {type: string, format: uuid}, name: {type: string}, position: {$ref: './common.schema.json#/$defs/GeoPoint'}}
+            required: [farmId, islandId, name, position]
+            properties:
+              farmId: {type: string, format: uuid}
+              islandId: {type: string, minLength: 1}
+              name: {type: string}
+              position: {$ref: './common.schema.json#/$defs/GeoPoint'}
+              referencePlaceId: {type: string, minLength: 1}
         buyers:
           type: array
           items:
             type: object
             additionalProperties: false
-            required: [buyerId, name, position]
-            properties: {buyerId: {type: string, format: uuid}, name: {type: string}, position: {$ref: './common.schema.json#/$defs/GeoPoint'}}
+            required: [buyerId, islandId, name, position]
+            properties:
+              buyerId: {type: string, format: uuid}
+              islandId: {type: string, minLength: 1}
+              name: {type: string}
+              position: {$ref: './common.schema.json#/$defs/GeoPoint'}
+              referencePlaceId: {type: string, minLength: 1}
         transporters:
           type: array
           items:
             type: object
             additionalProperties: false
-            required: [transporterId, name, homePosition, capacityKg]
-            properties: {transporterId: {type: string, format: uuid}, name: {type: string}, homePosition: {$ref: './common.schema.json#/$defs/GeoPoint'}, capacityKg: {type: number, minimum: 0}}
+            required: [transporterId, islandId, name, homePosition, capacityKg]
+            properties:
+              transporterId: {type: string, format: uuid}
+              islandId: {type: string, minLength: 1}
+              name: {type: string}
+              homePosition: {$ref: './common.schema.json#/$defs/GeoPoint'}
+              capacityKg: {type: number, minimum: 0}
+              referencePlaceId: {type: string, minLength: 1}
         roads:
           type: array
           items:
             type: object
             additionalProperties: false
-            required: [roadSegmentId, name, from, to, distanceKm]
-            properties: {roadSegmentId: {type: string, format: uuid}, name: {type: string}, from: {$ref: './common.schema.json#/$defs/GeoPoint'}, to: {$ref: './common.schema.json#/$defs/GeoPoint'}, distanceKm: {type: number, minimum: 0}}
+            required: [roadSegmentId, islandId, name, from, to, distanceKm]
+            properties:
+              roadSegmentId: {type: string, format: uuid}
+              islandId: {type: string, minLength: 1}
+              name: {type: string}
+              from: {$ref: './common.schema.json#/$defs/GeoPoint'}
+              to: {$ref: './common.schema.json#/$defs/GeoPoint'}
+              distanceKm: {type: number, minimum: 0}
+        referencePlaces: {type: array, items: {$ref: '#/components/schemas/ReferencePlace'}}
+        referenceDataSources: {type: array, items: {$ref: '#/components/schemas/ReferenceDataSource'}}
         participants: {type: array, items: {$ref: '#/components/schemas/SimulationParticipant'}}
         evidenceLabel: {type: string}
     ReplayFrame:

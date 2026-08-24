@@ -1558,12 +1558,14 @@ export class SimulationEngine {
         islandId: farm.islandId,
         name: farm.name,
         position: farm.position,
+        ...(farm.referencePlaceId ? { referencePlaceId: farm.referencePlaceId } : {}),
       })),
       buyers: [...this.world.buyers.values()].map((buyer) => ({
         buyerId: buyer.buyerId,
         islandId: buyer.islandId,
         name: buyer.name,
         position: buyer.position,
+        ...(buyer.referencePlaceId ? { referencePlaceId: buyer.referencePlaceId } : {}),
       })),
       transporters: [...this.world.transporters.values()].map((transporter) => ({
         transporterId: transporter.transporterId,
@@ -1571,6 +1573,7 @@ export class SimulationEngine {
         name: transporter.name,
         homePosition: transporter.homePosition,
         capacityKg: transporter.capacityKg,
+        ...(transporter.referencePlaceId ? { referencePlaceId: transporter.referencePlaceId } : {}),
       })),
       roads: [...this.world.roads.values()].map((road) => ({
         roadSegmentId: road.roadSegmentId,
@@ -1579,6 +1582,15 @@ export class SimulationEngine {
         from: road.from,
         to: road.to,
         distanceKm: road.distanceKm,
+      })),
+      referencePlaces: this.world.referencePlaces.map((place) => ({
+        ...place,
+        position: { ...place.position },
+        warnings: [...place.warnings],
+      })),
+      referenceDataSources: this.world.referenceDataSources.map((source) => ({
+        ...source,
+        limitations: [...source.limitations],
       })),
       participants: [
         ...[...this.world.farms.values()].map((farm) => ({

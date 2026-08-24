@@ -42,9 +42,33 @@ export interface CesiumGlobeProps {
 }
 
 function overviewPoint(scene: ControlRoomScene): GeoPoint {
-  const points = [...scene.farms.map((farm) => farm.position), ...scene.buyers.map((buyer) => buyer.position), ...scene.transporters.map((transporter) => transporter.homePosition)];
+  const points = overviewPoints(scene);
   if (!points.length) return { latitude: 13.97, longitude: -60.97 };
   return { latitude: points.reduce((sum, point) => sum + point.latitude, 0) / points.length, longitude: points.reduce((sum, point) => sum + point.longitude, 0) / points.length };
+}
+
+function overviewPoints(scene: ControlRoomScene): GeoPoint[] {
+  return [
+    ...scene.farms.map((farm) => farm.position),
+    ...scene.buyers.map((buyer) => buyer.position),
+    ...scene.transporters.map((transporter) => transporter.homePosition),
+    ...scene.referencePlaces.map((place) => place.position),
+  ];
+}
+
+/** Keep a single island close while fitting regional selections into view. */
+function overviewHeightMeters(scene: ControlRoomScene): number {
+  const points = overviewPoints(scene);
+  if (points.length < 2) return 78_000;
+  const latitudes = points.map((point) => point.latitude);
+  const longitudes = points.map((point) => point.longitude);
+  const spanDegrees = Math.max(
+    Math.max(...latitudes) - Math.min(...latitudes),
+    Math.max(...longitudes) - Math.min(...longitudes),
+  );
+  // The floating side panels leave much less usable map area than the full
+  // canvas, so use a deliberately generous scale for multi-island scopes.
+  return Math.max(78_000, spanDegrees * 350_000);
 }
 
 /**
@@ -219,6 +243,9 @@ function resolveFocusPoint(
   const transporter = scene.transporters.find((candidate) => candidate.transporterId === id);
   if (transporter) return transporter.homePosition;
 
+  const referencePlace = scene.referencePlaces.find((candidate) => candidate.referencePlaceId === id);
+  if (referencePlace) return referencePlace.position;
+
   const road = scene.roads.find((candidate) => candidate.roadSegmentId === id);
   if (road) return midpoint(road.from, road.to);
 
@@ -324,7 +351,11 @@ export default function CesiumGlobe(props: CesiumGlobeProps): React.JSX.Element 
 
       // Open on the island rather than Cesium's default whole-earth view, so
       // the first frame already looks like the finished product.
-      await flyToRegion(viewer, null, { immediate: true, overview: overviewPoint(sceneRef.current) });
+      await flyToRegion(viewer, null, {
+        immediate: true,
+        overview: overviewPoint(sceneRef.current),
+        overviewHeightM: overviewHeightMeters(sceneRef.current),
+      });
 
       // Hold the loading overlay until imagery has actually arrived.
       //
@@ -380,7 +411,10 @@ export default function CesiumGlobe(props: CesiumGlobeProps): React.JSX.Element 
     previousFocusRef.current = focusRegion;
 
     if (focusRegion === null) {
-      void flyToRegion(viewer, null, { overview: overviewPoint(scene) });
+      void flyToRegion(viewer, null, {
+        overview: overviewPoint(scene),
+        overviewHeightM: overviewHeightMeters(scene),
+      });
       return;
     }
     const point = resolveFocusPoint(scene, frame, atMs, focusRegion);

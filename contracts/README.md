@@ -10,7 +10,10 @@ contract here.
 ## Contract locations
 
 - [`openapi.yaml`](openapi.yaml): public Product API, saved simulation runs,
-  replay, paired results, snapshot, and SSE operations.
+  replay, paired results, snapshot, and SSE operations. Replay scenes carry
+  selected licensed reference places, source/licence metadata and optional
+  actor-to-reference links; references remain context, not Product API
+  organisations.
 - [`common.schema.json`](common.schema.json): IDs, quantities, money, location,
   roles, provenance, pagination, and RFC 7807 errors.
 - [`events/event-envelope.schema.json`](events/event-envelope.schema.json):

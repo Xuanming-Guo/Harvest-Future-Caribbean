@@ -155,7 +155,7 @@ export async function buildServer() {
   });
   server.setErrorHandler((error, _request, reply) => sendProblem(reply, error));
 
-  server.get("/health", async () => ({ status: "ok", service: "harvest-product-api", contractVersion: "0.7.0", adapters: { model: config.modelAdapter, agentText: agentCoordinator.textAdapterName } }));
+  server.get("/health", async () => ({ status: "ok", service: "harvest-product-api", contractVersion: "0.8.0", adapters: { model: config.modelAdapter, agentText: agentCoordinator.textAdapterName } }));
 
   server.get("/v1/me", async (request) => {
     const actor = requireRole(request, [...productRoles]);

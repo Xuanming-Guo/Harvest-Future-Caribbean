@@ -36,6 +36,19 @@ type RunScope =
 
 const ISLANDS = CARIBBEAN_ISLANDS_V1;
 const RUN_ROLES = [ActorRole.OPERATIONS, ActorRole.ADMIN];
+
+/** Additive compatibility adapter for replay JSON saved before contract 0.8.0. */
+export function normalizeReplayScene(value: unknown): ControlRoomScene {
+  const scene = value as ControlRoomScene & {
+    referencePlaces?: ControlRoomScene["referencePlaces"];
+    referenceDataSources?: ControlRoomScene["referenceDataSources"];
+  };
+  return {
+    ...scene,
+    referencePlaces: Array.isArray(scene.referencePlaces) ? scene.referencePlaces : [],
+    referenceDataSources: Array.isArray(scene.referenceDataSources) ? scene.referenceDataSources : [],
+  };
+}
 const SNAPSHOT_ROLES = [ActorRole.COORDINATOR, ActorRole.OPERATIONS, ActorRole.ADMIN];
 const PRODUCT_ROLES = [
   ActorRole.FARMER,
@@ -588,7 +601,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
       runId: row.id,
       evidenceLabel: row.evidenceLabel,
       provenanceNote: row.provenanceNote,
-      scene: row.scene,
+      scene: normalizeReplayScene(row.scene),
       frames: row.frames,
     };
   });

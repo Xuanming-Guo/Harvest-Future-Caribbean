@@ -48,6 +48,7 @@ export { SCENARIOS, requireScenario, saintLuciaDemoV1 } from './scenario/saint-l
 export { caribbeanIslandScenarios, caribbeanIslandsV1 } from './scenario/caribbean-islands-v1.js';
 export { CARIBBEAN_ISLANDS_V1, CARIBBEAN_ISLAND_IDS, requireCaribbeanIsland } from './scenario/caribbean-islands-manifest-v1.js';
 export type { CaribbeanIslandManifest } from './scenario/caribbean-islands-manifest-v1.js';
+export { CARIBBEAN_REFERENCE_PLACES_V1, CARIBBEAN_REFERENCE_DATA_SOURCES_V1, referencePlacesForIslands } from './scenario/reference-places.js';
 export type { Scenario, ScenarioContext } from './scenario/types.js';
 
 export { baselinePolicy } from './policy/baseline.js';

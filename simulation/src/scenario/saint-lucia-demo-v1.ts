@@ -5,8 +5,9 @@
  * around Castries and Rodney Bay, over a three-week window, with a rainy
  * stretch that degrades the interior roads partway through.
  *
- * EVIDENCE STATUS: every number below is SYNTHETIC. The geography is real and
- * the shape of the problem follows the project's research notes, but no yield,
+ * EVIDENCE STATUS: every number below is SYNTHETIC. Licensed public place
+ * references provide geographic context and the shape of the problem follows
+ * the project's research notes, but no yield,
  * price, road speed or demand figure here is a measurement. Nothing produced by
  * this scenario may be presented as observed impact from a deployed system;
  * `docs/architecture.md` and the repository evidence policy both require that
@@ -19,6 +20,7 @@ import { IdFactory } from '../core/ids.js';
 import { DAY_MS, HOUR_MS, formatDate } from '../core/time.js';
 import type { Scenario, ScenarioContext } from './types.js';
 import { caribbeanIslandScenarios, caribbeanIslandsV1 } from './caribbean-islands-v1.js';
+import { referencePlacesByCategory, referencePlacesForIslands, referenceSourcesForPlaces } from './reference-places.js';
 import type {
   Buyer,
   Farm,
@@ -33,7 +35,7 @@ import type {
 const START_ISO = '2026-09-01T06:00:00Z';
 const DURATION_DAYS = 21;
 
-/** Real Saint Lucia locations; the actors placed at them are invented. */
+/** Synthetic fallback sites used when the reference snapshot lacks a matching category. */
 const FARM_SITES = [
   { name: 'Mabouya Valley smallholding', latitude: 13.9503, longitude: -60.9312 },
   { name: 'Dennery ridge plot', latitude: 13.9094, longitude: -60.8919 },
@@ -74,25 +76,27 @@ function haversineKm(a: { latitude: number; longitude: number }, b: { latitude: 
 /** Saint Lucian roads wind; a 1.4 multiplier on straight-line distance is a synthetic stand-in. */
 const ROAD_WINDING_FACTOR = 1.4;
 
-function buildRoads(ids: IdFactory): Map<string, RoadSegment> {
+function buildRoads(
+  ids: IdFactory,
+  sites: readonly { name: string; latitude: number; longitude: number }[],
+  hub: { latitude: number; longitude: number },
+): Map<string, RoadSegment> {
   const roads = new Map<string, RoadSegment>();
 
   // One segment per farm-to-hub link. A full road graph is more than the hero
   // scenario needs, and issue #5 owns the map rendering that would justify one.
-  const hub = { latitude: 14.0101, longitude: -60.9875 }; // Castries.
-
-  for (const site of FARM_SITES) {
+  for (const [index, site] of sites.entries()) {
     const roadSegmentId = ids.next();
     const straightLineKm = haversineKm(site, hub);
-      roads.set(roadSegmentId, {
-        roadSegmentId,
-        islandId: 'saint-lucia',
+    roads.set(roadSegmentId, {
+      roadSegmentId,
+      islandId: 'saint-lucia',
       name: `${site.name} to Castries`,
       from: { latitude: site.latitude, longitude: site.longitude },
       to: hub,
       distanceKm: Number((straightLineKm * ROAD_WINDING_FACTOR).toFixed(2)),
-      // Interior valley routes flood; the coastal Cul de Sac road holds up.
-      rainSensitivity: site.name.includes('Cul de Sac') ? 0.25 : 0.7,
+      // Four synthetic interior links flood more readily than the fifth.
+      rainSensitivity: index === sites.length - 1 ? 0.25 : 0.7,
     });
   }
 
@@ -108,8 +112,8 @@ export const saintLuciaDemoV1: Scenario = {
   startsAtIso: START_ISO,
   durationDays: DURATION_DAYS,
   provenanceNote:
-    'SYNTHETIC. Locations are real Saint Lucian places; every yield, price, demand, road speed and ' +
-    'spoilage figure is invented for demonstration and is not a measurement of any real farm or buyer.',
+    'SYNTHETIC. Licensed public place references provide geographic context; every actor, yield, price, ' +
+    'demand, road speed and spoilage figure is invented. A nearby reference does not imply participation.',
 
   build(context: ScenarioContext): World {
     const { ids, random, startsAt } = context;
@@ -121,17 +125,59 @@ export const saintLuciaDemoV1: Scenario = {
     const weatherStream = random.stream('scenario:weather');
     const disruptionStream = random.stream('scenario:disruptions');
 
-    const roads = buildRoads(ids);
+    const referencePlaces = referencePlacesForIslands(['saint-lucia']);
+    const referenceDataSources = referenceSourcesForPlaces(referencePlaces);
+    const farmReferences = referencePlacesByCategory(referencePlaces, 'AGRICULTURAL_AREA');
+    const buyerReferences = [
+      ...referencePlacesByCategory(referencePlaces, 'HOTEL_RESORT').slice(0, 1),
+      ...referencePlacesByCategory(referencePlaces, 'RESTAURANT').slice(0, 1),
+      ...referencePlacesByCategory(referencePlaces, 'SUPERMARKET_MARKET').slice(0, 1),
+    ];
+    const transporterReferences = referencePlacesByCategory(referencePlaces, 'PORT_FERRY_TERMINAL');
+    const farmSites = FARM_SITES.map((site, index) => {
+      const reference = farmReferences[index];
+      return {
+        ...site,
+        name: `Saint Lucia synthetic smallholding ${index + 1}`,
+        latitude: reference?.position.latitude ?? site.latitude,
+        longitude: reference?.position.longitude ?? site.longitude,
+        referencePlaceId: reference?.referencePlaceId,
+      };
+    });
+    const buyerSites = BUYER_SITES.map((site, index) => {
+      const reference = buyerReferences[index];
+      return {
+        ...site,
+        name: `Saint Lucia synthetic buyer ${index + 1}`,
+        latitude: reference?.position.latitude ?? site.latitude,
+        longitude: reference?.position.longitude ?? site.longitude,
+        referencePlaceId: reference?.referencePlaceId,
+      };
+    });
+    const transporterSites = TRANSPORTER_SITES.map((site, index) => {
+      const reference = transporterReferences[index];
+      return {
+        ...site,
+        name: `Saint Lucia synthetic carrier ${index + 1}`,
+        latitude: reference?.position.latitude ?? site.latitude,
+        longitude: reference?.position.longitude ?? site.longitude,
+        referencePlaceId: reference?.referencePlaceId,
+      };
+    });
+
+    const roadHub = buyerSites[0] ?? { latitude: 14.0101, longitude: -60.9875 };
+    const roads = buildRoads(ids, farmSites, roadHub);
     const roadIds = [...roads.keys()];
 
     const farms = new Map<string, Farm>();
-    FARM_SITES.forEach((site, index) => {
+    farmSites.forEach((site, index) => {
       const farmId = ids.next();
       farms.set(farmId, {
         farmId,
         islandId: 'saint-lucia',
         name: site.name,
         position: { latitude: site.latitude, longitude: site.longitude },
+        ...(site.referencePlaceId ? { referencePlaceId: site.referencePlaceId } : {}),
         roadSegmentId: roadIds[index] as string,
         // Diligence spread is what makes reporting uneven, which is the whole
         // reason Harvest needs to reason about uncertainty at all.
@@ -140,26 +186,28 @@ export const saintLuciaDemoV1: Scenario = {
     });
 
     const buyers = new Map<string, Buyer>();
-    for (const site of BUYER_SITES) {
+    for (const site of buyerSites) {
       const buyerId = ids.next();
       buyers.set(buyerId, {
         buyerId,
         islandId: 'saint-lucia',
         name: site.name,
         position: { latitude: site.latitude, longitude: site.longitude },
+        ...(site.referencePlaceId ? { referencePlaceId: site.referencePlaceId } : {}),
         typicalOrderKg: site.typicalOrderKg,
         minimumAcceptableFraction: site.minimumAcceptableFraction,
       });
     }
 
     const transporters = new Map<string, Transporter>();
-    for (const site of TRANSPORTER_SITES) {
+    for (const site of transporterSites) {
       const transporterId = ids.next();
       transporters.set(transporterId, {
         transporterId,
         islandId: 'saint-lucia',
         name: site.name,
         homePosition: { latitude: site.latitude, longitude: site.longitude },
+        ...(site.referencePlaceId ? { referencePlaceId: site.referencePlaceId } : {}),
         capacityKg: site.capacityKg,
         cruiseSpeedKmh: site.cruiseSpeedKmh,
       });
@@ -293,6 +341,8 @@ export const saintLuciaDemoV1: Scenario = {
       buyers,
       transporters,
       roads,
+      referencePlaces,
+      referenceDataSources,
       truth: { crops, disruptions, rainfallMmByDate },
       observed: {
         batches,

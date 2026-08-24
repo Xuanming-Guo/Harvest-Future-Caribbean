@@ -9,7 +9,7 @@
  * unlike EventFeed and Legend, because it needs a close button in its header.
  */
 
-import type { ControlRoomBatch, ControlRoomDemand, ControlRoomFrame, ControlRoomMission, ControlRoomScene, CropStage, SimulationAgentAction } from "@harvest/simulation";
+import type { ControlRoomBatch, ControlRoomDemand, ControlRoomFrame, ControlRoomMission, ControlRoomScene, CropStage, ReferenceDataSource, ReferencePlace, ReferencePlaceCategory, SimulationAgentAction } from "@harvest/simulation";
 
 export interface InspectorProps {
   scene: ControlRoomScene;
@@ -61,6 +61,14 @@ const MISSION_PILL: Record<ControlRoomMission["status"], string> = {
   CANCELLED: "pill-bad",
 };
 
+const REFERENCE_CATEGORY: Record<ReferencePlaceCategory, string> = {
+  AGRICULTURAL_AREA: "Agricultural area",
+  HOTEL_RESORT: "Hotel or resort",
+  RESTAURANT: "Restaurant",
+  SUPERMARKET_MARKET: "Supermarket or public market",
+  PORT_FERRY_TERMINAL: "Port or ferry terminal",
+};
+
 function formatKg(kg: number): string {
   return `${Math.round(kg).toLocaleString("en-US")} kg`;
 }
@@ -96,7 +104,7 @@ function BatchRow({ batch }: { batch: ControlRoomBatch }): React.JSX.Element {
   );
 }
 
-function FarmView({ farm, batches, onClose }: { farm: ControlRoomScene["farms"][number]; batches: ControlRoomBatch[]; onClose: () => void }): React.JSX.Element {
+function FarmView({ farm, batches, reference, onClose }: { farm: ControlRoomScene["farms"][number]; batches: ControlRoomBatch[]; reference: ReferencePlace | undefined; onClose: () => void }): React.JSX.Element {
   const latestObservedAt = batches.reduce<number | null>((latest, batch) => {
     if (batch.lastObservedAt == null) return latest;
     return latest == null ? batch.lastObservedAt : Math.max(latest, batch.lastObservedAt);
@@ -106,6 +114,7 @@ function FarmView({ farm, batches, onClose }: { farm: ControlRoomScene["farms"][
     <>
       <Header title={farm.name} subtitle="Farm" onClose={onClose} />
       <div className="panel-body">
+        <LinkedReference reference={reference} />
         <Row label="Last check-in" value={formatWhen(latestObservedAt)} />
         {batches.length === 0 ? (
           <p className="empty-state">No crop batches reported yet.</p>
@@ -117,11 +126,12 @@ function FarmView({ farm, batches, onClose }: { farm: ControlRoomScene["farms"][
   );
 }
 
-function BuyerView({ buyer, demands, onClose }: { buyer: ControlRoomScene["buyers"][number]; demands: ControlRoomDemand[]; onClose: () => void }): React.JSX.Element {
+function BuyerView({ buyer, demands, reference, onClose }: { buyer: ControlRoomScene["buyers"][number]; demands: ControlRoomDemand[]; reference: ReferencePlace | undefined; onClose: () => void }): React.JSX.Element {
   return (
     <>
       <Header title={buyer.name} subtitle="Buyer" onClose={onClose} />
       <div className="panel-body">
+        <LinkedReference reference={reference} />
         {demands.length === 0 ? (
           <p className="empty-state">No orders placed yet.</p>
         ) : (
@@ -144,16 +154,19 @@ function BuyerView({ buyer, demands, onClose }: { buyer: ControlRoomScene["buyer
 function TransporterView({
   transporter,
   missions,
+  reference,
   onClose,
 }: {
   transporter: ControlRoomScene["transporters"][number];
   missions: ControlRoomMission[];
+  reference: ReferencePlace | undefined;
   onClose: () => void;
 }): React.JSX.Element {
   return (
     <>
       <Header title={transporter.name} subtitle="Transporter" onClose={onClose} />
       <div className="panel-body">
+        <LinkedReference reference={reference} />
         <Row label="Capacity" value={formatKg(transporter.capacityKg)} />
         {missions.length === 0 ? (
           <p className="empty-state">No missions assigned yet.</p>
@@ -196,6 +209,37 @@ function DisruptionView({ disruption, onClose }: { disruption: ControlRoomFrame[
       <div className="panel-body">
         <Row label="Description" value={disruption.description} />
         <Row label="Became visible" value={formatWhen(Date.parse(disruption.observedAt))} />
+      </div>
+    </>
+  );
+}
+
+function LinkedReference({ reference }: { reference: ReferencePlace | undefined }): React.JSX.Element | null {
+  if (!reference) return null;
+  return (
+    <div className="reference-notice">
+      <strong>Nearby public reference</strong>
+      <span>{reference.name} · {REFERENCE_CATEGORY[reference.category]}</span>
+      <span>This participant is synthetic; the named location is not a Harvest customer or participant.</span>
+    </div>
+  );
+}
+
+function ReferencePlaceView({ place, source, onClose }: { place: ReferencePlace; source: ReferenceDataSource | undefined; onClose: () => void }): React.JSX.Element {
+  return (
+    <>
+      <Header title={place.name} subtitle="Reference location" onClose={onClose} />
+      <div className="panel-body">
+        <div className="reference-notice is-prominent">
+          <strong>Reference location—not a Harvest participant or customer.</strong>
+          <span>Its name and position provide public geographic context only. All simulated behaviour and results remain synthetic.</span>
+        </div>
+        <Row label="Category" value={REFERENCE_CATEGORY[place.category]} />
+        <Row label="Evidence" value={place.evidenceType.replaceAll("_", " ").toLowerCase()} />
+        <Row label="Retrieved" value={place.retrievedAt} />
+        <Row label="Source" value={<a href={place.sourceUrl} target="_blank" rel="noreferrer">{source?.publisher ?? place.sourceId}</a>} />
+        <Row label="Licence" value={source ? <a href={source.licenceUrl} target="_blank" rel="noreferrer">{source.licenceName}</a> : "not recorded"} />
+        {place.warnings.map((warning) => <p className="panel-help" key={warning}>{warning}</p>)}
       </div>
     </>
   );
@@ -252,7 +296,7 @@ export default function Inspector({ scene, frame, selectedId, selectedAction, on
           <span className="panel-title">Inspector</span>
         </header>
         <div className="panel-body">
-          <p className="empty-state">Click a farm, buyer, vehicle or disruption marker on the globe — or an item in the feed — to see its detail here.</p>
+          <p className="empty-state">Click a participant, reference location, vehicle or disruption marker on the globe—or an item in the feed—to see its detail here.</p>
         </div>
       </section>
     );
@@ -262,7 +306,7 @@ export default function Inspector({ scene, frame, selectedId, selectedAction, on
   if (farm) {
     return (
       <section className="panel">
-        <FarmView farm={farm} batches={frame.batches.filter((b) => b.farmId === selectedId)} onClose={onClose} />
+        <FarmView farm={farm} batches={frame.batches.filter((b) => b.farmId === selectedId)} reference={scene.referencePlaces.find((place) => place.referencePlaceId === farm.referencePlaceId)} onClose={onClose} />
       </section>
     );
   }
@@ -271,7 +315,7 @@ export default function Inspector({ scene, frame, selectedId, selectedAction, on
   if (buyer) {
     return (
       <section className="panel">
-        <BuyerView buyer={buyer} demands={frame.demands.filter((d) => d.buyerId === selectedId)} onClose={onClose} />
+        <BuyerView buyer={buyer} demands={frame.demands.filter((d) => d.buyerId === selectedId)} reference={scene.referencePlaces.find((place) => place.referencePlaceId === buyer.referencePlaceId)} onClose={onClose} />
       </section>
     );
   }
@@ -280,7 +324,7 @@ export default function Inspector({ scene, frame, selectedId, selectedAction, on
   if (transporter) {
     return (
       <section className="panel">
-        <TransporterView transporter={transporter} missions={frame.missions.filter((m) => m.transporterId === selectedId)} onClose={onClose} />
+        <TransporterView transporter={transporter} missions={frame.missions.filter((m) => m.transporterId === selectedId)} reference={scene.referencePlaces.find((place) => place.referencePlaceId === transporter.referencePlaceId)} onClose={onClose} />
       </section>
     );
   }
@@ -299,6 +343,15 @@ export default function Inspector({ scene, frame, selectedId, selectedAction, on
     return (
       <section className="panel">
         <DisruptionView disruption={disruption} onClose={onClose} />
+      </section>
+    );
+  }
+
+  const referencePlace = scene.referencePlaces.find((place) => place.referencePlaceId === selectedId);
+  if (referencePlace) {
+    return (
+      <section className="panel">
+        <ReferencePlaceView place={referencePlace} source={scene.referenceDataSources.find((source) => source.sourceId === referencePlace.sourceId)} onClose={onClose} />
       </section>
     );
   }

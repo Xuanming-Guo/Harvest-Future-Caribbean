@@ -23,7 +23,7 @@
 
 import type { SimulationInstant } from './core/time.js';
 import type { ObservableActor, ObservableDisruptionView } from './world/observable.js';
-import type { CropStage, GeoPoint } from './world/types.js';
+import type { CropStage, GeoPoint, ReferenceDataSource, ReferencePlace } from './world/types.js';
 import type { DecisionRecord } from './policy/types.js';
 
 /** Static furniture, sent once rather than repeated in every frame. */
@@ -34,10 +34,13 @@ export interface ControlRoomScene {
   seed: number;
   startsAt: string;
   endsAt: string;
-  farms: Array<{ farmId: string; islandId: string; name: string; position: GeoPoint }>;
-  buyers: Array<{ buyerId: string; islandId: string; name: string; position: GeoPoint }>;
-  transporters: Array<{ transporterId: string; islandId: string; name: string; homePosition: GeoPoint; capacityKg: number }>;
+  farms: Array<{ farmId: string; islandId: string; name: string; position: GeoPoint; referencePlaceId?: string }>;
+  buyers: Array<{ buyerId: string; islandId: string; name: string; position: GeoPoint; referencePlaceId?: string }>;
+  transporters: Array<{ transporterId: string; islandId: string; name: string; homePosition: GeoPoint; capacityKg: number; referencePlaceId?: string }>;
   roads: Array<{ roadSegmentId: string; islandId: string; name: string; from: GeoPoint; to: GeoPoint; distanceKm: number }>;
+  /** Licensed public geography, never a claim of Product participation. */
+  referencePlaces: ReferencePlace[];
+  referenceDataSources: ReferenceDataSource[];
   /** Run-scoped Product API identities. Baseline participants have no product actor. */
   participants: SimulationParticipant[];
   /** Repeated here so a consumer cannot render the scene without the label. */

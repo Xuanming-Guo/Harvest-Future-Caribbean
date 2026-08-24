@@ -47,6 +47,47 @@ export interface Quantity {
   unit: 'kg';
 }
 
+/** Public geography used only as contextual evidence in observable replays. */
+export type ReferencePlaceCategory =
+  | 'AGRICULTURAL_AREA'
+  | 'HOTEL_RESORT'
+  | 'RESTAURANT'
+  | 'SUPERMARKET_MARKET'
+  | 'PORT_FERRY_TERMINAL';
+
+export type ReferencePlaceEvidenceType =
+  | 'PUBLIC_REFERENCE_POINT'
+  | 'PUBLIC_FEATURE_CENTROID'
+  | 'APPROXIMATE_PUBLIC_AREA_CENTROID';
+
+export interface ReferencePlace {
+  referencePlaceId: string;
+  islandId: string;
+  name: string;
+  category: ReferencePlaceCategory;
+  position: GeoPoint;
+  sourceId: string;
+  sourceFeatureId: string;
+  sourceUrl: string;
+  sourceRevision: string;
+  retrievedAt: string;
+  evidenceType: ReferencePlaceEvidenceType;
+  warnings: string[];
+}
+
+export interface ReferenceDataSource {
+  sourceId: string;
+  title: string;
+  publisher: string;
+  sourceUrl: string;
+  licenceName: string;
+  licenceUrl: string;
+  attribution: string;
+  retrievedAt: string;
+  revision: string;
+  limitations: string[];
+}
+
 export type DisruptionType = 'WEATHER' | 'ROAD' | 'VEHICLE' | 'CROP' | 'DEMAND';
 
 /** The lifecycle of a crop batch, from the grower's point of view. */
@@ -62,6 +103,8 @@ export interface Farm {
   islandId: string;
   name: string;
   position: GeoPoint;
+  /** Optional public-reference anchor; the farmer remains synthetic. */
+  referencePlaceId?: string;
   /** Which road segment the farm gate sits on, for routing. */
   roadSegmentId: string;
   /**
@@ -77,6 +120,8 @@ export interface Buyer {
   islandId: string;
   name: string;
   position: GeoPoint;
+  /** Optional public-reference anchor; the buyer remains synthetic. */
+  referencePlaceId?: string;
   /** Typical order size in kg; actual demand varies around this. */
   typicalOrderKg: number;
   /** How much of an order must arrive for the buyer to treat it as fulfilled. */
@@ -88,6 +133,8 @@ export interface Transporter {
   islandId: string;
   name: string;
   homePosition: GeoPoint;
+  /** Optional public-reference anchor; the transporter remains synthetic. */
+  referencePlaceId?: string;
   capacityKg: number;
   /** Average road speed in km/h under clear conditions. */
   cruiseSpeedKmh: number;
@@ -264,6 +311,8 @@ export interface World {
   buyers: Map<string, Buyer>;
   transporters: Map<string, Transporter>;
   roads: Map<string, RoadSegment>;
+  referencePlaces: ReferencePlace[];
+  referenceDataSources: ReferenceDataSource[];
   truth: HiddenTruth;
   observed: ObservedWorld;
 }
