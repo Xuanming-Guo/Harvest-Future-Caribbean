@@ -84,12 +84,14 @@ $scenarios.items | Select-Object scenarioId, durationDays,
 
 Expected:
 
-- scenarios `saint-lucia-demo-v1` and `caribbean-islands-v1`;
+- the Saint Lucia benchmark, the whole-Caribbean scenario, and one focused
+  `caribbean-<island-id>-v1` scenario for every manifest island;
 - 21 simulated days;
 - `BASELINE` and `HARVEST` policies;
 - `DETERMINISTIC` and `LLM_ASSISTED` decision modes;
 - the Saint Lucia benchmark exposes Saint Lucia only; the regional scenario
-  exposes all 28 current UN M49 Caribbean country/area entries.
+  exposes all 28 current UN M49 Caribbean country/area entries; each focused
+  Caribbean scenario exposes its named island only.
 
 ## 4. Create a connected deterministic Harvest run
 

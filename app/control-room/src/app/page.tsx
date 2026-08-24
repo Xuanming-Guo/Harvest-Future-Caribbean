@@ -112,9 +112,11 @@ export default function ControlRoomPage() {
     void (async () => {
       try {
         setScenarios(await listScenarios());
-        const run = await refreshRuns();
-        if (run) await loadRun(run);
-        else setLoading(false);
+        await refreshRuns();
+        // A saved replay is optional. Opening the control room should preserve
+        // the Caribbean launch defaults instead of silently replacing them
+        // with whichever historical run happens to be newest.
+        setLoading(false);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
         setLoading(false);

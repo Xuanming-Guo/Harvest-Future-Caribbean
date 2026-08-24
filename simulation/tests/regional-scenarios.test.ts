@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { CARIBBEAN_ISLANDS_V1, compactReplayTimeline, runScenario, type ControlRoomFrame } from '../src/index.js';
+import { CARIBBEAN_ISLANDS_V1, SCENARIOS, caribbeanIslandScenarios, compactReplayTimeline, runScenario, type ControlRoomFrame } from '../src/index.js';
 
 const M49_CARIBBEAN_ISLAND_IDS = [
   'anguilla', 'antigua-barbuda', 'aruba', 'bahamas', 'barbados',
@@ -16,6 +16,17 @@ const M49_CARIBBEAN_ISLAND_IDS = [
 describe('manifest-generated Caribbean scenarios', () => {
   it('covers every current UN M49 Caribbean country or area', () => {
     expect(CARIBBEAN_ISLANDS_V1.map((island) => island.islandId)).toEqual(M49_CARIBBEAN_ISLAND_IDS);
+  });
+
+  it('makes every manifest island a focused runnable scenario', () => {
+    expect(caribbeanIslandScenarios.map((scenario) => scenario.availableIslandIds)).toEqual(
+      CARIBBEAN_ISLANDS_V1.map((island) => [island.islandId]),
+    );
+    for (const scenario of caribbeanIslandScenarios) {
+      expect(SCENARIOS[scenario.scenarioId]).toBe(scenario);
+      const result = runScenario({ scenarioId: scenario.scenarioId, policy: 'HARVEST', seed: 7, captureFrames: true });
+      expect(new Set(result.timeline!.scene.participants.map((participant) => participant.islandId))).toEqual(new Set(scenario.availableIslandIds));
+    }
   });
 
   it('compacts large regional replay snapshots without losing decisions or critical frames', () => {

@@ -1,6 +1,6 @@
 # Control room
 
-The simulation control room: a 3D globe view of the Saint Lucia scenario, on
+The simulation control room: a 3D globe view of synthetic Caribbean scenarios, on
 port `3002`. It is where the team and judges watch the simulated food system
 change over time, and it is separate from the participant website on `3000`,
 which is a role-facing product interface rather than an operations console.
@@ -35,7 +35,8 @@ and handles play, pause, speed, rewind, scrub and reset locally:
 
 The scenario selector is populated by `GET /v1/simulation-scenarios`. It opens
 on the full synthetic Caribbean scenario, whose scope can be narrowed with the
-custom island picker; `saint-lucia-demo-v1` remains the detailed benchmark.
+custom island picker. Every manifest island also has a focused runnable
+scenario; `saint-lucia-demo-v1` remains the detailed benchmark.
 
 ### Reading the outcome cards
 

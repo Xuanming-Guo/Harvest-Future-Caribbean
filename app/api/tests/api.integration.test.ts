@@ -301,6 +301,9 @@ describe("participant Product API", () => {
       availableDecisionModes: ["DETERMINISTIC", "LLM_ASSISTED"],
       islands: [{ islandId: "saint-lucia", countryCode: "LC" }],
     });
+    const focusedCaribbeanScenarios = scenarios.json().items.filter((scenario: { scenarioId: string }) => scenario.scenarioId.startsWith("caribbean-") && scenario.scenarioId !== "caribbean-islands-v1");
+    expect(focusedCaribbeanScenarios).toHaveLength(28);
+    expect(focusedCaribbeanScenarios.every((scenario: { islands: unknown[] }) => scenario.islands.length === 1)).toBe(true);
 
     const fixtureLlm = await server.inject({
       method: "POST",

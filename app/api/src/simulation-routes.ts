@@ -96,7 +96,8 @@ function readScenario(value: unknown) {
 }
 
 function readScope(value: unknown, scenarioId: string): { scope: RunScope; resolvedIslandIds: string[] } {
-  const allowedIslandIds = scenarioId === "saint-lucia-demo-v1" ? new Set(["saint-lucia"]) : new Set(CARIBBEAN_ISLANDS_V1.map((island) => island.islandId));
+  const scenario = readScenario(scenarioId);
+  const allowedIslandIds = new Set(scenario.availableIslandIds);
   const scope = assertObjectBody(value, ["mode", "islandIds"], ["mode"]);
   if (scope.mode === "ALL") {
     if (scope.islandIds !== undefined) {
@@ -438,7 +439,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
         durationDays: scenario.durationDays,
         availablePolicies: ["BASELINE", "HARVEST"],
         availableDecisionModes: ["DETERMINISTIC", "LLM_ASSISTED"],
-        islands: scenario.scenarioId === "saint-lucia-demo-v1" ? ISLANDS.filter((island) => island.islandId === "saint-lucia") : ISLANDS,
+        islands: ISLANDS.filter((island) => scenario.availableIslandIds.includes(island.islandId)),
         provenanceNote: scenario.provenanceNote,
       })),
     };
