@@ -75,6 +75,19 @@ brainstorming and long-term ideas, so do not treat every item as current scope.
 - Never commit secrets, credentials, private personal data, or unapproved
   private datasets.
 
+## Front-end design contract
+
+- Do not introduce browser- or OS-native UI chrome in a user-facing feature.
+  This includes native select/multi-select listboxes, picker dialogs, default
+  scroll arrows, and unstyled controls whose appearance varies by platform.
+- Build product controls from the repository's design primitives or custom,
+  accessible components that match the Harvest visual language. Preserve native
+  semantics and keyboard support where practical, but do not expose native
+  browser styling as the product interface.
+- Before adding or changing a website or control-room interaction, read
+  [`docs/frontend-design-contract.md`](docs/frontend-design-contract.md) and
+  verify the rendered control in Chrome.
+
 ## Pull request control
 
 Unless the narrow exception below applies, the default rule stands:

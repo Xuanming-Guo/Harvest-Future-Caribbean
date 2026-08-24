@@ -5,6 +5,11 @@ port `3002`. It is where the team and judges watch the simulated food system
 change over time, and it is separate from the participant website on `3000`,
 which is a role-facing product interface rather than an operations console.
 
+All new control-room interactions follow the repository's
+[`frontend design contract`](../../docs/frontend-design-contract.md): visible
+controls are custom, accessible Harvest components rather than browser/OS
+widgets.
+
 ```bash
 npm run control-room          # from the repository root
 ```

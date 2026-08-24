@@ -2,16 +2,19 @@
 
 Use this reading order:
 
-1. [`product.md`](product.md) — concise product scope and non-negotiables.
-2. [`architecture.md`](architecture.md) — system ownership and communication.
-3. [`api_info.md`](api_info.md) — exact API consumers, state changes, events,
+1. [`frontend-design-contract.md`](frontend-design-contract.md) — mandatory
+   visual and interaction rule for new user-facing controls.
+
+2. [`product.md`](product.md) — concise product scope and non-negotiables.
+3. [`architecture.md`](architecture.md) — system ownership and communication.
+4. [`api_info.md`](api_info.md) — exact API consumers, state changes, events,
    and simulation effects.
-4. [`agent_workflows.md`](agent_workflows.md) — agent roles, prompts, safety,
+5. [`agent_workflows.md`](agent_workflows.md) — agent roles, prompts, safety,
    and provider setup.
-5. [`../contracts/README.md`](../contracts/README.md) — machine-readable
+6. [`../contracts/README.md`](../contracts/README.md) — machine-readable
    interface governance.
-6. [`roadmap.md`](roadmap.md) — priorities and responsibility areas.
-7. [`context.md`](context.md) — complete application, research, and planning
+7. [`roadmap.md`](roadmap.md) — priorities and responsibility areas.
+8. [`context.md`](context.md) — complete application, research, and planning
    background.
 
 Before changing or testing saved simulation runs, replay, run-scoped

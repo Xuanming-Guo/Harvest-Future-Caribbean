@@ -4,6 +4,10 @@ This responsive Next.js website is the interface used by Harvest participants:
 farmers, buyers, transporters and coordinators. It calls the shared Product API
 and has no website-specific database or private backend.
 
+All new participant controls follow the repository's
+[`frontend design contract`](../../docs/frontend-design-contract.md): they are
+custom, accessible Harvest controls rather than visible browser/OS widgets.
+
 It is deliberately not the simulation/control-room website. The separate saved-
 run control room is on `3002`; benchmark charts, model evidence, raw traces and
 judge controls do not belong in participant pages.
