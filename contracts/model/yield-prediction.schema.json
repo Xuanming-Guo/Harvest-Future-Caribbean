@@ -47,9 +47,19 @@
               "type": "integer",
               "minimum": 0
             },
+            "observationQuantityKg": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Latest farmer- or coordinator-observed quantity; this is evidence, not a commitment."
+            },
             "plantedAreaHectares": {
               "type": "number",
               "exclusiveMinimum": 0
+            },
+            "daysSincePlanting": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Age derived from a supplied or estimated planting date."
             },
             "cropStage": {
               "type": "string"

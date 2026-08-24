@@ -3,11 +3,65 @@ import { randomUUID } from "node:crypto";
 import { Prisma, Provenance } from "@prisma/client";
 
 import { operationNow } from "./clock.js";
+import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { recordEvent } from "./events.js";
 import { httpError } from "./http.js";
 
 const kilograms = (value: number) => ({ value, unit: "kg" });
+
+type ModelPrediction = {
+  predictionId: string;
+  requestId: string;
+  cropBatchId: string;
+  modelVersion: string;
+  q10: number;
+  q50: number;
+  q90: number;
+  harvestStart: Date;
+  harvestEnd: Date;
+  readiness: number;
+  confidence: number;
+  warnings: string[];
+  generatedAt: Date;
+  featureSnapshot: Prisma.InputJsonValue;
+};
+
+function modelResponseError(message: string): never {
+  throw httpError(502, "MODEL_RESPONSE_INVALID", message);
+}
+
+function isUuid(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function validNumber(value: unknown, minimum = 0): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= minimum;
+}
+
+function parseHttpPrediction(value: unknown, requestId: string, cropBatchId: string, featureSnapshot: Prisma.InputJsonValue): ModelPrediction {
+  if (!value || typeof value !== "object" || Array.isArray(value)) modelResponseError("The model returned a non-object response.");
+  const body = value as Record<string, unknown>;
+  const quantities = [body.q10MarketableYield, body.q50MarketableYield, body.q90MarketableYield];
+  if (!isUuid(body.predictionId) || body.requestId !== requestId || body.cropBatchId !== cropBatchId || typeof body.modelVersion !== "string" || !body.modelVersion) {
+    modelResponseError("The model response IDs or version do not match the request.");
+  }
+  if (!quantities.every((quantity) => quantity && typeof quantity === "object" && !Array.isArray(quantity) && (quantity as Record<string, unknown>).unit === "kg" && validNumber((quantity as Record<string, unknown>).value))) {
+    modelResponseError("The model response must contain non-negative kg quantiles.");
+  }
+  const [q10, q50, q90] = quantities.map((quantity) => (quantity as { value: number }).value);
+  if (q10 > q50 || q50 > q90) modelResponseError("The model response quantiles are out of order.");
+  const window = body.harvestWindow;
+  if (!window || typeof window !== "object" || Array.isArray(window)) modelResponseError("The model response harvest window is missing.");
+  const start = new Date((window as Record<string, unknown>).start as string);
+  const end = new Date((window as Record<string, unknown>).end as string);
+  const generatedAt = new Date(body.generatedAt as string);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end || Number.isNaN(generatedAt.getTime())) modelResponseError("The model response includes invalid dates.");
+  if (!validNumber(body.readiness) || body.readiness > 1 || !validNumber(body.confidence) || body.confidence > 1 || body.provenance !== "MODEL_PREDICTED" || !Array.isArray(body.warnings) || !body.warnings.every((warning) => typeof warning === "string" && warning.length > 0)) {
+    modelResponseError("The model response includes invalid evidence fields.");
+  }
+  return { predictionId: body.predictionId, requestId, cropBatchId, modelVersion: body.modelVersion, q10, q50, q90, harvestStart: start, harvestEnd: end, readiness: body.readiness, confidence: body.confidence, warnings: body.warnings, generatedAt, featureSnapshot };
+}
 
 export interface WorkflowEventContext {
   correlationId?: string;
@@ -118,18 +172,51 @@ export async function produceFixturePrediction(
     where: { cropBatchId, simulationRunId: batch.simulationRunId },
     orderBy: { recordedAt: "desc" },
   });
-  const estimate = observation?.estimatedQuantity ?? 20;
-  const damageBuffer = Math.max(2, Math.round(estimate * 0.3));
-  const q10 = Math.max(0, estimate - damageBuffer);
-  const q50 = Math.max(q10, estimate - Math.round(damageBuffer / 2));
-  const q90 = Math.max(q50, estimate + Math.round(estimate * 0.1));
-  const predictionId = randomUUID();
   const requestId = randomUUID();
-  const generatedAt = operationNow();
-  const start = new Date(generatedAt);
-  start.setUTCDate(start.getUTCDate() + 1);
-  const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 3);
+  const featureSnapshot = {
+    observationCount: observation ? await prisma.cropObservation.count({ where: { cropBatchId, simulationRunId: batch.simulationRunId } }) : 0,
+    ...(observation?.estimatedQuantity !== null && observation?.estimatedQuantity !== undefined ? { observationQuantityKg: observation.estimatedQuantity } : {}),
+    cropStage: observation?.cropStage ?? "UNKNOWN",
+    lastObservedAt: observation?.observedAt.toISOString() ?? null,
+    // The Product API does not invent climate or satellite measurements. A
+    // deployed feature pipeline may populate these contract allow-lists.
+    weatherSummary: {},
+    satelliteSummary: {},
+  };
+  let prediction: ModelPrediction;
+  if (config.modelAdapter === "fixture") {
+    const estimate = observation?.estimatedQuantity ?? 20;
+    const damageBuffer = Math.max(2, Math.round(estimate * 0.3));
+    const q10 = Math.max(0, estimate - damageBuffer);
+    const q50 = Math.max(q10, estimate - Math.round(damageBuffer / 2));
+    const q90 = Math.max(q50, estimate + Math.round(estimate * 0.1));
+    const generatedAt = operationNow();
+    const start = new Date(generatedAt);
+    start.setUTCDate(start.getUTCDate() + 1);
+    const end = new Date(start);
+    end.setUTCDate(end.getUTCDate() + 3);
+    prediction = {
+      predictionId: randomUUID(), requestId, cropBatchId, modelVersion: "fixture-yield-v0.1.0", q10, q50, q90,
+      harvestStart: start, harvestEnd: end, readiness: 0.8, confidence: observation ? 0.76 : 0.55,
+      warnings: observation ? ["Synthetic fixture prediction"] : ["No recent field observation"], generatedAt,
+      featureSnapshot: { ...featureSnapshot, weatherSummary: { source: "fixture", rainfall7dMm: 74 }, satelliteSummary: { source: "fixture", ndvi: 0.71 } },
+    };
+  } else if (config.modelAdapter === "http") {
+    let response: Response;
+    try {
+      response = await fetch(`${config.modelServiceUrl.replace(/\/$/, "")}/internal/v1/yield-predictions`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${config.internalServiceToken}`, "content-type": "application/json", "idempotency-key": `forecast-${requestId}` },
+        body: JSON.stringify({ requestId, cropBatchId, cropType: batch.cropType, farmId: batch.farmId, requestedAt: operationNow().toISOString(), ...(batch.simulationRunId ? { simulationRunId: batch.simulationRunId } : {}), provenance: observation?.provenance ?? "SYNTHETIC", features: featureSnapshot }),
+      });
+    } catch {
+      throw httpError(503, "MODEL_UNAVAILABLE", "The configured yield-model service could not be reached.");
+    }
+    if (!response.ok) throw httpError(503, "MODEL_UNAVAILABLE", "The configured yield-model service rejected the prediction request.");
+    prediction = parseHttpPrediction(await response.json(), requestId, cropBatchId, featureSnapshot);
+  } else {
+    throw httpError(500, "MODEL_ADAPTER_INVALID", "MODEL_ADAPTER must be fixture or http.");
+  }
 
   await prisma.$transaction(async (tx) => {
     const committed = await tx.reservation.aggregate({
@@ -137,37 +224,31 @@ export async function produceFixturePrediction(
       _sum: { quantity: true },
     });
     const committedQuantity = committed._sum.quantity ?? 0;
-    const availableToPromise = Math.max(0, q10 - committedQuantity);
+    const availableToPromise = Math.max(0, prediction.q10 - committedQuantity);
     await tx.yieldPrediction.create({
       data: {
-        id: predictionId,
-        requestId,
+        id: prediction.predictionId,
+        requestId: prediction.requestId,
         cropBatchId,
-        modelVersion: "fixture-yield-v0.1.0",
-        q10,
-        q50,
-        q90,
-        harvestStart: start,
-        harvestEnd: end,
-        readiness: 0.8,
-        confidence: observation ? 0.76 : 0.55,
-        warnings: observation ? ["Synthetic fixture prediction"] : ["No recent field observation"],
-        featureSnapshot: {
-          observationCount: observation ? 1 : 0,
-          cropStage: observation?.cropStage ?? "UNKNOWN",
-          lastObservedAt: observation?.observedAt.toISOString() ?? null,
-          weatherSummary: { source: "fixture", rainfall7dMm: 74 },
-          satelliteSummary: { source: "fixture", ndvi: 0.71 },
-        },
+        modelVersion: prediction.modelVersion,
+        q10: prediction.q10,
+        q50: prediction.q50,
+        q90: prediction.q90,
+        harvestStart: prediction.harvestStart,
+        harvestEnd: prediction.harvestEnd,
+        readiness: prediction.readiness,
+        confidence: prediction.confidence,
+        warnings: prediction.warnings,
+        featureSnapshot: prediction.featureSnapshot,
         provenance: Provenance.MODEL_PREDICTED,
-        generatedAt,
+        generatedAt: prediction.generatedAt,
         simulationRunId: batch.simulationRunId,
       },
     });
     await tx.cropBatch.update({
       where: { id: cropBatchId },
       data: {
-        latestPredictionId: predictionId,
+        latestPredictionId: prediction.predictionId,
         availableToPromise,
         provenance: Provenance.MODEL_PREDICTED,
       },
@@ -182,9 +263,9 @@ export async function produceFixturePrediction(
       provenance: Provenance.MODEL_PREDICTED,
       simulationRunId: batch.simulationRunId,
       payload: {
-        predictionId,
+        predictionId: prediction.predictionId,
         cropBatchId,
-        q10MarketableYield: kilograms(q10),
+        q10MarketableYield: kilograms(prediction.q10),
         committedQuantity: kilograms(committedQuantity),
         availableToPromise: kilograms(availableToPromise),
       },
@@ -196,20 +277,20 @@ export async function produceFixturePrediction(
     await tx.traceStep.create({
       data: {
         traceId,
-        recordedAt: generatedAt,
+        recordedAt: prediction.generatedAt,
         kind: "TOOL_CALL",
         agentName: "Crop Intelligence Agent",
-        toolName: "fixture-yield-model",
+        toolName: config.modelAdapter === "http" ? "http-yield-model" : "fixture-yield-model",
         provenance: Provenance.MODEL_PREDICTED,
-        summary: `Forecast q10 is ${q10} kg; ${committedQuantity} kg is committed, leaving ${availableToPromise} kg ATP.`,
-        confidence: observation ? 0.76 : 0.55,
+        summary: `Forecast q10 is ${prediction.q10} kg; ${committedQuantity} kg is committed, leaving ${availableToPromise} kg ATP.`,
+        confidence: prediction.confidence,
         simulationRunId: batch.simulationRunId,
       },
     });
     return forecastEvent;
   });
 
-  return { predictionId, requestId };
+  return { predictionId: prediction.predictionId, requestId: prediction.requestId };
 }
 
 export async function proposeAllocation(orderId: string, actorId: string, traceId: string) {

@@ -21,6 +21,7 @@ export const config = {
     process.env.INTERNAL_SERVICE_TOKEN ?? "harvest-local-service-token-change-me",
   enableDevAuth: process.env.ENABLE_DEV_AUTH !== "false" && process.env.NODE_ENV !== "production",
   modelAdapter: process.env.MODEL_ADAPTER ?? "fixture",
+  modelServiceUrl: process.env.MODEL_SERVICE_URL?.trim() ?? "http://localhost:8002",
   agentLlmProvider: process.env.AGENT_LLM_PROVIDER?.trim() ?? "",
   agentLlmModel: process.env.AGENT_LLM_MODEL?.trim() ?? "",
   agentLlmBaseUrl: process.env.AGENT_LLM_BASE_URL?.trim() ?? "",
