@@ -42,7 +42,7 @@ export default function ControlRoomPage() {
   const [scenarioId, setScenarioId] = useState(DEFAULT_SCENARIO);
   const [scenarios, setScenarios] = useState<SimulationScenario[]>([]);
   const [policy, setPolicy] = useState<PolicyName>("HARVEST");
-  const [seed, setSeed] = useState(DEFAULT_SEED);
+  const [seedInput, setSeedInput] = useState(String(DEFAULT_SEED));
   const [decisionMode, setDecisionMode] = useState<DecisionMode>("DETERMINISTIC");
   const [scopeMode, setScopeMode] = useState<"SELECTED" | "ALL">("ALL");
   const [islandIds, setIslandIds] = useState<string[]>(["saint-lucia"]);
@@ -70,7 +70,7 @@ export default function ControlRoomPage() {
       setCurrentRun(run);
       setScenarioId(run.scenarioId);
       setPolicy(run.policy);
-      setSeed(run.seed);
+      setSeedInput(String(run.seed));
       setDecisionMode(run.decisionMode);
       setInjections(run.disruptions as InjectedDisruption[]);
       const firstMapped = loaded.scene.participants.find((item) => item.productActorId);
@@ -123,6 +123,15 @@ export default function ControlRoomPage() {
   }, [loadRun, refreshRuns]);
 
   const runSimulation = useCallback(async () => {
+    if (!/^\d+$/.test(seedInput)) {
+      setError("Seed must contain whole digits only.");
+      return;
+    }
+    const seed = Number(seedInput);
+    if (!Number.isSafeInteger(seed) || seed > 4_294_967_295) {
+      setError("Seed must be an integer between 0 and 4294967295.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -133,7 +142,7 @@ export default function ControlRoomPage() {
       setError(caught instanceof Error ? caught.message : String(caught));
       setLoading(false);
     }
-  }, [decisionMode, injections, islandIds, loadRun, policy, refreshRuns, scenarioId, scopeMode, seed]);
+  }, [decisionMode, injections, islandIds, loadRun, policy, refreshRuns, scenarioId, scopeMode, seedInput]);
 
   const changeInjections = useCallback(async (next: InjectedDisruption[]) => {
     const additions = next.slice(injections.length);
@@ -220,7 +229,10 @@ export default function ControlRoomPage() {
         onSelectedIslandIdsChange={setIslandIds}
       />
       <label>Seed
-        <input type="number" min={0} max={4_294_967_295} value={seed} onChange={(event) => setSeed(Number(event.target.value))} />
+        <input inputMode="numeric" pattern="[0-9]*" autoComplete="off" spellCheck={false} value={seedInput} onChange={(event) => {
+          const next = event.target.value;
+          if (/^\d*$/.test(next)) setSeedInput(next);
+        }} />
       </label>
       <label>Decision mode
         <select value={decisionMode} onChange={(event) => setDecisionMode(event.target.value as DecisionMode)}>
