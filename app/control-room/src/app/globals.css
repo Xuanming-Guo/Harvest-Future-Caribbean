@@ -242,18 +242,19 @@ a:focus-visible {
 .run-toolbar label:last-of-type { flex: 1; }
 .run-toolbar label:last-of-type select { width: 100%; }
 
-.island-picker { min-width: 150px; margin: 0; padding: 0; border: 0; }
-.island-picker legend { margin-bottom: 4px; padding: 0; color: var(--text-dim); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-.island-picker-options { display: flex; max-width: 260px; flex-wrap: wrap; gap: 4px; }
-.scope-picker { margin: 0; padding: 0; border: 0; }
-.scope-picker legend { margin-bottom: 4px; padding: 0; color: var(--text-dim); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-.scope-picker-options { display: flex; gap: 4px; }
-.scope-option,
-.island-option { min-height: 31px; padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text-dim); font: inherit; font-size: 11px; cursor: pointer; }
-.scope-option:hover,
-.island-option:hover { border-color: var(--accent); color: var(--text); }
-.scope-option.is-selected,
-.island-option.is-selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 20%, var(--surface)); color: var(--text); font-weight: 700; }
+.custom-menu { position: relative; display: grid; min-width: 150px; gap: 4px; }
+.custom-menu-label { color: var(--text-dim); font-size: 9px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+.custom-menu-trigger { display: flex; align-items: center; justify-content: space-between; gap: 9px; width: 100%; min-height: 31px; padding: 4px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-raised); color: var(--text); font: inherit; font-size: 11px; cursor: pointer; }
+.custom-menu-trigger:hover, .custom-menu-trigger[aria-expanded="true"] { border-color: var(--accent); }
+.custom-menu-trigger:focus-visible, .custom-menu-option:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.custom-menu-chevron { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: transform .15s ease; }
+.custom-menu-trigger[aria-expanded="true"] .custom-menu-chevron { transform: rotate(180deg); }
+.custom-menu-popover { position: absolute; z-index: 20; top: calc(100% + 5px); left: 0; min-width: 100%; overflow: hidden; border: 1px solid var(--accent); border-radius: var(--radius-sm); background: rgba(13, 31, 26, .98); box-shadow: var(--shadow-panel); }
+.custom-menu-popover-scroll { max-height: min(288px, 50vh); overflow-y: auto; scrollbar-color: var(--accent) var(--surface); scrollbar-width: thin; }
+.custom-menu-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 33px; padding: 7px 9px; border: 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent); background: transparent; color: var(--text-dim); font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
+.custom-menu-option:last-child { border-bottom: 0; }
+.custom-menu-option:hover, .custom-menu-option.is-selected { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); color: var(--text); }
+.custom-menu-checkmark { width: 15px; height: 15px; flex: none; fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
 .run-button {
   min-height: 31px;

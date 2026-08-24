@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { InjectedDisruption, ReplayTimeline, SimulationAgentAction } from "@harvest/simulation";
 
 import InjectionPanel from "@/components/InjectionPanel";
+import IslandScopeControls from "@/components/IslandScopeControls";
 import EventFeed from "@/components/panels/EventFeed";
 import Inspector from "@/components/panels/Inspector";
 import Legend from "@/components/panels/Legend";
@@ -211,20 +212,13 @@ export default function ControlRoomPage() {
           <option value="BASELINE">Baseline</option>
         </select>
       </label>
-      <fieldset className="scope-picker"><legend>Island scope</legend>
-        <div className="scope-picker-options">
-          <button type="button" aria-pressed={scopeMode === "SELECTED"} className={scopeMode === "SELECTED" ? "scope-option is-selected" : "scope-option"} onClick={() => setScopeMode("SELECTED")}>Selected islands</button>
-          <button type="button" aria-pressed={scopeMode === "ALL"} className={scopeMode === "ALL" ? "scope-option is-selected" : "scope-option"} onClick={() => setScopeMode("ALL")}>Whole Caribbean</button>
-        </div>
-      </fieldset>
-      {scopeMode === "SELECTED" && <fieldset className="island-picker"><legend>Islands</legend>
-        <div className="island-picker-options">
-          {(scenarios.find((scenario) => scenario.scenarioId === scenarioId)?.islands ?? []).map((island) => {
-            const selected = islandIds.includes(island.islandId);
-            return <button key={island.islandId} type="button" aria-pressed={selected} className={selected ? "island-option is-selected" : "island-option"} onClick={() => setIslandIds((current) => selected ? (current.length > 1 ? current.filter((id) => id !== island.islandId) : current) : [...current, island.islandId])}>{island.name}</button>;
-          })}
-        </div>
-      </fieldset>}
+      <IslandScopeControls
+        islands={scenarios.find((scenario) => scenario.scenarioId === scenarioId)?.islands ?? []}
+        mode={scopeMode}
+        selectedIslandIds={islandIds}
+        onModeChange={setScopeMode}
+        onSelectedIslandIdsChange={setIslandIds}
+      />
       <label>Seed
         <input type="number" min={0} max={4_294_967_295} value={seed} onChange={(event) => setSeed(Number(event.target.value))} />
       </label>
