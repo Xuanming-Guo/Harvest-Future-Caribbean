@@ -172,6 +172,37 @@ export interface ReplayTimeline {
 }
 
 /**
+ * Reduces a large replay to periodic world-state checkpoints without losing
+ * agent actions, disruptions, the opening frame, the settled result, or any
+ * decision records. Regional frames each repeat the complete visible world;
+ * retaining every small physical event would otherwise make a browser replay
+ * impractically large while adding no extra state that a later checkpoint does
+ * not contain.
+ */
+export function compactReplayTimeline(timeline: ReplayTimeline, checkpointIntervalMs: number): ReplayTimeline {
+  if (!Number.isFinite(checkpointIntervalMs) || checkpointIntervalMs <= 0 || timeline.frames.length < 3) return timeline;
+
+  const compacted: ControlRoomFrame[] = [];
+  let pendingDecisions: DecisionRecord[] = [];
+  let lastCheckpointAt = Number.NEGATIVE_INFINITY;
+  const lastIndex = timeline.frames.length - 1;
+
+  for (const [index, frame] of timeline.frames.entries()) {
+    const critical = index === 0 || index === lastIndex || frame.eventType.startsWith('DISRUPTION_') || Boolean(frame.agentActions?.length);
+    const due = frame.atMs - lastCheckpointAt >= checkpointIntervalMs;
+    if (!critical && !due) {
+      pendingDecisions.push(...frame.newDecisions);
+      continue;
+    }
+    compacted.push({ ...frame, newDecisions: [...pendingDecisions, ...frame.newDecisions] });
+    pendingDecisions = [];
+    lastCheckpointAt = frame.atMs;
+  }
+
+  return { ...timeline, frames: compacted };
+}
+
+/**
  * Interpolates a position along a mission path.
  *
  * Frames land on events, which are irregular and sometimes hours apart. Drawing

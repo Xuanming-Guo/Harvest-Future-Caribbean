@@ -10,6 +10,7 @@ import {
   SCENARIOS,
   CARIBBEAN_ISLANDS_V1,
   assertNoTruthLeak,
+  compactReplayTimeline,
   runScenario,
   type ControlRoomScene,
   type InjectedDisruption,
@@ -44,6 +45,15 @@ const PRODUCT_ROLES = [
   ActorRole.OPERATIONS,
   ActorRole.ADMIN,
 ];
+/**
+ * A full M49 Caribbean replay persists substantially more immutable frames
+ * than the Saint Lucia benchmark. The transaction contains only the final
+ * atomic replay write, but PostgreSQL can still require over 30 seconds to
+ * store that document on a development Docker volume.
+ */
+const REPLAY_WRITE_TIMEOUT_MS = 120_000;
+/** Six-hour checkpoints keep full-region replays navigable without hiding important changes. */
+const REGIONAL_REPLAY_CHECKPOINT_INTERVAL_MS = 6 * 60 * 60 * 1_000;
 
 const json = (value: unknown): Prisma.InputJsonValue =>
   JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -263,7 +273,9 @@ async function executeAndSaveRun(server: FastifyInstance, input: SavedRunInput) 
           return { result, timeline: result.timeline, decisionAdapter: "deterministic", actions: [] };
         })();
     const result = connected.result;
-    const timeline = connected.timeline;
+    const timeline = input.resolvedIslandIds.length > 1
+      ? compactReplayTimeline(connected.timeline, REGIONAL_REPLAY_CHECKPOINT_INTERVAL_MS)
+      : connected.timeline;
     const finalProductSnapshot = timeline.frames.at(-1)?.operationsSnapshot;
     const metrics = connected.actions.length
       ? {
@@ -311,7 +323,7 @@ async function executeAndSaveRun(server: FastifyInstance, input: SavedRunInput) 
         },
       });
       return row;
-    }, { timeout: 30_000 });
+    }, { timeout: REPLAY_WRITE_TIMEOUT_MS, maxWait: 10_000 });
     if (input.policy === "BASELINE") await saveActorMappings(input.runId, timeline.scene);
     return completed;
   } catch (error) {

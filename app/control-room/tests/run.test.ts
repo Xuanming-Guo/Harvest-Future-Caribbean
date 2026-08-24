@@ -12,8 +12,8 @@ import {
 } from "@/lib/run";
 
 describe("saved-run control-room vocabulary", () => {
-  it("uses the documented Saint Lucia scenario and a repeatable default seed", () => {
-    expect(DEFAULT_SCENARIO).toBe("saint-lucia-demo-v1");
+  it("uses the documented Caribbean scenario and a repeatable default seed", () => {
+    expect(DEFAULT_SCENARIO).toBe("caribbean-islands-v1");
     expect(DEFAULT_SEED).toBe(8675309);
   });
 

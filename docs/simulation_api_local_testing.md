@@ -84,11 +84,12 @@ $scenarios.items | Select-Object scenarioId, durationDays,
 
 Expected:
 
-- scenario `saint-lucia-demo-v1`;
+- scenarios `saint-lucia-demo-v1` and `caribbean-islands-v1`;
 - 21 simulated days;
 - `BASELINE` and `HARVEST` policies;
 - `DETERMINISTIC` and `LLM_ASSISTED` decision modes;
-- Saint Lucia is the only available island until Issue #31.
+- the Saint Lucia benchmark exposes Saint Lucia only; the regional scenario
+  exposes all 28 current UN M49 Caribbean country/area entries.
 
 ## 4. Create a connected deterministic Harvest run
 
@@ -423,7 +424,9 @@ than silently running a local substitute.
 
 ## Boundaries
 
-- Saint Lucia only; regional expansion is Issue #31.
+- The regional scenario contains independent synthetic local systems for all
+  current UN M49 Caribbean areas. It does not model inter-island orders,
+  shipping, ports, customs, or currency conversion.
 - No mobile app.
 - No benchmark, Model Lab, Data Room or Judge page is added here.
 - Simulated approvals are synthetic decisions; real commitments still require

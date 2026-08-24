@@ -22,7 +22,7 @@ export type {
   RunStatus,
 } from './engine.js';
 
-export { frameAt, interpolateAlongPath, missionPositionAt } from './replay.js';
+export { compactReplayTimeline, frameAt, interpolateAlongPath, missionPositionAt } from './replay.js';
 export type {
   ControlRoomBatch,
   ControlRoomDemand,

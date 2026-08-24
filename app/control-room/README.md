@@ -33,9 +33,9 @@ and handles play, pause, speed, rewind, scrub and reset locally:
   safe trace/event references in the Inspector;
 - a mapped participant can be opened in the normal website, read-only.
 
-The scenario selector is populated by `GET /v1/simulation-scenarios`; Saint
-Lucia is currently the only option, so the UI is ready for later scenarios
-without pretending regional expansion is already implemented.
+The scenario selector is populated by `GET /v1/simulation-scenarios`. It opens
+on the full synthetic Caribbean scenario, whose scope can be narrowed with the
+custom island picker; `saint-lucia-demo-v1` remains the detailed benchmark.
 
 ### Reading the outcome cards
 

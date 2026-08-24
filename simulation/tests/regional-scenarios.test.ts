@@ -1,8 +1,38 @@
 import { describe, expect, it } from 'vitest';
 
-import { CARIBBEAN_ISLANDS_V1, runScenario } from '../src/index.js';
+import { CARIBBEAN_ISLANDS_V1, compactReplayTimeline, runScenario, type ControlRoomFrame } from '../src/index.js';
+
+const M49_CARIBBEAN_ISLAND_IDS = [
+  'anguilla', 'antigua-barbuda', 'aruba', 'bahamas', 'barbados',
+  'bonaire-sint-eustatius-saba', 'british-virgin-islands', 'cayman-islands',
+  'cuba', 'curacao', 'dominica', 'dominican-republic', 'grenada',
+  'guadeloupe', 'haiti', 'jamaica', 'martinique', 'montserrat', 'puerto-rico',
+  'saint-barthelemy', 'saint-kitts-nevis', 'saint-lucia',
+  'saint-martin-french-part', 'saint-vincent-grenadines',
+  'sint-maarten-dutch-part', 'trinidad-tobago', 'turks-caicos-islands',
+  'united-states-virgin-islands',
+];
 
 describe('manifest-generated Caribbean scenarios', () => {
+  it('covers every current UN M49 Caribbean country or area', () => {
+    expect(CARIBBEAN_ISLANDS_V1.map((island) => island.islandId)).toEqual(M49_CARIBBEAN_ISLAND_IDS);
+  });
+
+  it('compacts large regional replay snapshots without losing decisions or critical frames', () => {
+    const frame = (atMs: number, eventType: string, decisions: string[] = [], agentAction = false) => ({
+      atMs, at: new Date(atMs).toISOString(), eventType, newDecisions: decisions.map((summary) => ({ summary })),
+      agentActions: agentAction ? [{ actionId: eventType }] : undefined,
+    }) as unknown as ControlRoomFrame;
+    const compacted = compactReplayTimeline({ scene: {} as never, frames: [
+      frame(0, 'RUN_STARTED'), frame(1_000, 'FARMER_OBSERVATION', ['reported']),
+      frame(2_000, 'BUYER_DEMAND', ['requested']), frame(3_000, 'PRODUCT_AGENT_CYCLE', [], true),
+      frame(4_000, 'DISRUPTION_START'), frame(10_000, 'RUN_SETTLED'),
+    ] }, 5_000);
+
+    expect(compacted.frames.map((item) => item.eventType)).toEqual(['RUN_STARTED', 'PRODUCT_AGENT_CYCLE', 'DISRUPTION_START', 'RUN_SETTLED']);
+    expect(compacted.frames[1]!.newDecisions.map((item) => item.summary)).toEqual(['reported', 'requested']);
+  });
+
   it('generates deterministic independent systems for a selected island set', () => {
     const options = { scenarioId: 'caribbean-islands-v1', policy: 'HARVEST' as const, seed: 42, captureFrames: true, islandIds: ['barbados', 'dominica'] };
     const first = runScenario(options);

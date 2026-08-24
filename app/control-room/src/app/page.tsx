@@ -44,7 +44,7 @@ export default function ControlRoomPage() {
   const [policy, setPolicy] = useState<PolicyName>("HARVEST");
   const [seed, setSeed] = useState(DEFAULT_SEED);
   const [decisionMode, setDecisionMode] = useState<DecisionMode>("DETERMINISTIC");
-  const [scopeMode, setScopeMode] = useState<"SELECTED" | "ALL">("SELECTED");
+  const [scopeMode, setScopeMode] = useState<"SELECTED" | "ALL">("ALL");
   const [islandIds, setIslandIds] = useState<string[]>(["saint-lucia"]);
   const [injections, setInjections] = useState<InjectedDisruption[]>([]);
   const [timeline, setTimeline] = useState<ReplayTimeline | null>(null);
@@ -251,7 +251,7 @@ export default function ControlRoomPage() {
       <main className="control-room launch-screen">
         <section className="launch-card">
           <span className="masthead-mark">H</span>
-          <div><h1>Harvest control room</h1><p>Create or load a saved Saint Lucia simulation run.</p></div>
+          <div><h1>Harvest control room</h1><p>Create or load a saved synthetic simulation run.</p></div>
           {setup}
           {error && <p className="run-error" role="alert">{error}</p>}
           <p className="launch-note">Runs are synthetic evidence. Harvest-mode agents use the Product API; baseline runs remain isolated.</p>
