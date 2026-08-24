@@ -640,6 +640,14 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
 - Callers: operations/admin/control room.
 - Response: evidence label, provenance note, static scene and the complete
   ordered observable frame array.
+- Reference geography: the scene includes `referencePlaces` and
+  `referenceDataSources`. Each public place has a stable reference ID, category,
+  position, source feature URL, retrieval/revision metadata, evidence type and
+  warnings. Farms, buyers and transporters may carry a `referencePlaceId` that
+  links a synthetic actor to nearby geographic context. The source registry
+  supplies the attribution and licence that the control room displays. Only
+  references inside the run's selected island scope are returned. Older saved
+  scenes with no reference arrays are normalised to empty arrays when read.
 - Product state/simulation effect: none. Playback position, pause, speed,
   rewind and reset are local array navigation and never API commands.
   - Replay consistency: the engine appends a `RUN_SETTLED` frame at the exact
@@ -649,7 +657,10 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
     Multi-island runs retain periodic visible-world checkpoints plus every
     disruption and participant-action frame, rather than serialising an
     unbounded full-world snapshot after every physical event.
-- Rules/failures: only completed runs are replayable.
+- Rules/failures: only completed runs are replayable. Public references never
+  become operational Product API organisations, listings or orders. Their
+  presence does not imply participation or endorsement, and all actor behaviour
+  and results remain synthetic.
 
 #### `GET /v1/simulation-runs/{runId}/world`
 

@@ -20,6 +20,8 @@ const scene = {
   buyers: [],
   transporters: [{ transporterId: "vehicle-1", islandId: "saint-lucia", name: "Castries light truck", homePosition: { latitude: 14, longitude: -61 }, capacityKg: 500 }],
   roads: [{ roadSegmentId: "road-1", islandId: "saint-lucia", name: "Mabouya valley road", from: { latitude: 13.9, longitude: -60.9 }, to: { latitude: 14, longitude: -61 }, distanceKm: 12 }],
+  referencePlaces: [],
+  referenceDataSources: [],
   participants: [],
   evidenceLabel: "SYNTHETIC SIMULATION",
 } satisfies ControlRoomScene;

@@ -345,6 +345,15 @@ describe("participant Product API", () => {
     expect(timeline.json().frames).toHaveLength(created.json().frameCount);
     expect(timeline.json().scene.runId).toBe(runId);
     expect(timeline.json().scene.participants.every((participant: { productActorId: string | null }) => participant.productActorId)).toBe(true);
+    expect(timeline.json().scene.referencePlaces).toHaveLength(13);
+    expect(timeline.json().scene.referenceDataSources).toMatchObject([{
+      sourceId: "openstreetmap-v1",
+      licenceName: "Open Data Commons Open Database License 1.0",
+    }]);
+    const referenceIds = new Set(timeline.json().scene.referencePlaces.map((place: { referencePlaceId: string }) => place.referencePlaceId));
+    const actors = [...timeline.json().scene.farms, ...timeline.json().scene.buyers, ...timeline.json().scene.transporters];
+    expect(actors.filter((actor: { referencePlaceId?: string }) => actor.referencePlaceId)).toHaveLength(4);
+    expect(actors.every((actor: { referencePlaceId?: string }) => !actor.referencePlaceId || referenceIds.has(actor.referencePlaceId))).toBe(true);
     expect(timeline.json().frames.some((frame: { agentActions?: unknown[] }) => (frame.agentActions?.length ?? 0) > 0)).toBe(true);
     expect(timeline.json().frames.every((frame: { operationsSnapshot?: unknown }) => frame.operationsSnapshot)).toBe(true);
     const finalFrame = timeline.json().frames.at(-1);

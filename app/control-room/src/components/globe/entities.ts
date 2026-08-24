@@ -21,6 +21,7 @@ import type {
   ControlRoomScene,
   CropStage,
   GeoPoint,
+  ReferencePlaceCategory,
 } from "@harvest/simulation";
 import { missionPositionAt } from "@harvest/simulation";
 
@@ -56,6 +57,13 @@ const DISRUPTION_COLOUR = "#c45645";
 const ROAD_COLOUR = "#8faea2";
 const ROAD_DEGRADED_COLOUR = "#c45645";
 const SELECTION_HALO_COLOUR = "#eaf4ef";
+const REFERENCE_COLOUR: Record<ReferencePlaceCategory, string> = {
+  AGRICULTURAL_AREA: "#86a96f",
+  HOTEL_RESORT: "#a78ad1",
+  RESTAURANT: "#d98263",
+  SUPERMARKET_MARKET: "#d9b34c",
+  PORT_FERRY_TERMINAL: "#56a7bd",
+};
 
 const FARM_PIXEL_SIZE = 12;
 const BUYER_ICON_PIXELS = 26;
@@ -160,6 +168,38 @@ function isSelected(id: string, selectedId: string | null): boolean {
 export function syncScene(Cesium: CesiumModule, viewer: Viewer, scene: ControlRoomScene): void {
   viewer.entities.removeAll();
 
+  // Public-reference context is deliberately smaller and quieter than the
+  // synthetic participants. Labels appear only at close range; selecting a
+  // marker keeps its source and disclaimer in the Inspector.
+  for (const place of scene.referencePlaces) {
+    viewer.entities.add({
+      id: place.referencePlaceId,
+      name: place.name,
+      position: Cesium.Cartesian3.fromDegrees(place.position.longitude, place.position.latitude),
+      point: {
+        pixelSize: 6,
+        color: Cesium.Color.fromCssColorString(REFERENCE_COLOUR[place.category]).withAlpha(0.82),
+        outlineColor: Cesium.Color.fromCssColorString("#071310"),
+        outlineWidth: 1,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      },
+      label: {
+        text: place.name,
+        font: "500 10px 'DM Sans', sans-serif",
+        fillColor: Cesium.Color.fromCssColorString("#d8e6df"),
+        outlineColor: Cesium.Color.fromCssColorString("#071310"),
+        outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.TOP,
+        pixelOffset: new Cesium.Cartesian2(0, 8),
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 50_000),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      },
+    });
+  }
+
   for (const farm of scene.farms) {
     viewer.entities.add({
       id: farm.farmId,
@@ -185,6 +225,7 @@ export function syncScene(Cesium: CesiumModule, viewer: Viewer, scene: ControlRo
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
         verticalOrigin: Cesium.VerticalOrigin.TOP,
         pixelOffset: new Cesium.Cartesian2(0, 10),
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 200_000),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
         // Sit on the terrain surface. Positions carry no elevation of their
         // own, so with real relief an unclamped marker is buried inside the
@@ -218,6 +259,7 @@ export function syncScene(Cesium: CesiumModule, viewer: Viewer, scene: ControlRo
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
         verticalOrigin: Cesium.VerticalOrigin.TOP,
         pixelOffset: new Cesium.Cartesian2(0, 16),
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 200_000),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
         // Sit on the terrain surface. Positions carry no elevation of their
         // own, so with real relief an unclamped marker is buried inside the
@@ -266,12 +308,29 @@ export function syncFrame(
   atMs: number,
   selectedId: string | null,
 ): void {
+  syncReferencePlaces(Cesium, viewer, scene, selectedId);
   syncFarms(Cesium, viewer, scene, frame, selectedId);
   syncBuyers(Cesium, viewer, scene, selectedId);
   syncRoads(Cesium, viewer, scene, frame);
   syncMissions(Cesium, viewer, frame, atMs, selectedId);
   syncDisruptions(Cesium, viewer, scene, frame, selectedId);
   syncStructureFrame(Cesium, viewer, scene, frame, atMs);
+}
+
+function syncReferencePlaces(Cesium: CesiumModule, viewer: Viewer, scene: ControlRoomScene, selectedId: string | null): void {
+  for (const place of scene.referencePlaces) {
+    const entity = viewer.entities.getById(place.referencePlaceId);
+    if (!entity?.point || !entity.label) continue;
+    const selected = isSelected(place.referencePlaceId, selectedId);
+    entity.point.pixelSize = new Cesium.ConstantProperty(selected ? 12 : 6);
+    entity.point.outlineColor = new Cesium.ConstantProperty(
+      Cesium.Color.fromCssColorString(selected ? SELECTION_HALO_COLOUR : "#071310"),
+    );
+    entity.point.outlineWidth = new Cesium.ConstantProperty(selected ? 3 : 1);
+    entity.label.distanceDisplayCondition = new Cesium.ConstantProperty(
+      new Cesium.DistanceDisplayCondition(0, selected ? Number.POSITIVE_INFINITY : 50_000),
+    );
+  }
 }
 
 function syncFarms(

@@ -8,6 +8,7 @@ import InjectionPanel from "@/components/InjectionPanel";
 import IslandScopeControls from "@/components/IslandScopeControls";
 import EventFeed from "@/components/panels/EventFeed";
 import Inspector from "@/components/panels/Inspector";
+import ReferenceAttribution from "@/components/panels/ReferenceAttribution";
 import Legend from "@/components/panels/Legend";
 import Masthead from "@/components/panels/Masthead";
 import MetricsPanel from "@/components/panels/MetricsPanel";
@@ -199,11 +200,12 @@ export default function ControlRoomPage() {
   );
   const disruptionMarkers = useMemo(() => {
     if (!timeline) return [];
-    const seen = new Set<string>();
+    const seen = new Set<number>();
     return timeline.frames.flatMap((frame) => frame.disruptions.flatMap((disruption) => {
-      if (seen.has(disruption.eventId)) return [];
-      seen.add(disruption.eventId);
-      return [Date.parse(disruption.observedAt)];
+      const observedAt = Date.parse(disruption.observedAt);
+      if (seen.has(observedAt)) return [];
+      seen.add(observedAt);
+      return [observedAt];
     }));
   }, [timeline]);
 
@@ -281,6 +283,7 @@ export default function ControlRoomPage() {
       <div className="globe-layer">
         <CesiumGlobe scene={scene} frame={frame} atMs={state.atMs} selectedId={selectedId} onSelect={handleSelect} focusRegion={focusRegion} />
       </div>
+      <ReferenceAttribution sources={scene.referenceDataSources} />
       <div className="chrome">
         <div className="chrome-header">
           <Masthead scene={scene} />

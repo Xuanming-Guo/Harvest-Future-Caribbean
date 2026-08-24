@@ -18,6 +18,11 @@ const ENTRIES: Array<{ className: string; label: string }> = [
   { className: "status-harvested", label: "Harvested" },
   { className: "status-spoiled", label: "Spoiled" },
   { className: "status-delayed", label: "Delayed" },
+  { className: "reference-agriculture", label: "Reference agriculture" },
+  { className: "reference-hotel", label: "Reference hotel" },
+  { className: "reference-restaurant", label: "Reference restaurant" },
+  { className: "reference-market", label: "Reference market" },
+  { className: "reference-port", label: "Reference port" },
 ];
 
 export default function Legend(): React.JSX.Element {

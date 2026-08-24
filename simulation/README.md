@@ -121,12 +121,31 @@ without pretending the current policy already beats the baseline.
 
 ## Evidence status
 
-Every number this package produces is **synthetic**. The Saint Lucian locations
-are real; no yield, price, demand, road speed or spoilage figure is a
-measurement. Each `RunResult` carries an `evidenceLabel` and a
+Every number this package produces is **synthetic**. Licensed OpenStreetMap
+place names and coordinates provide offline Caribbean context; no actor, yield,
+price, demand, road speed or spoilage figure is a measurement. Synthetic actors
+can carry a `referencePlaceId` without adopting the real place's identity.
+Each `RunResult` carries an `evidenceLabel` and a
 `provenanceNote`, so the label travels with the data rather than living only in
 a document. Results are simulated counterfactual evidence and must never be
 presented as measured impact from a deployed system.
+
+## Caribbean reference places
+
+The versioned catalogue in
+`src/scenario/caribbean-reference-places-v1.data.ts` contains 8 to 20 licensed
+public reference features for each of the 28 manifest areas. The engine filters
+it to the selected island scope, anchors compatible generic synthetic actors
+where possible, and preserves the existing synthetic fallback when a category
+is absent. The replay scene includes both the selected references and their
+source registry so clients can show attribution and the non-participant
+disclaimer.
+
+There is no runtime geography lookup. Maintainers can run
+`npm --workspace @harvest/simulation run refresh:reference-places` from the
+repository root to rebuild the snapshot, then review the generated diff. See
+[`docs/caribbean-scenario-data.md`](../docs/caribbean-scenario-data.md) for the
+source, licence, safe-field rules and limitations.
 
 ## Responsibilities
 
