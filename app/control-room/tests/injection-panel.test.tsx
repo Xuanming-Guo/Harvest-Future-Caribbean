@@ -16,10 +16,10 @@ const scene = {
   seed: 8675309,
   startsAt: new Date(startMs).toISOString(),
   endsAt: new Date(endMs).toISOString(),
-  farms: [{ farmId: "farm-1", name: "Mabouya Valley smallholding", position: { latitude: 13.9, longitude: -60.9 } }],
+  farms: [{ farmId: "farm-1", islandId: "saint-lucia", name: "Mabouya Valley smallholding", position: { latitude: 13.9, longitude: -60.9 } }],
   buyers: [],
-  transporters: [{ transporterId: "vehicle-1", name: "Castries light truck", homePosition: { latitude: 14, longitude: -61 }, capacityKg: 500 }],
-  roads: [{ roadSegmentId: "road-1", name: "Mabouya valley road", from: { latitude: 13.9, longitude: -60.9 }, to: { latitude: 14, longitude: -61 }, distanceKm: 12 }],
+  transporters: [{ transporterId: "vehicle-1", islandId: "saint-lucia", name: "Castries light truck", homePosition: { latitude: 14, longitude: -61 }, capacityKg: 500 }],
+  roads: [{ roadSegmentId: "road-1", islandId: "saint-lucia", name: "Mabouya valley road", from: { latitude: 13.9, longitude: -60.9 }, to: { latitude: 14, longitude: -61 }, distanceKm: 12 }],
   participants: [],
   evidenceLabel: "SYNTHETIC SIMULATION",
 } satisfies ControlRoomScene;

@@ -615,6 +615,11 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
   injected disruption must start strictly before the scenario horizon; an
   offset at or after the horizon returns `422 INVALID_DISRUPTION` because no
   simulated time remains in which it could occur.
+  `saint-lucia-demo-v1` accepts only Saint Lucia; `caribbean-islands-v1`
+  accepts one, several, or `ALL` manifest islands. Island systems share the
+  clock but never create inter-island allocations, routes, or commitments.
+  Manifest reference inputs and synthetic fallbacks are documented in
+  [`caribbean-scenario-data.md`](caribbean-scenario-data.md).
 
 #### `GET /v1/simulation-runs/{runId}`
 

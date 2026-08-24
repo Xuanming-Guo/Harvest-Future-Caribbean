@@ -125,6 +125,8 @@ export interface EngineOptions {
    */
   runId?: string;
   scenarioId: string;
+  /** Resolved island scope supplied by the Product API for regional scenarios. */
+  islandIds?: readonly string[];
   policy: PolicyName;
   seed: number;
   /** Hard cap on events processed, so a scheduling bug fails fast instead of hanging. */
@@ -303,7 +305,7 @@ export class SimulationEngine {
     const deterministicRunId = this.ids.next();
     this.runId = options.runId ?? deterministicRunId;
 
-    this.world = this.scenario.build({ random: this.random, ids: this.ids, startsAt: this.startsAt });
+    this.world = this.scenario.build({ random: this.random, ids: this.ids, startsAt: this.startsAt, islandIds: options.islandIds });
 
     // Injected disruptions join the scenario's own before anything is
     // scheduled, so they are indistinguishable from generated ones once the run
@@ -1553,22 +1555,26 @@ export class SimulationEngine {
       endsAt: formatInstant(this.endsAt),
       farms: [...this.world.farms.values()].map((farm) => ({
         farmId: farm.farmId,
+        islandId: farm.islandId,
         name: farm.name,
         position: farm.position,
       })),
       buyers: [...this.world.buyers.values()].map((buyer) => ({
         buyerId: buyer.buyerId,
+        islandId: buyer.islandId,
         name: buyer.name,
         position: buyer.position,
       })),
       transporters: [...this.world.transporters.values()].map((transporter) => ({
         transporterId: transporter.transporterId,
+        islandId: transporter.islandId,
         name: transporter.name,
         homePosition: transporter.homePosition,
         capacityKg: transporter.capacityKg,
       })),
       roads: [...this.world.roads.values()].map((road) => ({
         roadSegmentId: road.roadSegmentId,
+        islandId: road.islandId,
         name: road.name,
         from: road.from,
         to: road.to,
@@ -1580,21 +1586,21 @@ export class SimulationEngine {
           productActorId: null,
           role: 'FARMER' as const,
           displayName: farm.name,
-          islandId: 'saint-lucia',
+          islandId: farm.islandId,
         })),
         ...[...this.world.buyers.values()].map((buyer) => ({
           simulationActorId: buyer.buyerId,
           productActorId: null,
           role: 'BUYER' as const,
           displayName: buyer.name,
-          islandId: 'saint-lucia',
+          islandId: buyer.islandId,
         })),
         ...[...this.world.transporters.values()].map((transporter) => ({
           simulationActorId: transporter.transporterId,
           productActorId: null,
           role: 'TRANSPORTER' as const,
           displayName: transporter.name,
-          islandId: 'saint-lucia',
+          islandId: transporter.islandId,
         })),
       ],
       evidenceLabel: EVIDENCE_LABEL,
