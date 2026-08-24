@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { InjectedDisruption, ReplayTimeline, SimulationAgentAction } from "@harvest/simulation";
 
 import InjectionPanel from "@/components/InjectionPanel";
+import IslandScopeControls from "@/components/IslandScopeControls";
 import EventFeed from "@/components/panels/EventFeed";
 import Inspector from "@/components/panels/Inspector";
 import Legend from "@/components/panels/Legend";
@@ -211,14 +212,13 @@ export default function ControlRoomPage() {
           <option value="BASELINE">Baseline</option>
         </select>
       </label>
-      <label>Island scope
-        <select value={scopeMode} onChange={(event) => setScopeMode(event.target.value as "SELECTED" | "ALL")}><option value="SELECTED">Selected islands</option><option value="ALL">Whole Caribbean</option></select>
-      </label>
-      {scopeMode === "SELECTED" && <label>Islands
-        <select multiple value={islandIds} onChange={(event) => setIslandIds([...event.currentTarget.selectedOptions].map((option) => option.value))}>
-          {(scenarios.find((scenario) => scenario.scenarioId === scenarioId)?.islands ?? []).map((island) => <option key={island.islandId} value={island.islandId}>{island.name}</option>)}
-        </select>
-      </label>}
+      <IslandScopeControls
+        islands={scenarios.find((scenario) => scenario.scenarioId === scenarioId)?.islands ?? []}
+        mode={scopeMode}
+        selectedIslandIds={islandIds}
+        onModeChange={setScopeMode}
+        onSelectedIslandIdsChange={setIslandIds}
+      />
       <label>Seed
         <input type="number" min={0} max={4_294_967_295} value={seed} onChange={(event) => setSeed(Number(event.target.value))} />
       </label>
