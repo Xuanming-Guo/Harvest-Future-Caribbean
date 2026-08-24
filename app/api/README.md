@@ -71,8 +71,11 @@ the corresponding event transactionally. Every POST requires
 ## Model integration and simulation boundary
 
 `MODEL_ADAPTER=fixture` is the local default and returns deterministic,
-contract-valid prediction evidence. A later model issue can replace it with an
-HTTP adapter without changing website payloads.
+contract-valid prediction evidence. Set `MODEL_ADAPTER=http` and
+`MODEL_SERVICE_URL=http://localhost:8002` to call the contract-bound model
+service in [`model/`](../../model/); it authenticates with
+`INTERNAL_SERVICE_TOKEN`, validates every response before persistence, and
+still calculates ATP itself. The model service never writes Product API state.
 
 Agent and simulation text assistance is provider-neutral. Leave
 `AGENT_LLM_PROVIDER`, `AGENT_LLM_MODEL`, `AGENT_LLM_BASE_URL`, and

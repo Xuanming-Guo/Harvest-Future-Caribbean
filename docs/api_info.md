@@ -822,7 +822,9 @@ The Product API alone calls
 `POST /internal/v1/yield-predictions` from the
 [model OpenAPI](../contracts/model/openapi.yaml). It sends batch/farm/crop IDs,
 request time/run context, provenance, and allow-listed observation/weather/
-satellite feature summaries. The model returns:
+satellite feature summaries. These may include observation count/latest
+observed quantity, planted area, crop stage, and days since planting; absent
+evidence must remain absent rather than being fabricated. The model returns:
 
 - model and prediction/request IDs;
 - q10, q50, and q90 marketable-yield quantities in the same unit;
