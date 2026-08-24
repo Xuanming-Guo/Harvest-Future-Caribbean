@@ -10,6 +10,7 @@ const evidence = 'SYNTHETIC. Manifest identity, settlement coordinates, timezone
 export const caribbeanIslandsV1: Scenario = {
   scenarioId: 'caribbean-islands-v1',
   description: 'Manifest-generated independent Caribbean island food systems. Inter-island trade, shipping, ports, customs and currency conversion are intentionally excluded.',
+  availableIslandIds: CARIBBEAN_ISLANDS_V1.map((island) => island.islandId),
   startsAtIso: START_ISO,
   durationDays: DURATION_DAYS,
   provenanceNote: evidence,
@@ -39,3 +40,21 @@ export const caribbeanIslandsV1: Scenario = {
     return { farms, buyers, transporters, roads, truth: { crops, disruptions, rainfallMmByDate }, observed: { batches, demands: new Map(), commitments: new Map(), missions: new Map(), disruptions: [], degradedRoadSegmentIds: new Set() } };
   },
 };
+
+/**
+ * A focused, independently runnable recipe for each manifest island. The
+ * regional recipe remains available for whole-Caribbean runs; these entries
+ * let the control room launch and inspect any island without first narrowing
+ * a broader scenario by hand.
+ */
+export const caribbeanIslandScenarios: readonly Scenario[] = CARIBBEAN_ISLANDS_V1.map((island) => ({
+  scenarioId: `caribbean-${island.islandId}-v1`,
+  description: `Synthetic ${island.name} local food system over three weeks.`,
+  availableIslandIds: [island.islandId],
+  startsAtIso: START_ISO,
+  durationDays: DURATION_DAYS,
+  provenanceNote: evidence,
+  build(context: ScenarioContext): World {
+    return caribbeanIslandsV1.build({ ...context, islandIds: [island.islandId] });
+  },
+}));

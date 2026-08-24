@@ -22,7 +22,7 @@ export type {
   RunStatus,
 } from './engine.js';
 
-export { frameAt, interpolateAlongPath, missionPositionAt } from './replay.js';
+export { compactReplayTimeline, frameAt, interpolateAlongPath, missionPositionAt } from './replay.js';
 export type {
   ControlRoomBatch,
   ControlRoomDemand,
@@ -45,7 +45,7 @@ export { IdFactory, UUID_V4_PATTERN } from './core/ids.js';
 export * from './core/time.js';
 
 export { SCENARIOS, requireScenario, saintLuciaDemoV1 } from './scenario/saint-lucia-demo-v1.js';
-export { caribbeanIslandsV1 } from './scenario/caribbean-islands-v1.js';
+export { caribbeanIslandScenarios, caribbeanIslandsV1 } from './scenario/caribbean-islands-v1.js';
 export { CARIBBEAN_ISLANDS_V1, CARIBBEAN_ISLAND_IDS, requireCaribbeanIsland } from './scenario/caribbean-islands-manifest-v1.js';
 export type { CaribbeanIslandManifest } from './scenario/caribbean-islands-manifest-v1.js';
 export type { Scenario, ScenarioContext } from './scenario/types.js';

@@ -18,7 +18,7 @@
 import { IdFactory } from '../core/ids.js';
 import { DAY_MS, HOUR_MS, formatDate } from '../core/time.js';
 import type { Scenario, ScenarioContext } from './types.js';
-import { caribbeanIslandsV1 } from './caribbean-islands-v1.js';
+import { caribbeanIslandScenarios, caribbeanIslandsV1 } from './caribbean-islands-v1.js';
 import type {
   Buyer,
   Farm,
@@ -104,6 +104,7 @@ export const saintLuciaDemoV1: Scenario = {
   description:
     'Cucumber supply from five Mabouya-area smallholdings to three Castries-area buyers over three weeks, ' +
     'with a rainy period that degrades interior roads and brings forward spoilage.',
+  availableIslandIds: ['saint-lucia'],
   startsAtIso: START_ISO,
   durationDays: DURATION_DAYS,
   provenanceNote:
@@ -308,6 +309,7 @@ export const saintLuciaDemoV1: Scenario = {
 export const SCENARIOS: Record<string, Scenario> = {
   [saintLuciaDemoV1.scenarioId]: saintLuciaDemoV1,
   [caribbeanIslandsV1.scenarioId]: caribbeanIslandsV1,
+  ...Object.fromEntries(caribbeanIslandScenarios.map((scenario) => [scenario.scenarioId, scenario])),
 };
 
 /** Looks up a scenario, listing what exists rather than returning undefined. */

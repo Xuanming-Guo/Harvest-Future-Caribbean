@@ -30,6 +30,8 @@ export interface ScenarioContext {
 export interface Scenario {
   scenarioId: string;
   description: string;
+  /** Manifest islands that this recipe may materialise. */
+  availableIslandIds: readonly string[];
   /** ISO-8601 instant the run clock starts at. */
   startsAtIso: string;
   /** How long the run covers before it is considered finished. */

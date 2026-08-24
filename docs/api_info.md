@@ -584,8 +584,9 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
 
 - Callers: operations/admin/control-room operator.
 - Response: safe scenario metadata, current policies, supported decision modes,
-  islands, duration and provenance. Saint Lucia is the only current island;
-  issue #31 owns regional generation.
+  islands, duration and provenance. The regional scenario exposes every current
+  UN M49 Caribbean country or area as an independently simulated, synthetic
+  local system; the Saint Lucia recipe remains the focused benchmark.
 
 #### `GET /v1/simulation-runs`
 
@@ -616,8 +617,10 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
   offset at or after the horizon returns `422 INVALID_DISRUPTION` because no
   simulated time remains in which it could occur.
   `saint-lucia-demo-v1` accepts only Saint Lucia; `caribbean-islands-v1`
-  accepts one, several, or `ALL` manifest islands. Island systems share the
-  clock but never create inter-island allocations, routes, or commitments.
+  accepts one, several, or `ALL` manifest islands; each
+  `caribbean-<island-id>-v1` focused scenario accepts its named island only.
+  Island systems share the clock but never create inter-island allocations,
+  routes, or commitments.
   Manifest reference inputs and synthetic fallbacks are documented in
   [`caribbean-scenario-data.md`](caribbean-scenario-data.md).
 
@@ -639,10 +642,13 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
   ordered observable frame array.
 - Product state/simulation effect: none. Playback position, pause, speed,
   rewind and reset are local array navigation and never API commands.
-- Replay consistency: the engine appends a `RUN_SETTLED` frame at the exact
-  scenario horizon after physical demand settlement. Harvest frames retain the
-  latest run-scoped Product API snapshot between participant action cycles, so
-  the final replay frame, saved-run metrics and operations endpoint agree.
+  - Replay consistency: the engine appends a `RUN_SETTLED` frame at the exact
+    scenario horizon after physical demand settlement. Harvest frames retain the
+    latest run-scoped Product API snapshot between participant action cycles, so
+    the final replay frame, saved-run metrics and operations endpoint agree.
+    Multi-island runs retain periodic visible-world checkpoints plus every
+    disruption and participant-action frame, rather than serialising an
+    unbounded full-world snapshot after every physical event.
 - Rules/failures: only completed runs are replayable.
 
 #### `GET /v1/simulation-runs/{runId}/world`

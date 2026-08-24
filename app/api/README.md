@@ -36,6 +36,10 @@ paired-run, snapshot and SSE checks with expected values. The root `npm run
 dev` command reseeds disposable development data, so it clears saved run IDs
 from a previous root development session.
 
+The local API accepts both `localhost` and `127.0.0.1` spellings for the
+configured website and control-room ports. A control room with no saved run is
+ready to generate one from its selected scenario, scope, and seed.
+
 ## Authentication
 
 All `/v1` operations require a bearer JWT. In development only,

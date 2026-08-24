@@ -10,6 +10,7 @@ import {
   SCENARIOS,
   CARIBBEAN_ISLANDS_V1,
   assertNoTruthLeak,
+  compactReplayTimeline,
   runScenario,
   type ControlRoomScene,
   type InjectedDisruption,
@@ -44,6 +45,15 @@ const PRODUCT_ROLES = [
   ActorRole.OPERATIONS,
   ActorRole.ADMIN,
 ];
+/**
+ * A full M49 Caribbean replay persists substantially more immutable frames
+ * than the Saint Lucia benchmark. The transaction contains only the final
+ * atomic replay write, but PostgreSQL can still require over 30 seconds to
+ * store that document on a development Docker volume.
+ */
+const REPLAY_WRITE_TIMEOUT_MS = 120_000;
+/** Six-hour checkpoints keep full-region replays navigable without hiding important changes. */
+const REGIONAL_REPLAY_CHECKPOINT_INTERVAL_MS = 6 * 60 * 60 * 1_000;
 
 const json = (value: unknown): Prisma.InputJsonValue =>
   JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -86,7 +96,8 @@ function readScenario(value: unknown) {
 }
 
 function readScope(value: unknown, scenarioId: string): { scope: RunScope; resolvedIslandIds: string[] } {
-  const allowedIslandIds = scenarioId === "saint-lucia-demo-v1" ? new Set(["saint-lucia"]) : new Set(CARIBBEAN_ISLANDS_V1.map((island) => island.islandId));
+  const scenario = readScenario(scenarioId);
+  const allowedIslandIds = new Set(scenario.availableIslandIds);
   const scope = assertObjectBody(value, ["mode", "islandIds"], ["mode"]);
   if (scope.mode === "ALL") {
     if (scope.islandIds !== undefined) {
@@ -263,7 +274,9 @@ async function executeAndSaveRun(server: FastifyInstance, input: SavedRunInput) 
           return { result, timeline: result.timeline, decisionAdapter: "deterministic", actions: [] };
         })();
     const result = connected.result;
-    const timeline = connected.timeline;
+    const timeline = input.resolvedIslandIds.length > 1
+      ? compactReplayTimeline(connected.timeline, REGIONAL_REPLAY_CHECKPOINT_INTERVAL_MS)
+      : connected.timeline;
     const finalProductSnapshot = timeline.frames.at(-1)?.operationsSnapshot;
     const metrics = connected.actions.length
       ? {
@@ -311,7 +324,7 @@ async function executeAndSaveRun(server: FastifyInstance, input: SavedRunInput) 
         },
       });
       return row;
-    }, { timeout: 30_000 });
+    }, { timeout: REPLAY_WRITE_TIMEOUT_MS, maxWait: 10_000 });
     if (input.policy === "BASELINE") await saveActorMappings(input.runId, timeline.scene);
     return completed;
   } catch (error) {
@@ -426,7 +439,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
         durationDays: scenario.durationDays,
         availablePolicies: ["BASELINE", "HARVEST"],
         availableDecisionModes: ["DETERMINISTIC", "LLM_ASSISTED"],
-        islands: scenario.scenarioId === "saint-lucia-demo-v1" ? ISLANDS.filter((island) => island.islandId === "saint-lucia") : ISLANDS,
+        islands: ISLANDS.filter((island) => scenario.availableIslandIds.includes(island.islandId)),
         provenanceNote: scenario.provenanceNote,
       })),
     };

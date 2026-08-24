@@ -39,6 +39,20 @@ beforeAll(async () => {
 afterAll(async () => server.close());
 
 describe("participant Product API", () => {
+  it("accepts the loopback spelling used by the local control-room preview", async () => {
+    const response = await server.inject({
+      method: "OPTIONS",
+      url: "/dev/session",
+      headers: {
+        origin: "http://127.0.0.1:3002",
+        "access-control-request-method": "POST",
+      },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.headers["access-control-allow-origin"]).toBe("http://127.0.0.1:3002");
+  });
+
   it("scopes participant data and exposes the P0 read projections", async () => {
     const buyerSession = await signIn("buyer-hotel");
     expect(buyerSession.actor.serviceZone).toBe("Castries");
@@ -287,6 +301,9 @@ describe("participant Product API", () => {
       availableDecisionModes: ["DETERMINISTIC", "LLM_ASSISTED"],
       islands: [{ islandId: "saint-lucia", countryCode: "LC" }],
     });
+    const focusedCaribbeanScenarios = scenarios.json().items.filter((scenario: { scenarioId: string }) => scenario.scenarioId.startsWith("caribbean-") && scenario.scenarioId !== "caribbean-islands-v1");
+    expect(focusedCaribbeanScenarios).toHaveLength(28);
+    expect(focusedCaribbeanScenarios.every((scenario: { islands: unknown[] }) => scenario.islands.length === 1)).toBe(true);
 
     const fixtureLlm = await server.inject({
       method: "POST",

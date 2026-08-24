@@ -1,8 +1,10 @@
 # Caribbean scenario manifest data
 
 `simulation/src/scenario/caribbean-islands-manifest-v1.ts` is the reviewed,
-versioned, offline input to `caribbean-islands-v1`. The demo never queries a
-third-party geography, weather, currency, or timezone service at runtime.
+versioned, offline input to `caribbean-islands-v1`. It covers every current
+country or area in the UN M49 Caribbean subregion (28 entries as reviewed on
+24 August 2026). The demo never queries a third-party geography, weather,
+currency, or timezone service at runtime.
 
 ## Reference inputs
 
@@ -24,6 +26,7 @@ network. Missing detailed local data remains a visible warning in the manifest
 rather than being represented as measured precision.
 
 Saint Lucia's `saint-lucia-demo-v1` remains the hand-tuned benchmark anchor.
-The regional generator treats island systems independently: no inter-island
-orders, shipping, ports, customs, currency conversion, or regional optimisation
-is simulated.
+The control room opens the broader regional scenario by default, while keeping
+that detailed Saint Lucia recipe selectable. The regional generator treats
+M49 areas as independent local systems: no inter-island orders, shipping,
+ports, customs, currency conversion, or regional optimisation is simulated.

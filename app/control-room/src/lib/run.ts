@@ -3,7 +3,8 @@
 import { createHarvestClient, newIdempotencyKey, type ApiSchema } from "@harvest/shared";
 import type { ControlRoomFrame, InjectedDisruption, ReplayTimeline } from "@harvest/simulation";
 
-export const DEFAULT_SCENARIO = "saint-lucia-demo-v1";
+/** The broad synthetic regional scenario opens first; Saint Lucia remains selectable as the detailed benchmark. */
+export const DEFAULT_SCENARIO = "caribbean-islands-v1";
 export const DEFAULT_SEED = 8675309;
 export const PRODUCT_API_URL = process.env.NEXT_PUBLIC_PRODUCT_API_URL ?? "http://localhost:3001";
 export const PARTICIPANT_WEBSITE_URL = process.env.NEXT_PUBLIC_WEBSITE_URL ?? "http://localhost:3000";

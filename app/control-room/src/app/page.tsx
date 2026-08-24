@@ -42,9 +42,9 @@ export default function ControlRoomPage() {
   const [scenarioId, setScenarioId] = useState(DEFAULT_SCENARIO);
   const [scenarios, setScenarios] = useState<SimulationScenario[]>([]);
   const [policy, setPolicy] = useState<PolicyName>("HARVEST");
-  const [seed, setSeed] = useState(DEFAULT_SEED);
+  const [seedInput, setSeedInput] = useState(String(DEFAULT_SEED));
   const [decisionMode, setDecisionMode] = useState<DecisionMode>("DETERMINISTIC");
-  const [scopeMode, setScopeMode] = useState<"SELECTED" | "ALL">("SELECTED");
+  const [scopeMode, setScopeMode] = useState<"SELECTED" | "ALL">("ALL");
   const [islandIds, setIslandIds] = useState<string[]>(["saint-lucia"]);
   const [injections, setInjections] = useState<InjectedDisruption[]>([]);
   const [timeline, setTimeline] = useState<ReplayTimeline | null>(null);
@@ -70,7 +70,7 @@ export default function ControlRoomPage() {
       setCurrentRun(run);
       setScenarioId(run.scenarioId);
       setPolicy(run.policy);
-      setSeed(run.seed);
+      setSeedInput(String(run.seed));
       setDecisionMode(run.decisionMode);
       setInjections(run.disruptions as InjectedDisruption[]);
       const firstMapped = loaded.scene.participants.find((item) => item.productActorId);
@@ -112,9 +112,11 @@ export default function ControlRoomPage() {
     void (async () => {
       try {
         setScenarios(await listScenarios());
-        const run = await refreshRuns();
-        if (run) await loadRun(run);
-        else setLoading(false);
+        await refreshRuns();
+        // A saved replay is optional. Opening the control room should preserve
+        // the Caribbean launch defaults instead of silently replacing them
+        // with whichever historical run happens to be newest.
+        setLoading(false);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
         setLoading(false);
@@ -123,6 +125,15 @@ export default function ControlRoomPage() {
   }, [loadRun, refreshRuns]);
 
   const runSimulation = useCallback(async () => {
+    if (!/^\d+$/.test(seedInput)) {
+      setError("Seed must contain whole digits only.");
+      return;
+    }
+    const seed = Number(seedInput);
+    if (!Number.isSafeInteger(seed) || seed > 4_294_967_295) {
+      setError("Seed must be an integer between 0 and 4294967295.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -133,7 +144,7 @@ export default function ControlRoomPage() {
       setError(caught instanceof Error ? caught.message : String(caught));
       setLoading(false);
     }
-  }, [decisionMode, injections, islandIds, loadRun, policy, refreshRuns, scenarioId, scopeMode, seed]);
+  }, [decisionMode, injections, islandIds, loadRun, policy, refreshRuns, scenarioId, scopeMode, seedInput]);
 
   const changeInjections = useCallback(async (next: InjectedDisruption[]) => {
     const additions = next.slice(injections.length);
@@ -220,7 +231,10 @@ export default function ControlRoomPage() {
         onSelectedIslandIdsChange={setIslandIds}
       />
       <label>Seed
-        <input type="number" min={0} max={4_294_967_295} value={seed} onChange={(event) => setSeed(Number(event.target.value))} />
+        <input inputMode="numeric" pattern="[0-9]*" autoComplete="off" spellCheck={false} value={seedInput} onChange={(event) => {
+          const next = event.target.value;
+          if (/^\d*$/.test(next)) setSeedInput(next);
+        }} />
       </label>
       <label>Decision mode
         <select value={decisionMode} onChange={(event) => setDecisionMode(event.target.value as DecisionMode)}>
@@ -251,7 +265,7 @@ export default function ControlRoomPage() {
       <main className="control-room launch-screen">
         <section className="launch-card">
           <span className="masthead-mark">H</span>
-          <div><h1>Harvest control room</h1><p>Create or load a saved Saint Lucia simulation run.</p></div>
+          <div><h1>Harvest control room</h1><p>Create or load a saved synthetic simulation run.</p></div>
           {setup}
           {error && <p className="run-error" role="alert">{error}</p>}
           <p className="launch-note">Runs are synthetic evidence. Harvest-mode agents use the Product API; baseline runs remain isolated.</p>
