@@ -245,8 +245,14 @@ a:focus-visible {
 .island-picker { min-width: 150px; margin: 0; padding: 0; border: 0; }
 .island-picker legend { margin-bottom: 4px; padding: 0; color: var(--text-dim); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .island-picker-options { display: flex; max-width: 260px; flex-wrap: wrap; gap: 4px; }
+.scope-picker { margin: 0; padding: 0; border: 0; }
+.scope-picker legend { margin-bottom: 4px; padding: 0; color: var(--text-dim); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.scope-picker-options { display: flex; gap: 4px; }
+.scope-option,
 .island-option { min-height: 31px; padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text-dim); font: inherit; font-size: 11px; cursor: pointer; }
+.scope-option:hover,
 .island-option:hover { border-color: var(--accent); color: var(--text); }
+.scope-option.is-selected,
 .island-option.is-selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 20%, var(--surface)); color: var(--text); font-weight: 700; }
 
 .run-button {

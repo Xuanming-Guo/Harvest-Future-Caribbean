@@ -211,9 +211,12 @@ export default function ControlRoomPage() {
           <option value="BASELINE">Baseline</option>
         </select>
       </label>
-      <label>Island scope
-        <select value={scopeMode} onChange={(event) => setScopeMode(event.target.value as "SELECTED" | "ALL")}><option value="SELECTED">Selected islands</option><option value="ALL">Whole Caribbean</option></select>
-      </label>
+      <fieldset className="scope-picker"><legend>Island scope</legend>
+        <div className="scope-picker-options">
+          <button type="button" aria-pressed={scopeMode === "SELECTED"} className={scopeMode === "SELECTED" ? "scope-option is-selected" : "scope-option"} onClick={() => setScopeMode("SELECTED")}>Selected islands</button>
+          <button type="button" aria-pressed={scopeMode === "ALL"} className={scopeMode === "ALL" ? "scope-option is-selected" : "scope-option"} onClick={() => setScopeMode("ALL")}>Whole Caribbean</button>
+        </div>
+      </fieldset>
       {scopeMode === "SELECTED" && <fieldset className="island-picker"><legend>Islands</legend>
         <div className="island-picker-options">
           {(scenarios.find((scenario) => scenario.scenarioId === scenarioId)?.islands ?? []).map((island) => {
