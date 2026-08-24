@@ -214,11 +214,14 @@ export default function ControlRoomPage() {
       <label>Island scope
         <select value={scopeMode} onChange={(event) => setScopeMode(event.target.value as "SELECTED" | "ALL")}><option value="SELECTED">Selected islands</option><option value="ALL">Whole Caribbean</option></select>
       </label>
-      {scopeMode === "SELECTED" && <label>Islands
-        <select multiple value={islandIds} onChange={(event) => setIslandIds([...event.currentTarget.selectedOptions].map((option) => option.value))}>
-          {(scenarios.find((scenario) => scenario.scenarioId === scenarioId)?.islands ?? []).map((island) => <option key={island.islandId} value={island.islandId}>{island.name}</option>)}
-        </select>
-      </label>}
+      {scopeMode === "SELECTED" && <fieldset className="island-picker"><legend>Islands</legend>
+        <div className="island-picker-options">
+          {(scenarios.find((scenario) => scenario.scenarioId === scenarioId)?.islands ?? []).map((island) => {
+            const selected = islandIds.includes(island.islandId);
+            return <button key={island.islandId} type="button" aria-pressed={selected} className={selected ? "island-option is-selected" : "island-option"} onClick={() => setIslandIds((current) => selected ? (current.length > 1 ? current.filter((id) => id !== island.islandId) : current) : [...current, island.islandId])}>{island.name}</button>;
+          })}
+        </div>
+      </fieldset>}
       <label>Seed
         <input type="number" min={0} max={4_294_967_295} value={seed} onChange={(event) => setSeed(Number(event.target.value))} />
       </label>
