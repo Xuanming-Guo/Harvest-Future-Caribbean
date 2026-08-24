@@ -41,6 +41,12 @@ export interface CesiumGlobeProps {
   focusRegion: string | null;
 }
 
+function overviewPoint(scene: ControlRoomScene): GeoPoint {
+  const points = [...scene.farms.map((farm) => farm.position), ...scene.buyers.map((buyer) => buyer.position), ...scene.transporters.map((transporter) => transporter.homePosition)];
+  if (!points.length) return { latitude: 13.97, longitude: -60.97 };
+  return { latitude: points.reduce((sum, point) => sum + point.latitude, 0) / points.length, longitude: points.reduce((sum, point) => sum + point.longitude, 0) / points.length };
+}
+
 /**
  * Esri's World Imagery: global satellite photography, no account, no key.
  *
@@ -224,6 +230,8 @@ function resolveFocusPoint(
 
 export default function CesiumGlobe(props: CesiumGlobeProps): React.JSX.Element {
   const { scene, frame, atMs, selectedId, onSelect, focusRegion } = props;
+  const sceneRef = useRef(scene);
+  sceneRef.current = scene;
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<Viewer | null>(null);
@@ -316,7 +324,7 @@ export default function CesiumGlobe(props: CesiumGlobeProps): React.JSX.Element 
 
       // Open on the island rather than Cesium's default whole-earth view, so
       // the first frame already looks like the finished product.
-      await flyToRegion(viewer, null, { immediate: true });
+      await flyToRegion(viewer, null, { immediate: true, overview: overviewPoint(sceneRef.current) });
 
       // Hold the loading overlay until imagery has actually arrived.
       //
@@ -372,7 +380,7 @@ export default function CesiumGlobe(props: CesiumGlobeProps): React.JSX.Element 
     previousFocusRef.current = focusRegion;
 
     if (focusRegion === null) {
-      void flyToRegion(viewer, null);
+      void flyToRegion(viewer, null, { overview: overviewPoint(scene) });
       return;
     }
     const point = resolveFocusPoint(scene, frame, atMs, focusRegion);

@@ -34,10 +34,10 @@ export interface ControlRoomScene {
   seed: number;
   startsAt: string;
   endsAt: string;
-  farms: Array<{ farmId: string; name: string; position: GeoPoint }>;
-  buyers: Array<{ buyerId: string; name: string; position: GeoPoint }>;
-  transporters: Array<{ transporterId: string; name: string; homePosition: GeoPoint; capacityKg: number }>;
-  roads: Array<{ roadSegmentId: string; name: string; from: GeoPoint; to: GeoPoint; distanceKm: number }>;
+  farms: Array<{ farmId: string; islandId: string; name: string; position: GeoPoint }>;
+  buyers: Array<{ buyerId: string; islandId: string; name: string; position: GeoPoint }>;
+  transporters: Array<{ transporterId: string; islandId: string; name: string; homePosition: GeoPoint; capacityKg: number }>;
+  roads: Array<{ roadSegmentId: string; islandId: string; name: string; from: GeoPoint; to: GeoPoint; distanceKm: number }>;
   /** Run-scoped Product API identities. Baseline participants have no product actor. */
   participants: SimulationParticipant[];
   /** Repeated here so a consumer cannot render the scene without the label. */

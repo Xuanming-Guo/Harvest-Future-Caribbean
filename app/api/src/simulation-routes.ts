@@ -8,6 +8,7 @@ import {
 } from "@prisma/client";
 import {
   SCENARIOS,
+  CARIBBEAN_ISLANDS_V1,
   assertNoTruthLeak,
   runScenario,
   type ControlRoomScene,
@@ -32,14 +33,7 @@ type RunScope =
   | { mode: "ALL" }
   | { mode: "SELECTED"; islandIds: string[] };
 
-const ISLANDS = [
-  {
-    islandId: "saint-lucia",
-    name: "Saint Lucia",
-    countryCode: "LC",
-  },
-] as const;
-const ISLAND_IDS = new Set(ISLANDS.map((island) => island.islandId));
+const ISLANDS = CARIBBEAN_ISLANDS_V1;
 const RUN_ROLES = [ActorRole.OPERATIONS, ActorRole.ADMIN];
 const SNAPSHOT_ROLES = [ActorRole.COORDINATOR, ActorRole.OPERATIONS, ActorRole.ADMIN];
 const PRODUCT_ROLES = [
@@ -91,13 +85,14 @@ function readScenario(value: unknown) {
   return scenario;
 }
 
-function readScope(value: unknown): { scope: RunScope; resolvedIslandIds: string[] } {
+function readScope(value: unknown, scenarioId: string): { scope: RunScope; resolvedIslandIds: string[] } {
+  const allowedIslandIds = scenarioId === "saint-lucia-demo-v1" ? new Set(["saint-lucia"]) : new Set(CARIBBEAN_ISLANDS_V1.map((island) => island.islandId));
   const scope = assertObjectBody(value, ["mode", "islandIds"], ["mode"]);
   if (scope.mode === "ALL") {
     if (scope.islandIds !== undefined) {
       throw httpError(400, "VALIDATION_FAILED", "ALL scope must not include islandIds.");
     }
-    return { scope: { mode: "ALL" }, resolvedIslandIds: [...ISLAND_IDS] };
+    return { scope: { mode: "ALL" }, resolvedIslandIds: [...allowedIslandIds] };
   }
   if (scope.mode !== "SELECTED" || !Array.isArray(scope.islandIds) || scope.islandIds.length === 0) {
     throw httpError(422, "INVALID_SIMULATION_SCOPE", "SELECTED scope requires at least one islandId.");
@@ -106,12 +101,12 @@ function readScope(value: unknown): { scope: RunScope; resolvedIslandIds: string
   if (new Set(islandIds).size !== islandIds.length) {
     throw httpError(422, "INVALID_SIMULATION_SCOPE", "scope.islandIds must not contain duplicates.");
   }
-  const unavailable = islandIds.filter((islandId) => !ISLAND_IDS.has(islandId as never));
+  const unavailable = islandIds.filter((islandId) => !allowedIslandIds.has(islandId));
   if (unavailable.length) {
     throw httpError(
       422,
       "SIMULATION_ISLAND_UNAVAILABLE",
-      `Unavailable islandId${unavailable.length === 1 ? "" : "s"}: ${unavailable.join(", ")}. Regional generation belongs to issue #31.`,
+      `Unavailable islandId${unavailable.length === 1 ? "" : "s"}: ${unavailable.join(", ")}.`,
     );
   }
   return { scope: { mode: "SELECTED", islandIds }, resolvedIslandIds: islandIds };
@@ -250,6 +245,7 @@ async function executeAndSaveRun(server: FastifyInstance, input: SavedRunInput) 
     const connected = input.policy === "HARVEST"
       ? await runConnectedHarvest(server, input.runId, {
           scenarioId: input.scenarioId,
+          islandIds: input.resolvedIslandIds,
           seed: input.seed,
           disruptions: input.disruptions,
         }, input.decisionMode)
@@ -257,6 +253,7 @@ async function executeAndSaveRun(server: FastifyInstance, input: SavedRunInput) 
           const result = runScenario({
             runId: input.runId,
             scenarioId: input.scenarioId,
+            islandIds: input.resolvedIslandIds,
             policy: input.policy,
             seed: input.seed,
             captureFrames: true,
@@ -292,6 +289,9 @@ async function executeAndSaveRun(server: FastifyInstance, input: SavedRunInput) 
       : result.metrics;
     assertNoTruthLeak({ timeline, decisions: result.decisions }, "saved Product API simulation run");
 
+    // Whole-Caribbean replays contain many more immutable frames than the hero
+    // scenario. Keep the transaction atomic, but allow the PostgreSQL write to
+    // finish instead of inheriting Prisma's short interactive default.
     const completed = await prisma.$transaction(async (tx) => {
       const row = await tx.simulationRun.update({
         where: { id: input.runId },
@@ -311,7 +311,7 @@ async function executeAndSaveRun(server: FastifyInstance, input: SavedRunInput) 
         },
       });
       return row;
-    });
+    }, { timeout: 30_000 });
     if (input.policy === "BASELINE") await saveActorMappings(input.runId, timeline.scene);
     return completed;
   } catch (error) {
@@ -426,7 +426,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
         durationDays: scenario.durationDays,
         availablePolicies: ["BASELINE", "HARVEST"],
         availableDecisionModes: ["DETERMINISTIC", "LLM_ASSISTED"],
-        islands: ISLANDS,
+        islands: scenario.scenarioId === "saint-lucia-demo-v1" ? ISLANDS.filter((island) => island.islandId === "saint-lucia") : ISLANDS,
         provenanceNote: scenario.provenanceNote,
       })),
     };
@@ -508,7 +508,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
       }
       const scenario = readScenario(body.scenarioId);
       const decisionMode = readDecisionMode(body.decisionMode);
-      const { scope, resolvedIslandIds } = readScope(body.scope);
+      const { scope, resolvedIslandIds } = readScope(body.scope, scenario.scenarioId);
       const row = await executeAndSaveRun(server, {
         runId: randomUUID(),
         scenarioId: scenario.scenarioId,
@@ -611,7 +611,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
       const scenario = readScenario(body.scenarioId);
       const decisionMode = readDecisionMode(body.decisionMode);
       const seed = readSeed(body.seed);
-      const { scope, resolvedIslandIds } = readScope(body.scope);
+      const { scope, resolvedIslandIds } = readScope(body.scope, scenario.scenarioId);
       const disruptions = readDisruptions(body.disruptions, scenario.durationDays);
       const pairId = randomUUID();
       const baselineRunId = randomUUID();

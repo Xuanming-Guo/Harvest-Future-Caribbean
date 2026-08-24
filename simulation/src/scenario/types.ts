@@ -23,6 +23,8 @@ export interface ScenarioContext {
   ids: IdFactory;
   /** The instant the scenario starts. */
   startsAt: SimulationInstant;
+  /** Resolved manifest scope. Undefined retains a scenario's default scope. */
+  islandIds?: readonly string[];
 }
 
 export interface Scenario {

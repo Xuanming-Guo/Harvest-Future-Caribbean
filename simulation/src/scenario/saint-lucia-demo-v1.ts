@@ -18,6 +18,7 @@
 import { IdFactory } from '../core/ids.js';
 import { DAY_MS, HOUR_MS, formatDate } from '../core/time.js';
 import type { Scenario, ScenarioContext } from './types.js';
+import { caribbeanIslandsV1 } from './caribbean-islands-v1.js';
 import type {
   Buyer,
   Farm,
@@ -83,8 +84,9 @@ function buildRoads(ids: IdFactory): Map<string, RoadSegment> {
   for (const site of FARM_SITES) {
     const roadSegmentId = ids.next();
     const straightLineKm = haversineKm(site, hub);
-    roads.set(roadSegmentId, {
-      roadSegmentId,
+      roads.set(roadSegmentId, {
+        roadSegmentId,
+        islandId: 'saint-lucia',
       name: `${site.name} to Castries`,
       from: { latitude: site.latitude, longitude: site.longitude },
       to: hub,
@@ -126,6 +128,7 @@ export const saintLuciaDemoV1: Scenario = {
       const farmId = ids.next();
       farms.set(farmId, {
         farmId,
+        islandId: 'saint-lucia',
         name: site.name,
         position: { latitude: site.latitude, longitude: site.longitude },
         roadSegmentId: roadIds[index] as string,
@@ -140,6 +143,7 @@ export const saintLuciaDemoV1: Scenario = {
       const buyerId = ids.next();
       buyers.set(buyerId, {
         buyerId,
+        islandId: 'saint-lucia',
         name: site.name,
         position: { latitude: site.latitude, longitude: site.longitude },
         typicalOrderKg: site.typicalOrderKg,
@@ -152,6 +156,7 @@ export const saintLuciaDemoV1: Scenario = {
       const transporterId = ids.next();
       transporters.set(transporterId, {
         transporterId,
+        islandId: 'saint-lucia',
         name: site.name,
         homePosition: { latitude: site.latitude, longitude: site.longitude },
         capacityKg: site.capacityKg,
@@ -302,6 +307,7 @@ export const saintLuciaDemoV1: Scenario = {
 
 export const SCENARIOS: Record<string, Scenario> = {
   [saintLuciaDemoV1.scenarioId]: saintLuciaDemoV1,
+  [caribbeanIslandsV1.scenarioId]: caribbeanIslandsV1,
 };
 
 /** Looks up a scenario, listing what exists rather than returning undefined. */

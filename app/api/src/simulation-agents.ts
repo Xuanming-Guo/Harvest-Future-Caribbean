@@ -129,6 +129,7 @@ interface ExceptionDto {
 
 interface ConnectedRunInput {
   scenarioId: string;
+  islandIds?: readonly string[];
   seed: number;
   disruptions: InjectedDisruption[];
 }
@@ -1064,6 +1065,7 @@ export async function runConnectedHarvest(
   const engine = new SimulationEngine({
     runId,
     scenarioId: input.scenarioId,
+    islandIds: input.islandIds,
     policy: "HARVEST",
     seed: input.seed,
     captureFrames: true,

@@ -43,6 +43,8 @@ export default function ControlRoomPage() {
   const [policy, setPolicy] = useState<PolicyName>("HARVEST");
   const [seed, setSeed] = useState(DEFAULT_SEED);
   const [decisionMode, setDecisionMode] = useState<DecisionMode>("DETERMINISTIC");
+  const [scopeMode, setScopeMode] = useState<"SELECTED" | "ALL">("SELECTED");
+  const [islandIds, setIslandIds] = useState<string[]>(["saint-lucia"]);
   const [injections, setInjections] = useState<InjectedDisruption[]>([]);
   const [timeline, setTimeline] = useState<ReplayTimeline | null>(null);
   const [currentRun, setCurrentRun] = useState<SavedRun | null>(null);
@@ -123,14 +125,14 @@ export default function ControlRoomPage() {
     setLoading(true);
     setError(null);
     try {
-      const created = await createSavedRun({ scenarioId, policy, seed, decisionMode, disruptions: injections });
+      const created = await createSavedRun({ scenarioId, policy, seed, decisionMode, disruptions: injections, scope: scopeMode === "ALL" ? { mode: "ALL" } : { mode: "SELECTED", islandIds } });
       const run = await refreshRuns(created.runId) ?? created;
       await loadRun(run);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
       setLoading(false);
     }
-  }, [decisionMode, injections, loadRun, policy, refreshRuns, scenarioId, seed]);
+  }, [decisionMode, injections, islandIds, loadRun, policy, refreshRuns, scenarioId, scopeMode, seed]);
 
   const changeInjections = useCallback(async (next: InjectedDisruption[]) => {
     const additions = next.slice(injections.length);
@@ -196,7 +198,7 @@ export default function ControlRoomPage() {
   const setup = (
     <div className="run-toolbar">
       <label>Scenario
-        <select value={scenarioId} onChange={(event) => setScenarioId(event.target.value)}>
+        <select value={scenarioId} onChange={(event) => { const next = event.target.value; setScenarioId(next); const scenario = scenarios.find((item) => item.scenarioId === next); if (scenario?.islands[0]) setIslandIds([scenario.islands[0].islandId]); }}>
           {scenarios.length === 0 && <option value={DEFAULT_SCENARIO}>Saint Lucia demo</option>}
           {scenarios.map((scenario) => (
             <option key={scenario.scenarioId} value={scenario.scenarioId}>{scenario.description}</option>
@@ -209,6 +211,14 @@ export default function ControlRoomPage() {
           <option value="BASELINE">Baseline</option>
         </select>
       </label>
+      <label>Island scope
+        <select value={scopeMode} onChange={(event) => setScopeMode(event.target.value as "SELECTED" | "ALL")}><option value="SELECTED">Selected islands</option><option value="ALL">Whole Caribbean</option></select>
+      </label>
+      {scopeMode === "SELECTED" && <label>Islands
+        <select multiple value={islandIds} onChange={(event) => setIslandIds([...event.currentTarget.selectedOptions].map((option) => option.value))}>
+          {(scenarios.find((scenario) => scenario.scenarioId === scenarioId)?.islands ?? []).map((island) => <option key={island.islandId} value={island.islandId}>{island.name}</option>)}
+        </select>
+      </label>}
       <label>Seed
         <input type="number" min={0} max={4_294_967_295} value={seed} onChange={(event) => setSeed(Number(event.target.value))} />
       </label>

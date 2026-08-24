@@ -81,7 +81,7 @@ function prefersReducedMotion(): boolean {
 export async function flyToRegion(
   viewer: Viewer,
   target: RegionTarget | null,
-  options?: { immediate?: boolean },
+  options?: { immediate?: boolean; overview?: RegionTarget },
 ): Promise<void> {
   if (viewer.isDestroyed()) return;
 
@@ -89,7 +89,7 @@ export async function flyToRegion(
   if (viewer.isDestroyed()) return; // the viewer can die while this import resolves
 
   const token = ++flightToken;
-  const destination = target ?? ISLAND_OVERVIEW;
+  const destination = target ?? options?.overview ?? ISLAND_OVERVIEW;
   const destinationHeight = target ? APPROACH_HEIGHT_M : ISLAND_OVERVIEW_HEIGHT_M;
   const destinationPitch = target ? APPROACH_PITCH_DEGREES : OVERVIEW_PITCH_DEGREES;
   const immediate = options?.immediate === true || prefersReducedMotion();

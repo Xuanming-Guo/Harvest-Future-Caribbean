@@ -66,6 +66,7 @@ export async function createSavedRun(input: {
   seed: number;
   decisionMode: DecisionMode;
   disruptions?: InjectedDisruption[];
+  scope?: { mode: "ALL" } | { mode: "SELECTED"; islandIds: string[] };
 }) {
   await ensureOperationsSession();
   return unwrap(await client.POST("/v1/simulation-runs", {
@@ -75,7 +76,7 @@ export async function createSavedRun(input: {
       policy: input.policy,
       seed: input.seed,
       decisionMode: input.decisionMode,
-      scope: { mode: "SELECTED", islandIds: ["saint-lucia"] },
+      scope: input.scope ?? { mode: "SELECTED", islandIds: ["saint-lucia"] },
       disruptions: input.disruptions,
     },
   }));

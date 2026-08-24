@@ -68,10 +68,13 @@ export const baselinePolicy: CoordinationPolicy = {
   },
 
   planAllocation(context: PolicyContext, demand: BuyerDemand): AllocationProposal | null {
+    const buyer = context.buyers.get(demand.buyerId);
+    if (!buyer) return null;
     // Only batches whose stated window covers the deadline are candidates. The
     // stated window is the grower's, and it is wrong more often than not.
     const candidates = [...context.observed.batches.values()]
       .filter((batch) => batch.crop === demand.crop)
+      .filter((batch) => context.farms.get(batch.farmId)?.islandId === buyer.islandId)
       .filter((batch) => batch.expectedReadyFrom <= demand.neededBy)
       .filter((batch) => batch.lastReportedStage !== 'HARVESTED' && batch.lastReportedStage !== 'SPOILED')
       // Deterministic order: the buyer works down a contact list, and that list

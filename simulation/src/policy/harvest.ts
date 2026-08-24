@@ -94,9 +94,12 @@ export const harvestPolicy: CoordinationPolicy = {
 
   planAllocation(context: PolicyContext, demand: BuyerDemand): AllocationProposal | null {
     const wanted = demand.quantity.value;
+    const buyer = context.buyers.get(demand.buyerId);
+    if (!buyer) return null;
 
     const candidates = [...context.observed.batches.values()]
       .filter((batch) => batch.crop === demand.crop)
+      .filter((batch) => context.farms.get(batch.farmId)?.islandId === buyer.islandId)
       // The defining difference from the baseline. The baseline promises
       // against the grower's stated calendar window, which is a guess made at
       // planting. Harvest promises only against a batch someone has actually
@@ -120,6 +123,7 @@ export const harvestPolicy: CoordinationPolicy = {
     if (promised0 < wanted) {
       const worthChecking = [...context.observed.batches.values()]
         .filter((batch) => batch.crop === demand.crop)
+        .filter((batch) => context.farms.get(batch.farmId)?.islandId === buyer.islandId)
         .filter((batch) => batch.lastReportedStage !== 'READY')
         .filter((batch) => batch.lastReportedStage !== 'HARVESTED' && batch.lastReportedStage !== 'SPOILED')
         // Its stated window has opened, so it might be ready even though the

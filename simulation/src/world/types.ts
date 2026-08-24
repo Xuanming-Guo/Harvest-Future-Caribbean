@@ -58,6 +58,8 @@ export type CropStage = 'PLANTED' | 'GROWING' | 'MATURING' | 'READY' | 'HARVESTE
 
 export interface Farm {
   farmId: string;
+  /** Manifest identity; island systems are intentionally independent. */
+  islandId: string;
   name: string;
   position: GeoPoint;
   /** Which road segment the farm gate sits on, for routing. */
@@ -72,6 +74,7 @@ export interface Farm {
 
 export interface Buyer {
   buyerId: string;
+  islandId: string;
   name: string;
   position: GeoPoint;
   /** Typical order size in kg; actual demand varies around this. */
@@ -82,6 +85,7 @@ export interface Buyer {
 
 export interface Transporter {
   transporterId: string;
+  islandId: string;
   name: string;
   homePosition: GeoPoint;
   capacityKg: number;
@@ -91,6 +95,7 @@ export interface Transporter {
 
 export interface RoadSegment {
   roadSegmentId: string;
+  islandId: string;
   name: string;
   from: GeoPoint;
   to: GeoPoint;
