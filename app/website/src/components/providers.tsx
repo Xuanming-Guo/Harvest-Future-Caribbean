@@ -18,7 +18,9 @@ import {
   QUERY_CACHE_MAX_AGE,
   createLocalStoragePersister,
 } from "@/lib/offline";
-import { flushOutbox } from "@/lib/outbox";
+import { flushOutbox, readOutbox } from "@/lib/outbox";
+
+const OUTBOX_RETRY_MS = 15_000;
 
 interface SessionContextValue {
   actor: SessionActor | null;
@@ -92,7 +94,15 @@ export function Providers({ children }: { children: React.ReactNode }) {
     };
     flush();
     window.addEventListener("online", flush);
-    return () => window.removeEventListener("online", flush);
+    // `online` is not a reliable signal on a farm where the interface stays up
+    // while the link drops, so keep retrying quietly while anything is queued.
+    const retry = window.setInterval(() => {
+      if (readOutbox(actor).some((item) => item.status === "saved" || item.status === "waiting")) flush();
+    }, OUTBOX_RETRY_MS);
+    return () => {
+      window.removeEventListener("online", flush);
+      window.clearInterval(retry);
+    };
   }, [offlineCapable, actor, queryClient]);
 
   const value = useMemo<SessionContextValue>(() => ({
