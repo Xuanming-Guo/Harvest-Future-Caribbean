@@ -362,9 +362,9 @@ describe("participant Product API", () => {
     expect(timeline.json().frames.every((frame: { operationsSnapshot?: unknown }) => frame.operationsSnapshot)).toBe(true);
     const finalFrame = timeline.json().frames.at(-1);
     expect(finalFrame).toMatchObject({ eventType: "RUN_SETTLED", at: created.json().endedAt });
-    const outcomes = finalFrame.operationsSnapshot.orderOutcomes;
-    expect(outcomes.total).toBeGreaterThan(0);
-    expect(outcomes.fulfilled + outcomes.partiallyFulfilled + outcomes.unfulfilled + outcomes.pending).toBe(outcomes.total);
+    const finalOutcomes = finalFrame.operationsSnapshot.orderOutcomes;
+    expect(finalOutcomes.total).toBeGreaterThan(0);
+    expect(finalOutcomes.fulfilled + finalOutcomes.partiallyFulfilled + finalOutcomes.unfulfilled + finalOutcomes.pending).toBe(finalOutcomes.total);
     for (const forbidden of ["potentialYieldKg", "qualityFraction", "dailySpoilageRate", "severity"]) {
       expect(timeline.body).not.toContain(forbidden);
     }
