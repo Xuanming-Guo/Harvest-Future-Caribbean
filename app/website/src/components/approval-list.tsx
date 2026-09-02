@@ -5,10 +5,12 @@ import { Check, X } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { formatDate, titleCase } from "@/lib/format";
+import { OfflineHint, useOnlineStatus } from "./offline";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, SectionTitle } from "./ui";
 
 export function ApprovalList({ compact = false }: { compact?: boolean }) {
   const queryClient = useQueryClient();
+  const online = useOnlineStatus();
   const approvals = useQuery({ queryKey: ["approvals", "PENDING"], queryFn: () => api.approvals("PENDING"), refetchInterval: 5_000 });
   const decision = useMutation({
     mutationFn: ({ id, value }: { id: string; value: "APPROVE" | "REJECT" }) => api.decideApproval(id, value),
@@ -34,12 +36,13 @@ export function ApprovalList({ compact = false }: { compact?: boolean }) {
               {!compact && <small>Requested {formatDate(approval.requestedAt)}</small>}
             </div>
             <div className="inline-actions">
-              <button className="button button-danger" disabled={decision.isPending} onClick={() => decision.mutate({ id: approval.approvalId, value: "REJECT" })}><X size={16} />Decline</button>
-              <button className="button" disabled={decision.isPending} onClick={() => decision.mutate({ id: approval.approvalId, value: "APPROVE" })}><Check size={16} />Approve</button>
+              <button className="button button-danger" disabled={decision.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) decision.mutate({ id: approval.approvalId, value: "REJECT" }); }}><X size={16} />Decline</button>
+              <button className="button" disabled={decision.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) decision.mutate({ id: approval.approvalId, value: "APPROVE" }); }}><Check size={16} />Approve</button>
             </div>
           </article>
         ))}
       </div>
+      {!online && <OfflineHint>A commitment decision is never queued on a device. Reconnect to approve or decline.</OfflineHint>}
       {decision.error && <p className="form-error">{decision.error.message}</p>}
     </Card>
   );

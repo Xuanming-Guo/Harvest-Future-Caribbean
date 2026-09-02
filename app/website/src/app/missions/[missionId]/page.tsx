@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useState } from "react";
 
+import { OfflineHint, useOnlineStatus } from "@/components/offline";
 import { useSession } from "@/components/providers";
 import { Badge, Card, ErrorState, LoadingState, PageHeader, SectionTitle } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -14,6 +15,7 @@ import { formatDate, titleCase } from "@/lib/format";
 export default function MissionDetailPage() {
   const { missionId } = useParams<{ missionId: string }>();
   const { actor } = useSession();
+  const online = useOnlineStatus();
   const queryClient = useQueryClient();
   const [delayNote, setDelayNote] = useState("");
   const [vehicleId, setVehicleId] = useState("");
@@ -65,10 +67,11 @@ export default function MissionDetailPage() {
           <SectionTitle title="Job details" detail={titleCase(mission.data.status)} />
           <div className="info-list"><div><PackageCheck /><span><strong>{mission.data.quantity.value} kg</strong><small>Produce quantity</small></span></div><div><Truck /><span><strong>{mission.data.vehicleId ? "Vehicle assigned" : "No vehicle yet"}</strong><small>Transport status</small></span></div></div>
           {isTransporter && <div className="mission-actions">
-            {mission.data.status === "AVAILABLE" && <><div className="field"><label htmlFor="mission-vehicle">Vehicle</label><select id="mission-vehicle" value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}><option value="">Select a vehicle</option>{vehicles.data?.items.map((vehicle) => <option value={vehicle.vehicleId} disabled={vehicle.status !== "AVAILABLE"} key={vehicle.vehicleId}>{vehicle.label} · {vehicle.status}</option>)}</select></div><button className="button" disabled={accept.isPending || !vehicleId} onClick={() => accept.mutate()}><Check size={17} />Accept job</button></>}
-            {mayArrive && <button className="button" disabled={update.isPending} onClick={() => update.mutate("ARRIVED")}><MapPin size={17} />Arrived at next stop</button>}
-            {mayConfirmPickup && <button className="button" disabled={update.isPending} onClick={() => update.mutate("PICKED_UP")}><PackageCheck size={17} />Confirm pickup</button>}
-            {mayDeliver && <button className="button button-secondary" disabled={update.isPending} onClick={() => update.mutate("DELIVERED")}><Check size={17} />Mark delivered</button>}
+            {mission.data.status === "AVAILABLE" && <><div className="field"><label htmlFor="mission-vehicle">Vehicle</label><select id="mission-vehicle" value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}><option value="">Select a vehicle</option>{vehicles.data?.items.map((vehicle) => <option value={vehicle.vehicleId} disabled={vehicle.status !== "AVAILABLE"} key={vehicle.vehicleId}>{vehicle.label} · {vehicle.status}</option>)}</select></div><button className="button" disabled={accept.isPending || !vehicleId} aria-disabled={!online || undefined} onClick={() => { if (online) accept.mutate(); }}><Check size={17} />Accept job</button></>}
+            {mayArrive && <button className="button" disabled={update.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) update.mutate("ARRIVED"); }}><MapPin size={17} />Arrived at next stop</button>}
+            {mayConfirmPickup && <button className="button" disabled={update.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) update.mutate("PICKED_UP"); }}><PackageCheck size={17} />Confirm pickup</button>}
+            {mayDeliver && <button className="button button-secondary" disabled={update.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) update.mutate("DELIVERED"); }}><Check size={17} />Mark delivered</button>}
+            {!online && <OfflineHint>Delivery progress is only recorded live, so it is never queued. Reconnect to report it.</OfflineHint>}
           </div>}
         </Card>
       </div>
@@ -79,10 +82,11 @@ export default function MissionDetailPage() {
       {isTransporter && mission.data.status !== "AVAILABLE" && mission.data.status !== "DELIVERED" && (
         <Card className="section-gap">
           <SectionTitle title="Report a delay or problem" detail="The coordinator will be notified" />
-          <form className="form-inline" onSubmit={(event: FormEvent) => { event.preventDefault(); delay.mutate(); }}>
+          <form className="form-inline" onSubmit={(event: FormEvent) => { event.preventDefault(); if (online) delay.mutate(); }}>
             <div className="field"><label htmlFor="delay">What happened?</label><input id="delay" required minLength={3} value={delayNote} onChange={(event) => setDelayNote(event.target.value)} placeholder="For example: road closure near Castries" /></div>
-            <button className="button button-danger" disabled={delay.isPending}><AlertTriangle size={17} />Report problem</button>
+            <button className="button button-danger" disabled={delay.isPending} aria-disabled={!online || undefined}><AlertTriangle size={17} />Report problem</button>
           </form>
+          {!online && <OfflineHint>A coordinator has to see this straight away, so it is never queued. Reconnect to report it.</OfflineHint>}
         </Card>
       )}
       {(message || accept.error || update.error || delay.error) && <p className={(accept.error || update.error || delay.error) ? "form-error" : "form-success"}>{message ?? accept.error?.message ?? update.error?.message ?? delay.error?.message}</p>}
