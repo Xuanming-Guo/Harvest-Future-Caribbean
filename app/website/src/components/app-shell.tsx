@@ -5,6 +5,7 @@ import {
   Compass,
   Leaf,
   LogOut,
+  Map,
   Menu,
   PackageCheck,
   ShoppingBasket,
@@ -24,6 +25,7 @@ import { useSession } from "./providers";
 const navigation = {
   FARMER: [
     ["/farmer", "My farm", Sprout],
+    ["/farmer/farm", "Farm map", Map],
     ["/orders", "Orders", PackageCheck],
   ],
   BUYER: [
