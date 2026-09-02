@@ -130,20 +130,20 @@ status            COMPLETED
 policy            HARVEST
 decisionMode      DETERMINISTIC
 decisionAdapter   deterministic
-frameCount        119
-eventsProcessed    76
+frameCount        127
+eventsProcessed    80
 totalDemandedKg   2956
-totalAcceptedKg   1387.75
+totalAcceptedKg   1545.13
 ```
 
 `metrics.productActions` must also exist with positive attempted, succeeded and
 domain-event counts. For the deterministic seed-`42` run, expect:
 
 ```text
-attempted             140
-succeeded             140
+attempted             151
+succeeded             151
 rejected                0
-domainEventsCreated   222
+domainEventsCreated   238
 activeListings          3
 openDemands             11
 totalOrders             11
@@ -156,32 +156,61 @@ metrics above. For deterministic seed `42`, expect:
 
 ```text
 total orders              11
-fulfilled                  3
+fulfilled                  4
 partially fulfilled        2
 unfulfilled                5
-pending                    1
-approved commitments       5
-completed missions         5
+pending                    0
+approved commitments       7
+completed missions         7
 ```
 
 `orderOutcomes.causes` explains every unfulfilled or partially fulfilled
 order. For seed `42`:
 
 ```text
-INSUFFICIENT_SUPPLY        3
 DELIVERY_REJECTED          2
-NO_READY_SUPPLY            1
-SUPPLY_CHANGED             1
+HORIZON_TRUNCATED          1
+INSUFFICIENT_SUPPLY        2
+NO_READY_SUPPLY            2
 ```
 
-These values were re-recorded after the #53 readiness, expiry, and re-match
-fixes; earlier revisions of this document showed 2 fulfilled / 8 unfulfilled
-and 359 kg delivered for the same seed.
+`HORIZON_TRUNCATED` is not an operational failure. It is one order whose
+deadline falls after the 21-day scenario horizon, so the run window closed
+before the order could be observed either way. It was previously counted as
+`pending`, which left the outcome cards short of the order total.
 
-`deliveryAcceptedKg` is the sum of the five immutable delivery acceptances,
+### Where the seed-42 numbers came from
+
+Every figure above is read from a real run, never edited by hand. The three
+columns show what each change to the fulfilment path moved:
+
+| Value | Before the #53 fixes | After readiness/expiry/re-match | After safe partial commitment |
+|---|---|---|---|
+| `frameCount` | 130 | 119 | 127 |
+| `eventsProcessed` | 82 | 76 | 80 |
+| `productActions.attempted` | 154 | 140 | 151 |
+| `productActions.domainEventsCreated` | 242 | 222 | 238 |
+| `activeListings` | 7 | 3 | 3 |
+| fulfilled | 2 | 3 | 4 |
+| partially fulfilled | 0 | 2 | 2 |
+| unfulfilled | 8 | 5 | 5 |
+| pending | 1 | 1 | 0 |
+| approved commitments | 8 | 5 | 7 |
+| completed missions | 8 | 5 | 7 |
+| `deliveryAcceptedKg` | 359 | 1387.75 | 1545.13 |
+
+The first column is the pre-#53 baseline this document recorded before the
+readiness fixes, when unready crop was still listable, so eight commitments
+were approved but only 359 kg survived to delivery. The middle column is the
+readiness, expiry, and re-match fixes. The last column adds safe partial
+commitment: two more orders reach a commitment they would previously have
+waited out, and the horizon-truncated order now carries a cause instead of
+sitting in `pending`.
+
+`deliveryAcceptedKg` is the sum of the seven immutable delivery acceptances,
 not the engine's `totalAcceptedKg`. The control room uses this Product API
 quantity for its Harvest **Delivered** card. For seed `42`, both values are
-`1387.75 kg` because the engine applies the Product API delivery acceptances back
+`1545.13 kg` because the engine applies the Product API delivery acceptances back
 to physical state as each mission arrives.
 
 The `runId` is a fresh UUID. All evidence is explicitly labelled synthetic and

@@ -895,6 +895,7 @@ async function processDemandFrame(
   demanded: Set<string>,
   actions: SimulationAgentAction[],
   projector: ProductEventProjector,
+  acceptanceThresholds: Map<string, number>,
 ) {
   for (const demand of [...frame.demands].sort((a, b) => a.demandId.localeCompare(b.demandId))) {
     if (demanded.has(demand.demandId)) continue;
@@ -913,12 +914,17 @@ async function processDemandFrame(
       maxUnitPrice: { amount: 8, currency: "XCD" },
     }, `Recorded demand for ${demand.quantityKg.toFixed(2)} kg of ${demand.crop}.`), actions, projector);
 
+    // The buyer persona already carries the share of an order it treats as
+    // fulfilled; the Product order states the same number so matching can
+    // safely offer a partial commitment this buyer would actually accept.
+    const minimumAcceptableFraction = acceptanceThresholds.get(demand.buyerId) ?? 0.8;
     const order = await tools.placeOrder(buyer, frame.at, {
       cropType: demand.crop,
       requestedQuantity: kilograms(demand.quantityKg),
       neededBy: new Date(demand.neededBy).toISOString(),
       deliveryLocation,
-    }, `Placed an order for ${demand.quantityKg.toFixed(2)} kg of ${demand.crop}.`);
+      minimumAcceptableFraction,
+    }, `Placed an order for ${demand.quantityKg.toFixed(2)} kg of ${demand.crop}, accepting at least ${Math.round(minimumAcceptableFraction * 100)}%.`);
     actions.push(order.action);
     if (order.ok) projector.bindOrder(order.data.orderId, demand.demandId, buyer.actor.id);
     projector.consume(order.events);
@@ -1087,6 +1093,9 @@ export async function runConnectedHarvest(
 
   const observed = new Set<string>();
   const demanded = new Set<string>();
+  const acceptanceThresholds = new Map(
+    engine.controlRoomScene.buyers.map((buyer) => [buyer.buyerId, buyer.minimumAcceptableFraction] as const),
+  );
   const handledDisruptionImpacts = new Set<string>();
   const allActions: SimulationAgentAction[] = [];
   let previousFrame: ControlRoomFrame | undefined = firstFrame;
@@ -1102,7 +1111,7 @@ export async function runConnectedHarvest(
       if (frame.eventType === "FARMER_OBSERVATION") {
         await processObservationFrame(tools, participants, batchIds, frame, observed, actions, projector, coordinator);
       } else if (frame.eventType === "BUYER_DEMAND") {
-        await processDemandFrame(tools, participants, frame, demanded, actions, projector);
+        await processDemandFrame(tools, participants, frame, demanded, actions, projector, acceptanceThresholds);
       } else if (frame.eventType === "MISSION_DEPART") {
         await processMissionDeparture(tools, participants, frame, previousFrame, actions, projector);
       } else if (frame.eventType === "MISSION_ARRIVE") {

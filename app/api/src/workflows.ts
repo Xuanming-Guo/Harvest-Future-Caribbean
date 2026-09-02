@@ -423,8 +423,17 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
     }
   }
 
-  if (remaining > 0.0001) {
-    const found = order.requestedQuantity - remaining;
+  // Stakeholder evidence (#53): a hotel that ordered 6 kg and can be offered 5
+  // would rather commit the 5 and source the last kilogram elsewhere than wait
+  // for supply that may never arrive. The buyer states that threshold up front
+  // on the order, so a partial proposal is still something they consented to.
+  const covered = order.requestedQuantity - remaining;
+  const coverageFraction = order.requestedQuantity > 0 ? covered / order.requestedQuantity : 0;
+  const threshold = order.minimumAcceptableFraction * order.requestedQuantity;
+  const isPartial = remaining > 0.0001;
+
+  if (covered + 0.0001 < threshold) {
+    const found = covered;
     await prisma.$transaction(async (tx) => {
       await tx.order.update({
         where: { id: orderId },
@@ -447,7 +456,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
           agentName: "Market Balance Agent",
           toolName: "read-safe-supply",
           provenance: Provenance.INFERRED,
-          summary: `Found ${order.requestedQuantity - remaining} kg of ${order.requestedQuantity} kg required. No partial commitment was proposed.`,
+          summary: `Found ${covered} kg of ${order.requestedQuantity} kg required, below the ${Math.round(order.minimumAcceptableFraction * 100)}% this buyer accepts. No partial commitment was proposed.`,
           simulationRunId: order.simulationRunId,
         },
       });
@@ -456,6 +465,8 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
   }
 
   const allocationId = randomUUID();
+  const coveragePercent = Math.round(coverageFraction * 100);
+  const coverageSentence = `covers ${covered} of ${order.requestedQuantity} kg (${coveragePercent}%)`;
   const farmers = await prisma.listing.findMany({
     where: { id: { in: lines.map((line) => line.listingId) }, simulationRunId: order.simulationRunId },
     select: { farmerId: true },
@@ -479,7 +490,13 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
     await tx.order.update({ where: { id: orderId }, data: { lifecycleStatus: "AWAITING_APPROVAL", outcomeCause: null, outcomeNote: null } });
     await tx.agentTrace.update({
       where: { id: traceId },
-      data: { status: "AWAITING_APPROVAL", stage: "ALLOCATION_PROPOSED", summary: "Matched complete safe supply and paused before commitment for human approval." },
+      data: {
+        status: "AWAITING_APPROVAL",
+        stage: "ALLOCATION_PROPOSED",
+        summary: isPartial
+          ? `Matched ${coveragePercent}% of the requested quantity, which this buyer accepts, and paused before commitment for human approval.`
+          : "Matched complete safe supply and paused before commitment for human approval.",
+      },
     });
     await tx.traceStep.create({
       data: {
@@ -489,7 +506,9 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
         agentName: "Market Balance Agent",
         toolName: "read-safe-supply",
         provenance: Provenance.INFERRED,
-        summary: `Confirmed complete coverage for ${order.requestedQuantity} kg using current listing windows and per-batch ATP.`,
+        summary: isPartial
+          ? `Confirmed ${coverageSentence} using current listing windows and per-batch ATP, at or above the ${Math.round(order.minimumAcceptableFraction * 100)}% this buyer accepts.`
+          : `Confirmed complete coverage for ${order.requestedQuantity} kg using current listing windows and per-batch ATP.`,
         simulationRunId: order.simulationRunId,
       },
     });
@@ -514,7 +533,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
         agentName: "Commitment Agent",
         toolName: "request-human-approval",
         provenance: Provenance.INFERRED,
-        summary: `Requested approval from the buyer and ${approverIds.length - 1} participating farmer${approverIds.length === 2 ? "" : "s"}; no stock is reserved yet.`,
+        summary: `Requested approval from the buyer and ${approverIds.length - 1} participating farmer${approverIds.length === 2 ? "" : "s"} for a commitment that ${coverageSentence}; no stock is reserved yet.`,
         simulationRunId: order.simulationRunId,
       },
     });
@@ -530,6 +549,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
       payload: {
         allocationId,
         orderId,
+        coverageFraction: Number(coverageFraction.toFixed(4)),
         lines: lines.map((line) => ({ cropBatchId: line.cropBatchId, quantity: kilograms(line.quantity) })),
       },
     });
@@ -654,7 +674,12 @@ export async function approveAllocation(
         const remainingQuantity = Math.max(0, listing.quantity - quantity);
         await tx.listing.update({ where: { id: listingId }, data: { quantity: remainingQuantity, status: remainingQuantity > 0.0001 ? "ACTIVE" : "SOLD_OUT" } });
       }
-      await tx.order.update({ where: { id: order.id }, data: { lifecycleStatus: "COMMITTED" } });
+      // Commit exactly what was approved. On a safe partial commitment that is
+      // less than the request, and the mission, its acceptance arithmetic and
+      // the released reservation all have to agree with it rather than with the
+      // quantity the buyer originally asked for.
+      const committedQuantity = lines.reduce((sum, line) => sum + line.quantity, 0);
+      await tx.order.update({ where: { id: order.id }, data: { lifecycleStatus: "COMMITTED", committedQuantity } });
 
       const route = await buildDeliveryRoute(tx, lines, { latitude: order.latitude, longitude: order.longitude });
       const missionId = randomUUID();
@@ -663,7 +688,7 @@ export async function approveAllocation(
           id: missionId,
           orderId: order.id,
           status: "AVAILABLE",
-          quantity: order.requestedQuantity,
+          quantity: committedQuantity,
           deadline: order.neededBy,
           stops: route.stops,
           estimatedDistanceKm: route.distanceKm,
@@ -674,7 +699,7 @@ export async function approveAllocation(
       });
       if (trace) {
         await tx.agentTrace.update({ where: { id: trace.id }, data: { status: "RUNNING", stage: "DELIVERY_AVAILABLE", summary: "All participants approved; safe supply was reserved and a delivery mission is available." } });
-        await tx.traceStep.create({ data: { traceId, recordedAt: decidedAt, kind: "STATE_CHANGE", agentName: "Commitment Agent", toolName: "commit-reservations", provenance: Provenance.INFERRED, summary: "Aggregate supply was revalidated and reservations were committed atomically.", simulationRunId: order.simulationRunId } });
+        await tx.traceStep.create({ data: { traceId, recordedAt: decidedAt, kind: "STATE_CHANGE", agentName: "Commitment Agent", toolName: "commit-reservations", provenance: Provenance.INFERRED, summary: `Aggregate supply was revalidated and reservations were committed atomically for ${committedQuantity} of ${order.requestedQuantity} kg.`, simulationRunId: order.simulationRunId } });
         await tx.traceStep.create({ data: { traceId, recordedAt: decidedAt, kind: "DECISION", agentName: "Logistics Agent", toolName: "build-pickup-route", provenance: Provenance.INFERRED, summary: `Created a ${route.stops.length}-stop mission covering ${route.distanceKm} km with an estimated ${route.durationMinutes}-minute duration.`, simulationRunId: order.simulationRunId } });
       }
       const allocationEvent = await recordEvent(tx, {
@@ -686,7 +711,7 @@ export async function approveAllocation(
         causationId: approvalEvent.id,
         provenance: Provenance.OBSERVED,
         simulationRunId: order.simulationRunId,
-        payload: { allocationId: allocation.id, orderId: order.id, lines: lines.map((line) => ({ cropBatchId: line.cropBatchId, quantity: kilograms(line.quantity) })) },
+        payload: { allocationId: allocation.id, orderId: order.id, coverageFraction: Number((order.requestedQuantity > 0 ? committedQuantity / order.requestedQuantity : 0).toFixed(4)), lines: lines.map((line) => ({ cropBatchId: line.cropBatchId, quantity: kilograms(line.quantity) })) },
       });
       await recordEvent(tx, {
         eventType: "DELIVERY_MISSION_CREATED",

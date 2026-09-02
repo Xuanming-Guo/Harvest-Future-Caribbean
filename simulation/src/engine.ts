@@ -1565,6 +1565,7 @@ export class SimulationEngine {
         islandId: buyer.islandId,
         name: buyer.name,
         position: buyer.position,
+        minimumAcceptableFraction: buyer.minimumAcceptableFraction,
         ...(buyer.referencePlaceId ? { referencePlaceId: buyer.referencePlaceId } : {}),
       })),
       transporters: [...this.world.transporters.values()].map((transporter) => ({
