@@ -69,10 +69,15 @@ with `SIMULATION_RUN_IMMUTABLE`. The tutorial is not shown during replay.
 
 | Role | Routes | Main actions |
 | --- | --- | --- |
-| Farmer | `/farmer`, `/crops/[cropBatchId]`, `/orders` | crop update, forecast refresh, safe listing, commitment decision |
-| Buyer | `/buyer`, `/marketplace`, `/orders`, `/orders/[orderId]` | demand, multi-farm order, commitment decision, delivery acceptance |
+| Farmer | `/farmer`, `/crops/[cropBatchId]`, `/orders` | crop update, forecast refresh, safe listing, commitment decision, read what was wrong and what to do next, follow the crop journey |
+| Buyer | `/buyer`, `/marketplace`, `/orders`, `/orders/[orderId]` | demand, multi-farm order, commitment decision, delivery acceptance with a required rejection reason and next action |
 | Transporter | `/transporter`, `/missions/[missionId]` | accept mission, pickup/arrival/delivery update, report exception |
 | Coordinator | `/coordinator`, `/crops/[cropBatchId]`, `/orders` | permitted-farm verification, missing information, recovery decision, exception follow-up |
+
+The crop journey on `/crops/[cropBatchId]` is composed in the browser from the
+existing crop-batch, order, mission and mission-update reads. It shows recorded
+Harvest evidence only, never a food-safety certification, and never private farm
+coordinates.
 
 Participant pages poll active orders, approvals, missions, exceptions and
 verification tasks every five seconds. Crop, demand, listing and opportunity
