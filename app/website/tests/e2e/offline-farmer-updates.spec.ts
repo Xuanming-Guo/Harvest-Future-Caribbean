@@ -52,17 +52,17 @@ test("keeps a farmer crop update on the device while offline and sends it exactl
   await page.getByRole("button", { name: "Save crop update" }).click();
 
   await expect(page.getByText("Updates on this device")).toBeVisible();
-  await expect(page.getByText("Saved on this device")).toBeVisible();
+  await expect(page.getByText("Saved on this device", { exact: true })).toBeVisible();
   expect(acceptedObservationPosts).toHaveLength(0);
 
   // Still offline: the page can only come back from the cached app shell.
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: "Share a crop update" })).toBeVisible();
   await expect(page.getByText(/^Offline · showing/)).toBeVisible();
-  await expect(page.getByText("Saved on this device")).toBeVisible();
+  await expect(page.getByText("Saved on this device", { exact: true })).toBeVisible();
 
   await context.setOffline(false);
-  await expect(page.getByText("Synced")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("Synced", { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(/^Offline · showing/)).toHaveCount(0);
 
   // Exactly one observation reached the Product API, and it moved the crop batch head once.
