@@ -26,14 +26,14 @@ schema-validated envelope for every event type below.
 | `CROP_OBSERVATION_INTAKE_DRAFTED` | Text or a supplied transcript is extracted into a non-binding draft | intake, crop batch, source type, prompt version, adapter | No world mutation; wait for the actor to review and submit structured fields |
 | `CROP_OBSERVATION_SUBMITTED` | A crop observation is stored | observation, crop batch, observation time, stage | Complete the actor's observation task; never alter hidden crop truth |
 | `VERIFICATION_TASK_CREATED` | An observation creates explicit coordinator work | task, crop batch, observation, `OPEN` status | Schedule the permitted coordinator's observable verification action |
-| `VERIFICATION_DECIDED` | A coordinator verifies an observation or requests changes | task, crop batch, observation, final status, optional note | Complete the verification action; never alter hidden crop truth |
+| `VERIFICATION_DECIDED` | A coordinator verifies an observation or requests changes | task, crop batch, observation, final status, optional note, and for `CHANGES_REQUESTED` the required `reasonCode` and `nextAction` | Complete the verification action; never alter hidden crop truth |
 | `FORECAST_PRODUCED` | A model response is validated and ATP is calculated | prediction, crop batch, q10 yield, ATP | Record the prediction for later predicted-versus-actual comparison |
 | `LISTING_PUBLISHED` | Safely orderable supply is published | listing, batch, quantity, availability date | Make the listing discoverable during later buyer actions |
 | `LISTING_EXPIRED` | An active listing's `availableUntil` date has passed | listing, batch, availability end date | Stop offering the listing; no inventory or reservation changes |
 | `BUYER_DEMAND_CREATED` | Buyer demand is stored | demand, crop, quantity, deadline | Mark demand pending and schedule eligible actor reactions |
 | `ORDER_REQUESTED` | An order is created | order, crop, requested quantity, `REQUESTED` | Mark the buyer's order pending and schedule matching |
 | `ALLOCATION_PROPOSED` | A non-binding multi-farm allocation is saved | allocation, order, batch quantities | Schedule the relevant approval actions |
-| `APPROVAL_DECIDED` | A person approves or rejects an allocation or recovery | approval, subject, decision | Complete only that actor's approval task; never infer other approvals |
+| `APPROVAL_DECIDED` | A person approves or rejects an allocation or recovery | approval, subject, decision, and for `REJECT` the required `reasonCode` and `nextAction` | Complete only that actor's approval task; never infer other approvals |
 | `ALLOCATION_INVALIDATED` | Final validation detects changed safe supply | allocation, order, `SUPPLY_CHANGED`, `STALE` | Cancel the proposal without creating partial reservations and leave demand open |
 | `ALLOCATION_APPROVED` | Final approval creates reservations and commitment | allocation, order, batch quantities | Schedule harvest/pickup obligations and reduce planned uncommitted supply only |
 | `DELIVERY_MISSION_CREATED` | A committed order receives a route | mission, order, status, quantity-bearing stops and route estimates | Add an available mission to transporter schedules |
@@ -42,7 +42,7 @@ schema-validated envelope for every event type below.
 | `EXCEPTION_REPORTED` | An operational exception is stored | exception type, severity, affected entities | Expose/apply the observable disruption and pause affected future work where appropriate |
 | `RECOVERY_PROPOSED` | Deterministic recovery code stores a concrete action for approval | exception, approval, action, mission, before/after deadline | Schedule the permitted coordinator approval; do not apply the change yet |
 | `RECOVERY_APPROVED` | A human approves a recovery proposal | exception, approval, action, and concrete changed mission/deadline when applicable | Deterministically apply only the stored reroute, reschedule, substitute, reallocate, or cancellation |
-| `DELIVERY_ACCEPTED` | Buyer records accepted and rejected quantities | delivery, order, totals, per-crop-batch outcomes, outcome | Record actual outcome and economics for model/benchmark evaluation |
+| `DELIVERY_ACCEPTED` | Buyer records accepted and rejected quantities | delivery, order, totals, per-crop-batch outcomes, outcome, and whenever any quantity is rejected the required `reasonCode` and `nextAction` (acceptance level and on each rejected line) | Record actual outcome and economics for model/benchmark evaluation |
 | `ORDER_FULFILLED` | Accepted quantity completes the commitment | order, final status, accepted and released quantities | Satisfy demand, end remaining order tasks, and record procurement/fulfilment metrics |
 | `ORDER_PARTIALLY_FULFILLED` | Some committed quantity is accepted | order, final status, accepted and released quantities | Schedule unmet-demand handling or import/substitution fallback |
 | `ORDER_REJECTED` | No delivered quantity is accepted | order, final status, zero accepted and released quantities | Schedule fallback and record rejection economics |

@@ -146,7 +146,8 @@ scope, not only the role name.
   admin roles.
 - Request: optional `cropType`, status, cursor, and limit filters.
 - Response: a role-filtered page of observable crop batches with latest safe
-  prediction IDs, ATP, provenance, and latest verification status.
+  prediction IDs, ATP, provenance, latest verification status, and the optional
+  `latestDecision` explanation described under `GET /v1/crop-batches/{cropBatchId}`.
 - Product state/event and simulation effect: none; this is a read projection.
 - Consumers: farmer crop lists and authorised technical evidence views.
 
@@ -192,7 +193,14 @@ scope, not only the role name.
   coordinator/operations/admin.
 - Request: UUID path parameter; no body.
 - Response: observable batch identity/type/status, latest observation and
-  prediction IDs, deterministic `availableToPromise`, and provenance.
+  prediction IDs, deterministic `availableToPromise`, and provenance. When the
+  batch's most recent verification decision was `REQUEST_CHANGES`, or its most
+  recent delivery line was rejected, the response also carries the additive
+  optional `latestDecision` object: `source` (`VERIFICATION` or `DELIVERY`),
+  `decidedAt`, and the recorded `reasonCode`, `nextAction`, and `note`. Records
+  written before structured reasons existed simply omit those fields. This is
+  traceability evidence about one operational decision, not a food-safety
+  certification.
 - Product state/event: none.
 - Simulation effect: none; reading cannot advance time or reveal truth.
 - Consumers: farmer crop view, order/allocation detail, crop map.
@@ -329,7 +337,11 @@ scope, not only the role name.
 - Response: a role-filtered order page using the same lifecycle representation
   as order detail.
 - Product state/event and simulation effect: none.
-- Consumers: buyer, farmer, and coordinator order lists.
+- Consumers: buyer, farmer, and coordinator order lists, and the crop-batch
+  journey view.
+- Rules/failures: the optional `cropBatchId` filter narrows the caller's already
+  visible orders to those whose allocation commits that batch. It never widens
+  visibility and never discloses private farm coordinates.
 
 #### `GET /v1/orders/{orderId}`
 
@@ -339,7 +351,9 @@ scope, not only the role name.
 - Response: quantities, deadline, lifecycle status, `atRisk`, active exception
   IDs, timestamps, safe allocation, approval totals and the caller's approval,
   trace ID, related delivery mission, immutable delivery acceptance when
-  recorded, and `outcomeCause`/`outcomeNote` (the latest recorded reason the
+  recorded (including its `reasonCode`/`nextAction` and any per-line reasons, so
+  the affected farmer reads the same explanation the buyer recorded), and
+  `outcomeCause`/`outcomeNote` (the latest recorded reason the
   order is not fulfilled: `NO_READY_SUPPLY`, `INSUFFICIENT_SUPPLY`,
   `SUPPLY_CHANGED`, `APPROVAL_REJECTED`, `DELIVERY_REJECTED`, `CANCELLED`).
   Private farm coordinates are not exposed here.
@@ -367,8 +381,14 @@ scope, not only the role name.
 
 - Callers: the named human approver for the pending subject; admin only through
   an explicitly audited override.
-- Request: `decision` (`APPROVE`/`REJECT`) and optional `reason`.
-- Response: approval subject, final status, decider, and time.
+- Request: `decision` (`APPROVE`/`REJECT`) and optional `reason`. A `REJECT`
+  must also carry `reasonCode` (`QUANTITY_MISMATCH`, `MATURITY_OR_QUALITY`, `DAMAGE`, `CLEANLINESS`,
+  `SIZE_OR_GRADE`, `MISSING_INFORMATION`, or `OTHER`) and a `nextAction` of 1-300
+  characters saying what the affected participant should do next. A request
+  that omits either fails with `422 DECISION_REASON_REQUIRED` and records no
+  decision.
+- Response: approval subject, final status, decider, time, and the recorded
+  `reasonCode`/`nextAction` when present.
 - Product state/event: record one final decision. An allocation creates one
   targeted approval for its buyer and one for every participating farmer. No
   reservation, commitment, or mission exists until all remain valid and every
@@ -469,7 +489,13 @@ scope, not only the role name.
 
 - Callers: coordinator for the task's permitted farm or admin.
 - Request: `VERIFY` or `REQUEST_CHANGES` plus an optional note.
-- Product state/event: finalise the task and emit `VERIFICATION_DECIDED`.
+  `REQUEST_CHANGES` must also carry `reasonCode` (`QUANTITY_MISMATCH`, `MATURITY_OR_QUALITY`, `DAMAGE`, `CLEANLINESS`,
+  `SIZE_OR_GRADE`, `MISSING_INFORMATION`, or `OTHER`) and a `nextAction`
+  of 1-300 characters; without both the request fails with
+  `422 DECISION_REASON_REQUIRED` and the task stays `OPEN`.
+- Product state/event: finalise the task, store the structured reason, and emit
+  `VERIFICATION_DECIDED` with the additive `reasonCode`/`nextAction` fields. The
+  reason is surfaced to the owning farmer as the batch's `latestDecision`.
 - Simulation effect: complete the observable verification action without
   changing hidden crop truth.
 - Consumers: coordinator queue and crop/listing evidence.
@@ -514,10 +540,18 @@ scope, not only the role name.
 
 - Callers: receiving buyer or explicitly authorised receiving coordinator.
 - Request: outcome, accepted quantity, rejected quantity, one accepted/rejected
-  outcome for every committed crop batch, and optional note.
-- Response: delivery/order IDs, outcome/quantities, accepter and time.
-- Product state/event: record immutable actual outcome and emit
-  `DELIVERY_ACCEPTED`; then atomically derive one of `ORDER_FULFILLED`,
+  outcome for every committed crop batch, and optional note. Whenever any
+  quantity is rejected, the request must also carry `reasonCode` (`QUANTITY_MISMATCH`, `MATURITY_OR_QUALITY`, `DAMAGE`, `CLEANLINESS`,
+  `SIZE_OR_GRADE`, `MISSING_INFORMATION`, or `OTHER`) and
+  a `nextAction` of 1-300 characters. Both may be given once on the acceptance
+  and apply to every rejected line, or per line for a batch-specific reason; a
+  per-line value overrides the shared one. Any rejected line left without both
+  fields fails with `422 DECISION_REASON_REQUIRED` and stores nothing.
+- Response: delivery/order IDs, outcome/quantities, accepter, time, the stored
+  `reasonCode`/`nextAction`, and the per-line reasons inside `lineOutcomes`.
+- Product state/event: record immutable actual outcome with its structured
+  reasons and emit `DELIVERY_ACCEPTED` carrying the additive
+  `reasonCode`/`nextAction` fields; then atomically derive one of `ORDER_FULFILLED`,
   `ORDER_PARTIALLY_FULFILLED`, or `ORDER_REJECTED` and release unused
   reservations.
 - Simulation effect: record actual farmer/transporter economics and model
@@ -526,7 +560,9 @@ scope, not only the role name.
   partial/rejected outcomes schedule unmet-demand/import/substitution fallback.
 - Consumers: buyer receipt, farmer outcome/revenue, trust, benchmark, Model Lab.
 - Rules/failures: quantities must use one unit, be non-negative, sum to the
-  delivered amount, and match outcome; produce rejection requires approval.
+  delivered amount, and match outcome; produce rejection requires approval and
+  an actionable reason. The affected farmer reads the recorded reason as the
+  crop batch's `latestDecision`.
 
 #### `GET /v1/agent-traces/{traceId}`
 
