@@ -67,9 +67,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!offlineCapable || typeof navigator === "undefined" || !("serviceWorker" in navigator) || navigator.onLine === false) return;
     let cancelled = false;
-    void navigator.serviceWorker.ready.then(() => {
+    void navigator.serviceWorker.ready.then(async () => {
       if (cancelled) return;
-      return fetch(pathname, { headers: { accept: "text/html" }, cache: "no-store" });
+      const response = await fetch(pathname, { headers: { accept: "text/html" }, cache: "no-store" });
+      // Scripts and styles loaded before the worker took control were never
+      // cached, so pull the ones this document references through it now.
+      const html = await response.text();
+      const assets = [...html.matchAll(/(?:src|href)="(\/_next\/static\/[^"]+)"/g)].map((match) => match[1].replaceAll("&amp;", "&"));
+      await Promise.all([...new Set(assets)].map((asset) => fetch(asset).catch(() => undefined)));
     }).catch(() => {
       // Warming is best effort; the next successful navigation caches it anyway.
     });
