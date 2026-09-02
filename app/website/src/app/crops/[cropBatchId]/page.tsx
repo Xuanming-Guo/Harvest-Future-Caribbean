@@ -101,6 +101,9 @@ export default function CropDetailPage() {
   }
 
   const observation = useMutation<SubmitResult>({
+    // Runs while offline on purpose: TanStack pauses mutations by default until
+    // the browser is back online, which would skip the on-device queue entirely.
+    networkMode: "always",
     mutationFn: async () => {
       const body = observationBody();
       if (!online) return queueWrite("observation", body);
@@ -148,6 +151,9 @@ export default function CropDetailPage() {
     onSuccess: () => setMessage("Forecast refresh requested."),
   });
   const listing = useMutation<SubmitResult>({
+    // Runs while offline on purpose: TanStack pauses mutations by default until
+    // the browser is back online, which would skip the on-device queue entirely.
+    networkMode: "always",
     mutationFn: async () => {
       const body = listingBody();
       if (!online) return queueWrite("listing", body);
