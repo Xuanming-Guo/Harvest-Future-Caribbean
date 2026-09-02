@@ -1,19 +1,37 @@
 @import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap");
 
+/*
+ * Warm agrarian editorial palette (docs/design/mood-board.md section 3).
+ * Ratios stated below are WCAG relative-luminance against the pair actually
+ * shipped, not against a blank white page.
+ */
 :root {
   --ink: #17332a;
-  --muted: #6b7f77;
+  /* Darkened from #6b7f77: it labels 11-12px captions, which are not "large
+     text", so the old value failed AA at 3.97:1. Now 5.95:1 on cream. */
+  --muted: #526158;
   --forest: #1d5c45;
   --forest-dark: #124333;
+  /* Vivid enough for icons and decorative marks at 24px and up. Never used as
+     text: leaf on cream is 2.73:1 and fails even the large-text threshold. */
   --leaf: #5ba64b;
   --mint: #edf7ef;
-  --cream: #f8f7f1;
+  --cream: #f7f4ec;
   --card: #ffffff;
-  --line: #dce6df;
+  --line: #e2dbc8;
   --amber: #d99b2b;
-  --red: #c45645;
+  /* Darkened from #c45645, which sat at 4.41:1 as normal-size danger text. */
+  --red: #b84a39;
   --blue: #377f8c;
+  /* Deep warm umber: the palette's first real earth tone. 10.67:1 on cream. */
+  --soil: #4a3324;
+  /* Warm light tint, the soil/sun equivalent of --mint. */
+  --sand: #f3e6d3;
+  /* Ripe harvest orange. Decorative fills and illustration only, never text or
+     a status carrier: 2.43:1 on sand. */
+  --sun: #dd7d1f;
   --shadow: 0 12px 35px rgba(25, 64, 48, 0.08);
+  --shadow-warm: 0 20px 50px rgba(74, 51, 36, 0.16);
 }
 
 * { box-sizing: border-box; }
@@ -59,7 +77,7 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .page-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 25px; margin-bottom: 30px; }
 .page-header h1 { margin-bottom: 8px; font-size: clamp(28px, 3vw, 42px); line-height: 1.1; letter-spacing: -.04em; }
 .page-header > div > p:last-child { max-width: 730px; margin-bottom: 0; color: var(--muted); font-size: 16px; line-height: 1.6; }
-.eyebrow { margin-bottom: 8px; color: var(--leaf); font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.eyebrow { margin-bottom: 8px; color: var(--forest); font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .page-actions, .inline-actions { display: flex; align-items: center; gap: 9px; }
 .back-link, .text-link { display: inline-flex; align-items: center; gap: 7px; color: var(--forest); font-weight: 700; }
 .back-link { margin-bottom: 20px; font-size: 13px; }
@@ -166,7 +184,7 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .order-summary input { width: 110px; min-height: 36px; padding: 7px 9px; border: 1px solid #cfdcd3; border-radius: 8px; background: white; }
 
 .lifecycle { display: grid; grid-template-columns: repeat(6, 1fr); }
-.lifecycle > div { position: relative; display: grid; justify-items: center; gap: 7px; color: #9aac9f; text-align: center; }
+.lifecycle > div { position: relative; display: grid; justify-items: center; gap: 7px; color: var(--muted); text-align: center; }
 .lifecycle > div::before { content: ""; position: absolute; z-index: 0; top: 15px; left: -50%; width: 100%; height: 2px; background: var(--line); }
 .lifecycle > div:first-child::before { display: none; }
 .lifecycle > div span { z-index: 1; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: #e7ece8; font-size: 11px; font-weight: 800; }
@@ -276,7 +294,7 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .sign-in-page { min-height: 100vh; display: grid; grid-template-columns: .9fr 1.1fr; align-items: center; gap: clamp(40px, 7vw, 110px); max-width: 1250px; margin: auto; padding: 55px !important; }
 .sign-in-page::before { content: ""; position: fixed; inset: 0 50% 0 0; z-index: -1; background: radial-gradient(circle at 20% 25%, rgba(118,180,90,.2), transparent 30%), linear-gradient(145deg, #0f3f30, #216147); }
 .sign-in-copy { color: white; }
-.sign-in-copy .eyebrow { margin-top: 55px; color: #acd49b; }
+.sign-in-copy .eyebrow { margin-top: 55px; color: #d3e9c8; }
 .sign-in-copy h1 { max-width: 570px; margin-bottom: 20px; font-size: clamp(39px, 5vw, 65px); line-height: 1.02; letter-spacing: -.055em; }
 .sign-in-copy > p:last-child { max-width: 500px; color: rgba(255,255,255,.7); font-size: 17px; line-height: 1.7; }
 .sign-in-brand strong { font-size: 24px; }
@@ -286,7 +304,7 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .role-card { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 13px; width: 100%; padding: 14px; border: 1px solid var(--line); border-radius: 13px; color: var(--ink); text-align: left; background: white; cursor: pointer; }
 .role-card:hover { border-color: var(--leaf); background: #fbfefb; transform: translateY(-1px); }
 .role-card small, .role-card strong, .role-card em { display: block; }
-.role-card small { margin-bottom: 2px; color: var(--leaf); font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.role-card small { margin-bottom: 2px; color: var(--forest); font-size: 10px; font-weight: 800; text-transform: uppercase; }
 .role-card strong { font: 700 14px "Manrope", sans-serif; }
 .role-card em { margin-top: 3px; color: var(--muted); font-size: 11px; font-style: normal; }
 
