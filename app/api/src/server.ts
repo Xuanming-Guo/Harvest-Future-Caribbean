@@ -18,6 +18,7 @@ import {
   approvalDto,
   cropBatchDto,
   cropObservationIntakeDto,
+  cropStandardDto,
   deliveryAcceptanceDto,
   deliveryUpdateDto,
   demandDto,
@@ -39,6 +40,9 @@ type GeoPoint = { latitude: number; longitude: number };
 type DeliveryStop = { sequence: number; kind: "PICKUP" | "DROPOFF"; location: GeoPoint };
 
 const productRoles = ["FARMER", "BUYER", "TRANSPORTER", "COORDINATOR", "OPERATIONS", "ADMIN"] as const;
+const checklistKeys = ["VARIETY", "SIZE_AND_GRADE", "MATURITY_AND_APPEARANCE", "PERMITTED_DEFECTS", "CLEANING", "PACKAGING"] as const;
+const guidanceTopics = ["HARVEST_WINDOW", "PEST_AND_DISEASE_SIGNS", "GOOD_AGRICULTURAL_PRACTICE", "HARVEST_READINESS", "SORTING_GRADING_CLEANING_STORAGE"] as const;
+const unreviewedChemicalGuidance = /chlorine|bleach|sanitiser|sanitizer|pesticide\s+dose/i;
 const queryLimit = (value: unknown) => Math.min(100, Math.max(1, Number(value ?? 20) || 20));
 
 const asString = (value: unknown, field: string) => {
@@ -51,6 +55,99 @@ const asDate = (value: unknown, field: string) => {
   if (Number.isNaN(parsed.valueOf())) throw httpError(400, "VALIDATION_FAILED", `${field} must be an ISO-8601 date or date-time.`);
   return parsed;
 };
+
+const asPublicUrl = (value: unknown, field: string) => {
+  const url = asString(value, field);
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error("unsupported protocol");
+  } catch {
+    throw httpError(400, "VALIDATION_FAILED", `${field} must be a valid public HTTP URL.`);
+  }
+  return url;
+};
+
+const asDateOnly = (value: unknown, field: string) => {
+  const date = asString(value, field);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(new Date(`${date}T00:00:00Z`).valueOf())) {
+    throw httpError(400, "VALIDATION_FAILED", `${field} must be an ISO-8601 date.`);
+  }
+  return date;
+};
+
+function assertReviewedGuidance(text: string) {
+  if (unreviewedChemicalGuidance.test(text)) {
+    throw httpError(422, "CHEMICAL_GUIDANCE_NOT_REVIEWED", "Chemical sanitation or pesticide-dose guidance is excluded until authoritative local or regional review is complete.");
+  }
+}
+
+function readCropStandardSource(value: unknown) {
+  const source = assertObjectBody(value, ["title", "url", "licence", "retrievedAt"], ["title", "url", "licence", "retrievedAt"]);
+  return {
+    title: asString(source.title, "source.title"),
+    url: asPublicUrl(source.url, "source.url"),
+    licence: asString(source.licence, "source.licence"),
+    retrievedAt: asDateOnly(source.retrievedAt, "source.retrievedAt"),
+  };
+}
+
+function readGuidanceSource(value: unknown, index: number) {
+  const field = `guidance[${index}].source`;
+  const source = assertObjectBody(value, ["title", "url", "retrievedAt"], ["title", "url", "retrievedAt"]);
+  return {
+    title: asString(source.title, `${field}.title`),
+    url: asPublicUrl(source.url, `${field}.url`),
+    retrievedAt: asDateOnly(source.retrievedAt, `${field}.retrievedAt`),
+  };
+}
+
+function readCropStandardBody(value: unknown) {
+  const body = assertObjectBody(value, ["cropType", "status", "reviewedAt", "geography", "source", "checklist", "images", "guidance"], ["cropType", "status", "reviewedAt", "geography", "source", "checklist", "images", "guidance"]);
+  const status = asString(body.status, "status");
+  if (status !== "DRAFT" && status !== "PUBLISHED") throw httpError(422, "INVALID_CROP_STANDARD_STATUS", "status must be DRAFT or PUBLISHED.");
+  if (!Array.isArray(body.checklist) || body.checklist.length === 0) throw httpError(400, "VALIDATION_FAILED", "checklist must contain at least one item.");
+  const checklist = body.checklist.map((value, index) => {
+    const item = assertObjectBody(value, ["key", "requirement"], ["key", "requirement"]);
+    const key = asString(item.key, `checklist[${index}].key`);
+    if (!(checklistKeys as readonly string[]).includes(key)) throw httpError(422, "INVALID_CHECKLIST_KEY", `checklist[${index}].key is not supported.`);
+    const requirement = asString(item.requirement, `checklist[${index}].requirement`);
+    assertReviewedGuidance(requirement);
+    return { key, requirement };
+  });
+  if (new Set(checklist.map((item) => item.key)).size !== checklist.length) throw httpError(422, "DUPLICATE_CHECKLIST_KEY", "Each checklist key may appear only once.");
+  if (!Array.isArray(body.images)) throw httpError(400, "VALIDATION_FAILED", "images must be an array.");
+  const images = body.images.map((value, index) => {
+    const item = assertObjectBody(value, ["url", "licence", "attribution", "alt", "acceptable"], ["url", "licence", "attribution", "alt", "acceptable"]);
+    if (typeof item.acceptable !== "boolean") throw httpError(400, "VALIDATION_FAILED", `images[${index}].acceptable must be a boolean.`);
+    return {
+      url: asPublicUrl(item.url, `images[${index}].url`),
+      licence: asString(item.licence, `images[${index}].licence`),
+      attribution: asString(item.attribution, `images[${index}].attribution`),
+      alt: asString(item.alt, `images[${index}].alt`),
+      acceptable: item.acceptable,
+    };
+  });
+  if (!Array.isArray(body.guidance) || body.guidance.length === 0) throw httpError(400, "VALIDATION_FAILED", "guidance must contain at least one item.");
+  const guidance = body.guidance.map((value, index) => {
+    const item = assertObjectBody(value, ["topic", "text", "source"], ["topic", "text", "source"]);
+    const topic = asString(item.topic, `guidance[${index}].topic`);
+    if (!(guidanceTopics as readonly string[]).includes(topic)) throw httpError(422, "INVALID_GUIDANCE_TOPIC", `guidance[${index}].topic is not supported.`);
+    const text = asString(item.text, `guidance[${index}].text`);
+    assertReviewedGuidance(text);
+    return { topic, text, source: readGuidanceSource(item.source, index) };
+  });
+  if (new Set(guidance.map((item) => item.topic)).size !== guidance.length) throw httpError(422, "DUPLICATE_GUIDANCE_TOPIC", "Each guidance topic may appear only once.");
+  return {
+    cropType: asString(body.cropType, "cropType").toUpperCase(),
+    status,
+    reviewedAt: asDate(body.reviewedAt, "reviewedAt"),
+    geography: asString(body.geography, "geography"),
+    source: readCropStandardSource(body.source),
+    checklist,
+    images,
+    guidance,
+  };
+}
 
 async function verificationStatuses(batchIds: string[]) {
   const tasks = await prisma.verificationTask.findMany({
@@ -222,6 +319,45 @@ export async function buildServer() {
     const statuses = await verificationStatuses([row.id]);
     return cropBatchDto(row, statuses.get(row.id));
   });
+
+  server.get("/v1/crop-standards", async (request) => {
+    const actor = requireRole(request, [...productRoles]);
+    const query = request.query as JsonObject;
+    const cropType = asString(query.cropType, "cropType").toUpperCase();
+    const mayPublish = actor.role === "BUYER" || actor.role === "COORDINATOR" || actor.role === "ADMIN";
+    const rows = await prisma.cropStandard.findMany({
+      where: {
+        cropType,
+        ...(mayPublish ? { OR: [{ status: "PUBLISHED" }, { publisherActorId: actor.id }] } : { status: "PUBLISHED" }),
+      },
+      orderBy: [{ createdAt: "desc" }, { version: "desc" }],
+      take: queryLimit(query.limit),
+    });
+    const publishers = await prisma.actor.findMany({ where: { id: { in: rows.map((row) => row.publisherActorId) } }, select: { id: true, name: true } });
+    const publisherNames = new Map(publishers.map((publisher) => [publisher.id, publisher.name]));
+    return { items: rows.map((row) => cropStandardDto(row, publisherNames.get(row.publisherActorId) ?? "Unknown publisher")), pageInfo };
+  });
+
+  server.post("/v1/crop-standards", async (request, reply) => idempotent(request, reply, 201, async () => {
+    const actor = requireRole(request, ["BUYER", "COORDINATOR", "ADMIN"]);
+    const input = readCropStandardBody(request.body);
+    const row = await prisma.$transaction(async (tx) => {
+      const latest = await tx.cropStandard.findFirst({
+        where: { publisherActorId: actor.id, cropType: input.cropType },
+        orderBy: { version: "desc" },
+        select: { version: true },
+      });
+      return tx.cropStandard.create({
+        data: {
+          id: randomUUID(),
+          publisherActorId: actor.id,
+          version: (latest?.version ?? 0) + 1,
+          ...input,
+        },
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    return cropStandardDto(row, actor.name);
+  }));
 
   server.post("/v1/crop-observation-intakes", async (request, reply) => idempotent(request, reply, 201, async () => {
     const actor = requireRole(request, ["FARMER", "COORDINATOR", "ADMIN"]);
@@ -535,8 +671,10 @@ export async function buildServer() {
     const orderId = randomUUID();
     const traceId = randomUUID();
     const requestedQuantity = readQuantity(body.requestedQuantity, "requestedQuantity");
+    const cropType = asString(body.cropType, "cropType").toUpperCase();
     const row = await prisma.$transaction(async (tx) => {
-      const order = await tx.order.create({ data: { id: orderId, buyerId: actor.id, cropType: asString(body.cropType, "cropType").toUpperCase(), requestedQuantity, acceptedQuantity: 0, neededBy: asDate(body.neededBy, "neededBy"), latitude: location.latitude, longitude: location.longitude, listingIds, lifecycleStatus: "REQUESTED", atRisk: false, activeExceptionIds: [], traceId, simulationRunId: actor.simulationRunId } });
+      const cropStandard = await tx.cropStandard.findFirst({ where: { cropType, status: "PUBLISHED" }, orderBy: [{ createdAt: "desc" }, { version: "desc" }] });
+      const order = await tx.order.create({ data: { id: orderId, buyerId: actor.id, cropType, requestedQuantity, acceptedQuantity: 0, neededBy: asDate(body.neededBy, "neededBy"), latitude: location.latitude, longitude: location.longitude, listingIds, lifecycleStatus: "REQUESTED", atRisk: false, activeExceptionIds: [], cropStandardId: cropStandard?.id, traceId, simulationRunId: actor.simulationRunId } });
       await tx.agentTrace.create({ data: { id: traceId, subjectType: "ORDER", subjectId: orderId, workflowType: "ORDER_FULFILMENT", stage: "ORDER_REQUESTED", status: "RUNNING", summary: "Validating safe supply for a buyer order.", simulationRunId: actor.simulationRunId } });
       await tx.traceStep.create({ data: { traceId, recordedAt: operationNow(), kind: "INPUT", agentName: "Market Balance Agent", toolName: "read-order-request", provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, summary: `Buyer requested ${requestedQuantity} kg of ${order.cropType}.`, simulationRunId: actor.simulationRunId } });
       await recordEvent(tx, { eventType: "ORDER_REQUESTED", actorId: actor.id, entityId: orderId, traceId, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, simulationRunId: actor.simulationRunId, payload: { orderId, cropType: order.cropType, requestedQuantity: quantity(requestedQuantity), status: "REQUESTED" } });

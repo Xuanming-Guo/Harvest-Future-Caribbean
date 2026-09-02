@@ -29,6 +29,19 @@ async function decide(persona: string, approvalId: string, decision: "APPROVE" |
   return server.inject({ method: "POST", url: `/v1/approvals/${approvalId}/decisions`, headers: mutationHeaders(persona, `decision-${decision.toLowerCase()}`), payload: { decision } });
 }
 
+function cropStandardPayload(status: "DRAFT" | "PUBLISHED" = "PUBLISHED") {
+  return {
+    cropType: "PAPAYA",
+    status,
+    reviewedAt: "2026-09-03T12:00:00Z",
+    geography: "Saint Lucia test reference",
+    source: { title: "Test quality reference", url: "https://example.com/papaya-quality", licence: "Test reference", retrievedAt: "2026-09-03" },
+    checklist: [{ key: "MATURITY_AND_APPEARANCE", requirement: "Fruit must meet the buyer's agreed maturity and appearance." }],
+    images: [],
+    guidance: [{ topic: "HARVEST_READINESS", text: "Use the documented maturity indicators in the cited reference.", source: { title: "Test harvest reference", url: "https://example.com/papaya-harvest", retrievedAt: "2026-09-03" } }],
+  };
+}
+
 beforeAll(async () => {
   await server.listen({ host: "127.0.0.1", port: 0 });
   const address = server.server.address() as AddressInfo;
@@ -86,6 +99,57 @@ describe("participant Product API", () => {
     expect(coordinatorTasks.json().items).toHaveLength(1);
     const farmerTasks = await server.inject({ method: "GET", url: "/v1/verification-tasks", headers: auth("farmer-ana") });
     expect(farmerTasks.statusCode).toBe(403);
+  });
+
+  it("versions sourced crop standards, lists them by crop, and snapshots the latest published version on orders", async () => {
+    const first = await server.inject({ method: "POST", url: "/v1/crop-standards", headers: mutationHeaders("buyer-hotel", "papaya-standard-one"), payload: cropStandardPayload() });
+    expect(first.statusCode).toBe(201);
+    expect(first.json()).toMatchObject({ cropType: "PAPAYA", publisherName: "Bay Gardens Hotel", version: 1, status: "PUBLISHED" });
+
+    const second = await server.inject({ method: "POST", url: "/v1/crop-standards", headers: mutationHeaders("buyer-hotel", "papaya-standard-two"), payload: cropStandardPayload() });
+    expect(second.statusCode).toBe(201);
+    expect(second.json().version).toBe(2);
+
+    const draft = await server.inject({ method: "POST", url: "/v1/crop-standards", headers: mutationHeaders("buyer-hotel", "papaya-standard-draft"), payload: cropStandardPayload("DRAFT") });
+    expect(draft.statusCode).toBe(201);
+    expect(draft.json()).toMatchObject({ version: 3, status: "DRAFT" });
+
+    const buyerList = await server.inject({ method: "GET", url: "/v1/crop-standards?cropType=papaya", headers: auth("buyer-hotel") });
+    expect(buyerList.statusCode).toBe(200);
+    expect(buyerList.json().items.map((item: { version: number }) => item.version)).toEqual([3, 2, 1]);
+    const farmerList = await server.inject({ method: "GET", url: "/v1/crop-standards?cropType=PAPAYA", headers: auth("farmer-ana") });
+    expect(farmerList.statusCode).toBe(200);
+    expect(farmerList.json().items.map((item: { version: number }) => item.version)).toEqual([2, 1]);
+
+    const order = await server.inject({
+      method: "POST",
+      url: "/v1/orders",
+      headers: mutationHeaders("buyer-hotel", "papaya-order"),
+      payload: { cropType: "PAPAYA", requestedQuantity: { value: 1, unit: "kg" }, neededBy: new Date(Date.now() + 86_400_000).toISOString(), deliveryLocation: { latitude: 14.0101, longitude: -60.9875 } },
+    });
+    expect(order.statusCode).toBe(201);
+    expect(order.json().cropStandardId).toBe(second.json().standardId);
+
+    const chemical = await server.inject({
+      method: "POST",
+      url: "/v1/crop-standards",
+      headers: mutationHeaders("buyer-hotel", "papaya-standard-chemical"),
+      payload: { ...cropStandardPayload(), checklist: [{ key: "CLEANING", requirement: "Rinse with bleach before packing." }] },
+    });
+    expect(chemical.statusCode).toBe(422);
+    expect(chemical.json().code).toBe("CHEMICAL_GUIDANCE_NOT_REVIEWED");
+
+    const chemicalGuidance = await server.inject({
+      method: "POST",
+      url: "/v1/crop-standards",
+      headers: mutationHeaders("buyer-hotel", "papaya-guidance-chemical"),
+      payload: { ...cropStandardPayload(), guidance: [{ topic: "HARVEST_READINESS", text: "Apply a pesticide dose before harvest.", source: { title: "Test harvest reference", url: "https://example.com/papaya-harvest", retrievedAt: "2026-09-03" } }] },
+    });
+    expect(chemicalGuidance.statusCode).toBe(422);
+    expect(chemicalGuidance.json().code).toBe("CHEMICAL_GUIDANCE_NOT_REVIEWED");
+
+    const farmerPost = await server.inject({ method: "POST", url: "/v1/crop-standards", headers: mutationHeaders("farmer-ana", "farmer-standard"), payload: cropStandardPayload() });
+    expect(farmerPost.statusCode).toBe(403);
   });
 
   it("drafts, human-confirms, forecasts, and exposes a safe crop trace", async () => {

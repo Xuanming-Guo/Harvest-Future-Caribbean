@@ -7,6 +7,7 @@ import { useParams } from "next/navigation";
 import { FormEvent, useState } from "react";
 
 import { useSession } from "@/components/providers";
+import { CropStandardCard } from "@/components/crop-standard-card";
 import { Badge, Card, ErrorState, LoadingState, PageHeader, SectionTitle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { dateInputOffset, formatDate, formatPercent, titleCase } from "@/lib/format";
@@ -28,6 +29,12 @@ export default function CropDetailPage() {
   const [message, setMessage] = useState<string | null>(null);
 
   const batch = useQuery({ queryKey: ["crop-batch", cropBatchId], queryFn: () => api.cropBatch(cropBatchId), refetchInterval: 15_000 });
+  const standards = useQuery({
+    queryKey: ["crop-standards", batch.data?.cropType],
+    queryFn: () => api.cropStandards(batch.data!.cropType),
+    enabled: Boolean(batch.data?.cropType),
+    refetchInterval: 15_000,
+  });
   const prediction = useQuery({
     queryKey: ["prediction", batch.data?.latestPredictionId],
     queryFn: () => api.prediction(batch.data!.latestPredictionId!),
@@ -87,6 +94,7 @@ export default function CropDetailPage() {
   if (batch.error) return <ErrorState error={batch.error} />;
   if (!batch.data) return <LoadingState label="Loading crop details..." />;
   const canEdit = actor?.role === "FARMER";
+  const standard = standards.data?.items.find((item) => item.status === "PUBLISHED");
 
   return (
     <>
@@ -135,16 +143,23 @@ export default function CropDetailPage() {
         )}
       </div>
       {canEdit && (
-        <div className="section-gap" data-tour="crop-listing"><Card>
-          <SectionTitle title="Offer produce to buyers" detail={`Up to ${batch.data.availableToPromise.value} kg safe to list`} />
-          <form className="form-grid four-fields" onSubmit={(event: FormEvent) => { event.preventDefault(); listing.mutate(); }}>
-            <div className="field"><label>Quantity (kg)</label><input type="number" min="0.1" max={batch.data.availableToPromise.value} step="0.1" value={listingQuantity} onChange={(event) => setListingQuantity(Number(event.target.value))} /></div>
-            <div className="field"><label>Price per kg (EC$)</label><input type="number" min="0" step="0.25" value={price} onChange={(event) => setPrice(Number(event.target.value))} /></div>
-            <div className="field"><label>Available from</label><input type="date" value={availableFrom} onChange={(event) => setAvailableFrom(event.target.value)} /></div>
-            <div className="field"><label>Available until</label><input type="date" value={availableUntil} onChange={(event) => setAvailableUntil(event.target.value)} /></div>
-            <button className="button field-full" disabled={listing.isPending || listingQuantity > batch.data.availableToPromise.value}><Store size={16} />{listing.isPending ? "Publishing..." : "List in marketplace"}</button>
-          </form>
-        </Card></div>
+        <>
+          <div className="section-gap">
+            {standards.error ? <ErrorState error={standards.error} /> : !standards.data ? <LoadingState label="Loading buyer expectations..." /> : standard ? <CropStandardCard standard={standard} /> : (
+              <Card><SectionTitle title="What buyers expect" detail={batch.data.cropType} /><p>No published buyer standard is available for this crop yet.</p></Card>
+            )}
+          </div>
+          <div className="section-gap" data-tour="crop-listing"><Card>
+            <SectionTitle title="Offer produce to buyers" detail={`Up to ${batch.data.availableToPromise.value} kg safe to list`} />
+            <form className="form-grid four-fields" onSubmit={(event: FormEvent) => { event.preventDefault(); listing.mutate(); }}>
+              <div className="field"><label>Quantity (kg)</label><input type="number" min="0.1" max={batch.data.availableToPromise.value} step="0.1" value={listingQuantity} onChange={(event) => setListingQuantity(Number(event.target.value))} /></div>
+              <div className="field"><label>Price per kg (EC$)</label><input type="number" min="0" step="0.25" value={price} onChange={(event) => setPrice(Number(event.target.value))} /></div>
+              <div className="field"><label>Available from</label><input type="date" value={availableFrom} onChange={(event) => setAvailableFrom(event.target.value)} /></div>
+              <div className="field"><label>Available until</label><input type="date" value={availableUntil} onChange={(event) => setAvailableUntil(event.target.value)} /></div>
+              <button className="button field-full" disabled={listing.isPending || listingQuantity > batch.data.availableToPromise.value}><Store size={16} />{listing.isPending ? "Publishing..." : "List in marketplace"}</button>
+            </form>
+          </Card></div>
+        </>
       )}
       {(message || intake.error || observation.error || refresh.error || listing.error) && <p className={(intake.error || observation.error || refresh.error || listing.error) ? "form-error" : "form-success"}>{message ?? intake.error?.message ?? observation.error?.message ?? refresh.error?.message ?? listing.error?.message}</p>}
     </>

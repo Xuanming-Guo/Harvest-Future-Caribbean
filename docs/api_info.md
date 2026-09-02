@@ -199,6 +199,34 @@ scope, not only the role name.
 - Rules/failures: return `403` for unauthorised scope and `404` only when
   absence may safely be disclosed.
 
+#### `GET /v1/crop-standards`
+
+- Callers: every authenticated product role. Published standards are visible
+  to all roles; buyers, coordinators, and admins also see their own drafts.
+- Request: required `cropType`; optional cursor and limit filters.
+- Response: newest-first crop-standard versions with publisher identity,
+  review date, geography, attributed source, buyer checklist, licensed images,
+  and individually sourced farmer guidance.
+- Product state/event and simulation effect: none; this is a read projection.
+- Consumers: the crop detail guidance card and order standard attribution.
+
+#### `POST /v1/crop-standards`
+
+- Callers: buyer, coordinator, or admin.
+- Request: crop type, `DRAFT` or `PUBLISHED` status, review date, geography,
+  source, checklist, images, and sourced guidance. The publisher is derived
+  from the authenticated actor.
+- Response: the newly stored standard. Each command creates the next version
+  for that publisher and crop; published versions remain immutable history.
+- Product state/event and simulation effect: no domain event and no simulation
+  effect.
+- Consumers: future standards-authoring surfaces and the current crop/order
+  read projections.
+- Rules/failures: unknown fields and invalid source URLs fail validation.
+  Checklist requirements or guidance text mentioning chlorine, bleach,
+  sanitiser/sanitizer, or a pesticide dose return `422`
+  `CHEMICAL_GUIDANCE_NOT_REVIEWED` until reviewed chemical guidance is in scope.
+
 #### `POST /v1/crop-batches/{cropBatchId}/forecast-requests`
 
 - Callers: owning farmer, coordinator, operations, or scheduled Product API
@@ -304,9 +332,11 @@ scope, not only the role name.
 - Request: `cropType`, `requestedQuantity`, `neededBy`, `deliveryLocation`;
   optional candidate `listingIds`.
 - Response: order ID, buyer ID, requested/accepted quantities, lifecycle status,
-  risk overlay, timestamps.
+  risk overlay, timestamps, and optional `cropStandardId`.
 - Product state/event: store `REQUESTED`, start matching, and emit
-  `ORDER_REQUESTED`. Creation does not reserve stock.
+  `ORDER_REQUESTED`. Creation does not reserve stock. When a published crop
+  standard exists, creation records the newest published version for that crop
+  in `cropStandardId`; later standard versions do not rewrite the order.
 - Simulation effect: mark buyer demand pending and schedule matching/actor
   reactions.
 - Consumers: buyer marketplace and order timeline.
@@ -327,7 +357,7 @@ scope, not only the role name.
 - Callers: participating buyer/farm/transporter when relevant; authorised
   coordinator/operations/admin.
 - Request: order UUID.
-- Response: quantities, deadline, lifecycle status, `atRisk`, active exception
+- Response: quantities, deadline, lifecycle status, optional `cropStandardId`, `atRisk`, active exception
   IDs, timestamps, safe allocation, approval totals and the caller's approval,
   trace ID, related delivery mission, and immutable delivery acceptance when recorded.
   Private farm coordinates are not exposed here.

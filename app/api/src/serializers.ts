@@ -4,6 +4,7 @@ import type {
   BuyerDemand,
   CropBatch,
   CropObservationIntake,
+  CropStandard,
   DeliveryAcceptance,
   DeliveryMission,
   DeliveryUpdate,
@@ -30,6 +31,23 @@ export function cropBatchDto(row: CropBatch, verificationStatus = "UNVERIFIED") 
     availableToPromise: quantity(row.availableToPromise),
     provenance: row.provenance,
     verificationStatus,
+  };
+}
+
+export function cropStandardDto(row: CropStandard, publisherName: string) {
+  return {
+    standardId: row.id,
+    cropType: row.cropType,
+    publisherActorId: row.publisherActorId,
+    publisherName,
+    version: row.version,
+    status: row.status,
+    reviewedAt: row.reviewedAt.toISOString(),
+    geography: row.geography,
+    source: row.source,
+    checklist: row.checklist,
+    images: row.images,
+    guidance: row.guidance,
   };
 }
 
@@ -100,6 +118,7 @@ export function orderDto(row: Order) {
     lifecycleStatus: row.lifecycleStatus,
     atRisk: row.atRisk,
     activeExceptionIds: row.activeExceptionIds as string[],
+    ...(row.cropStandardId ? { cropStandardId: row.cropStandardId } : {}),
     ...(row.traceId ? { traceId: row.traceId } : {}),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

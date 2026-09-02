@@ -142,6 +142,43 @@ paths:
                 availableToPromise: {value: 380, unit: kg}
                 provenance: MODEL_PREDICTED
         default: {$ref: '#/components/responses/Problem'}
+  /v1/crop-standards:
+    get:
+      tags: [Crop]
+      operationId: listCropStandards
+      summary: List published crop standards and the caller's own drafts
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+        - name: cropType
+          in: query
+          required: true
+          schema: {type: string, minLength: 1}
+      responses:
+        '200':
+          description: Versioned crop standards for the requested crop.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CropStandardPage'}
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      tags: [Crop]
+      operationId: createCropStandard
+      summary: Create a new publisher-specific crop standard version
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CropStandardCreate'}
+      responses:
+        '201':
+          description: A new immutable standard version was created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CropStandard'}
+        default: {$ref: '#/components/responses/Problem'}
   /v1/crop-batches/{cropBatchId}/forecast-requests:
     post:
       tags: [Crop]
@@ -1240,6 +1277,101 @@ components:
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/CropBatch'}}
         pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
+    CropStandardSource:
+      type: object
+      additionalProperties: false
+      required: [title, url, licence, retrievedAt]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 300}
+        url: {type: string, format: uri, minLength: 1, maxLength: 2000}
+        licence: {type: string, minLength: 1, maxLength: 300}
+        retrievedAt: {type: string, format: date}
+    CropStandardChecklistItem:
+      type: object
+      additionalProperties: false
+      required: [key, requirement]
+      properties:
+        key: {enum: [VARIETY, SIZE_AND_GRADE, MATURITY_AND_APPEARANCE, PERMITTED_DEFECTS, CLEANING, PACKAGING]}
+        requirement: {type: string, minLength: 1, maxLength: 2000}
+    CropStandardImage:
+      type: object
+      additionalProperties: false
+      required: [url, licence, attribution, alt, acceptable]
+      properties:
+        url: {type: string, format: uri, minLength: 1, maxLength: 2000}
+        licence: {type: string, minLength: 1, maxLength: 300}
+        attribution: {type: string, minLength: 1, maxLength: 500}
+        alt: {type: string, minLength: 1, maxLength: 500}
+        acceptable: {type: boolean}
+    CropStandardGuidanceSource:
+      type: object
+      additionalProperties: false
+      required: [title, url, retrievedAt]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 300}
+        url: {type: string, format: uri, minLength: 1, maxLength: 2000}
+        retrievedAt: {type: string, format: date}
+    CropStandardGuidanceItem:
+      type: object
+      additionalProperties: false
+      required: [topic, text, source]
+      properties:
+        topic: {enum: [HARVEST_WINDOW, PEST_AND_DISEASE_SIGNS, GOOD_AGRICULTURAL_PRACTICE, HARVEST_READINESS, SORTING_GRADING_CLEANING_STORAGE]}
+        text: {type: string, minLength: 1, maxLength: 4000}
+        source: {$ref: '#/components/schemas/CropStandardGuidanceSource'}
+    CropStandardCreate:
+      type: object
+      additionalProperties: false
+      required: [cropType, status, reviewedAt, geography, source, checklist, images, guidance]
+      properties:
+        cropType: {type: string, minLength: 1, maxLength: 100}
+        status: {enum: [DRAFT, PUBLISHED]}
+        reviewedAt: {type: string, format: date-time}
+        geography: {type: string, minLength: 1, maxLength: 300}
+        source: {$ref: '#/components/schemas/CropStandardSource'}
+        checklist:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/CropStandardChecklistItem'}
+        images:
+          type: array
+          items: {$ref: '#/components/schemas/CropStandardImage'}
+        guidance:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/CropStandardGuidanceItem'}
+    CropStandard:
+      type: object
+      additionalProperties: false
+      required: [standardId, cropType, publisherActorId, publisherName, version, status, reviewedAt, geography, source, checklist, images, guidance]
+      properties:
+        standardId: {type: string, format: uuid}
+        cropType: {type: string, minLength: 1, maxLength: 100}
+        publisherActorId: {type: string, format: uuid}
+        publisherName: {type: string, minLength: 1, maxLength: 300}
+        version: {type: integer, minimum: 1}
+        status: {enum: [DRAFT, PUBLISHED]}
+        reviewedAt: {type: string, format: date-time}
+        geography: {type: string, minLength: 1, maxLength: 300}
+        source: {$ref: '#/components/schemas/CropStandardSource'}
+        checklist:
+          type: array
+          items: {$ref: '#/components/schemas/CropStandardChecklistItem'}
+        images:
+          type: array
+          items: {$ref: '#/components/schemas/CropStandardImage'}
+        guidance:
+          type: array
+          items: {$ref: '#/components/schemas/CropStandardGuidanceItem'}
+    CropStandardPage:
+      type: object
+      additionalProperties: false
+      required: [items, pageInfo]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/CropStandard'}}
+        pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
     ForecastRequest:
       type: object
       additionalProperties: false
@@ -1416,6 +1548,7 @@ components:
           type: array
           uniqueItems: true
           items: {type: string, format: uuid}
+        cropStandardId: {type: string, format: uuid}
         traceId: {type: string, format: uuid}
         allocation: {$ref: '#/components/schemas/AllocationSummary'}
         createdAt: {type: string, format: date-time}

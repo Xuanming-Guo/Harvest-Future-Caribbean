@@ -164,6 +164,9 @@ export const api = {
   async cropBatch(cropBatchId: string) {
     return unwrap(await client.GET("/v1/crop-batches/{cropBatchId}", { params: { path: { cropBatchId } } }));
   },
+  async cropStandards(cropType: string) {
+    return unwrap(await client.GET("/v1/crop-standards", { params: { query: { cropType, limit: 100 } } }));
+  },
   async createObservationIntake(body: ApiSchema<"CropObservationIntakeCreate">) {
     return unwrap(await client.POST("/v1/crop-observation-intakes", {
       params: { header: { "Idempotency-Key": newIdempotencyKey("intake") } },
