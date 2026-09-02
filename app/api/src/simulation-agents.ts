@@ -169,6 +169,25 @@ const productStage = (stage: ControlRoomBatch["lastReportedStage"]) => {
  * This is an API bootstrap operation, not a simulation database write: the
  * engine supplies only its safe scene/first frame and never receives Prisma.
  */
+/**
+ * Payment terms a synthetic hotel buyer agrees to, and the simulated days it
+ * then actually waits before recording payment. Both are
+ * stakeholder-calibrated and scaled to the 21-day scenario: hotels quote short
+ * terms and pay in one to two months, so 7 against 10 preserves "paid late" at
+ * demonstration scale. A delivered order therefore falls due on day 7, reads
+ * as overdue from day 8, and is settled on day 10 unless the run window closes
+ * first. Real buyers keep the Product API's 14-day default; only the synthetic
+ * participants use these.
+ */
+export const SIMULATED_PAYMENT_TERMS_DAYS = 7;
+export const PAYMENT_BEHAVIOUR_DAYS = 10;
+
+interface PendingPayment {
+  orderId: string;
+  buyerProductId: string;
+  payableFromMs: number;
+}
+
 async function bootstrapParticipants(runId: string, scene: ControlRoomScene, firstFrame: ControlRoomFrame) {
   const participants: ProductParticipant[] = [];
   const batchIds = new Map<string, string>();
@@ -934,7 +953,8 @@ async function processDemandFrame(
       neededBy: new Date(demand.neededBy).toISOString(),
       deliveryLocation,
       minimumAcceptableFraction,
-    }, `Placed an order for ${demand.quantityKg.toFixed(2)} kg of ${demand.crop}, accepting at least ${Math.round(minimumAcceptableFraction * 100)}%.`);
+      paymentTermsDays: SIMULATED_PAYMENT_TERMS_DAYS,
+    }, `Placed an order for ${demand.quantityKg.toFixed(2)} kg of ${demand.crop}, accepting at least ${Math.round(minimumAcceptableFraction * 100)}% on ${SIMULATED_PAYMENT_TERMS_DAYS}-day payment terms.`);
     actions.push(order.action);
     if (order.ok) projector.bindOrder(order.data.orderId, demand.demandId, buyer.actor.id);
     projector.consume(order.events);
@@ -1018,21 +1038,6 @@ async function processMissionDeparture(
       note: "Recorded the quantity physically available at this pickup.",
     }, `Confirmed ${pickedAtStop.toFixed(2)} kg picked up at stop ${stop.sequence}.`), actions, projector);
   }
-}
-
-/**
- * Simulated days a synthetic buyer waits after accepting its own delivery
- * before it records paying. Stakeholder-calibrated: farmers report that hotels
- * currently take one to two months, which no 21-day scenario can show. Ten
- * days is that delay scaled to the scenario window, so a replay contains both
- * settled orders and orders whose 14-day term has not yet expired.
- */
-export const PAYMENT_BEHAVIOUR_DAYS = 10;
-
-interface PendingPayment {
-  orderId: string;
-  buyerProductId: string;
-  payableFromMs: number;
 }
 
 async function processMissionArrival(

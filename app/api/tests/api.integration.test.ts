@@ -366,11 +366,17 @@ describe("participant Product API", () => {
     // as truncated by the run window rather than as an operational failure.
     expect(finalFrame.operationsSnapshot.orderOutcomes.causes).toEqual({ DELIVERY_REJECTED: 2, HORIZON_TRUNCATED: 1, INSUFFICIENT_SUPPLY: 2, NO_READY_SUPPLY: 2 });
     expect(finalFrame.operationsSnapshot).toMatchObject({ activeListings: 3, openDemands: 11, deliveryAcceptedKg: 1545.13, approvedCommitmentCount: 7, completedMissionCount: 7 });
-    // No order breaches its 14-day term inside a 21-day window: the buyers that
-    // reach their tenth day after delivery pay, and the rest are still within
-    // terms when the run ends.
+    // Synthetic buyers order on 7-day terms and pay on their tenth simulated
+    // day, so the replay carries the cash-flow gap: the overdue count rises and
+    // falls mid-run and is back to zero once both late payments land and the
+    // remaining deliveries are still inside their term at the horizon.
+    const overduePerFrame = timeline.json().frames.map((frame: { operationsSnapshot?: { paymentOverdueCount?: number } }) => frame.operationsSnapshot?.paymentOverdueCount ?? 0);
     expect(finalFrame.operationsSnapshot.paymentOverdueCount).toBe(0);
+    expect(overduePerFrame.filter((count: number) => count > 0)).toHaveLength(19);
+    expect(Math.max(...overduePerFrame)).toBe(2);
     expect(await prisma.domainEvent.count({ where: { simulationRunId: runId, eventType: "PAYMENT_CONFIRMED" } })).toBe(2);
+    const settled = await prisma.order.findMany({ where: { simulationRunId: runId, paidAt: { not: null } }, select: { paymentTermsDays: true } });
+    expect(settled.map((order) => order.paymentTermsDays)).toEqual([7, 7]);
     for (const forbidden of ["potentialYieldKg", "qualityFraction", "dailySpoilageRate", "severity"]) {
       expect(timeline.body).not.toContain(forbidden);
     }

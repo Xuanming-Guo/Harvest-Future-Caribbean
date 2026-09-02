@@ -165,12 +165,24 @@ completed missions         7
 overdue payments           0
 ```
 
-Two of the six delivered orders reach their tenth simulated day after
-acceptance inside the run window, so their synthetic buyers record paying them.
-The other four were accepted too late in the 21-day scenario for that day to
-arrive, and none of them breaches its 14-day term before the run ends, which is
-why `paymentOverdueCount` is `0`. Harvest tracks these payments; it moves no
-money.
+`paymentOverdueCount` is `0` in that closing snapshot, but it is not `0`
+throughout the run. Synthetic buyers order on 7-day terms and pay on their
+tenth simulated day, so every settled order is paid three days late and shows
+as overdue in between. Across the saved timeline:
+
+```text
+frames with an overdue payment    19 of 129
+highest overdue count in a frame   2
+delivered orders                   6
+paid inside the run window         2
+```
+
+The two paid orders were accepted 12.7 and 11.6 days before the run ended, far
+enough ahead for their tenth day to arrive. The remaining four were accepted
+6.7 days or less before the end, so they are still inside their term when the
+window closes; that, and not prompt payment, is why the final count is `0`.
+Scrub the control room back into the middle of the run to see the overdue
+count rise and fall. Harvest tracks these payments; it moves no money.
 
 `orderOutcomes.causes` explains every unfulfilled or partially fulfilled
 order. For seed `42`:
@@ -206,7 +218,8 @@ columns show what each change to the fulfilment path moved:
 | approved commitments | 8 | 5 | 7 | 7 |
 | completed missions | 8 | 5 | 7 | 7 |
 | `deliveryAcceptedKg` | 359 | 1387.75 | 1545.13 | 1545.13 |
-| overdue payments | n/a | n/a | n/a | 0 |
+| overdue payments at run end | n/a | n/a | n/a | 0 |
+| frames showing an overdue payment | n/a | n/a | n/a | 19 |
 
 The first column is the pre-#53 baseline this document recorded before the
 readiness fixes, when unready crop was still listable, so eight commitments
@@ -217,7 +230,9 @@ the horizon-truncated order now carries a cause instead of sitting in
 `pending`. The last column adds payment tracking: two synthetic buyers record
 paying a delivered order, which is two more product actions, two more domain
 events, and two more agent-cycle checkpoint frames. No physical outcome moves,
-because recording a payment mutates no world state.
+because recording a payment mutates no world state, and giving the synthetic
+buyers 7-day terms changes none of these totals either: it changes only which
+payment status those same orders report.
 
 `deliveryAcceptedKg` is the sum of the seven immutable delivery acceptances,
 not the engine's `totalAcceptedKg`. The control room uses this Product API

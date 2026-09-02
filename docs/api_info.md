@@ -929,12 +929,16 @@ outbox adapter touch Prisma.
 
 ### Connected execution order
 
-A synthetic buyer records paying its own accepted delivery a fixed ten
-simulated days later, in sorted order-ID order so the run stays deterministic.
-That delay is **stakeholder-calibrated**: farmers report hotels taking one to
-two months, which no 21-day scenario can contain, so the wait is scaled to the
-scenario window. Baseline runs never call the operation, and replay reads saved
-frames rather than repeating it.
+A synthetic buyer places its orders on 7-day payment terms and then records
+paying its own accepted delivery a fixed ten simulated days later, in sorted
+order-ID order so the run stays deterministic. Both numbers are
+**stakeholder-calibrated** and scaled to the 21-day scenario: hotels quote
+short terms and pay in one to two months, a gap no 21-day window can contain,
+so 7 against 10 preserves "paid late" at demonstration scale. A delivered
+simulated order therefore falls due on day 7, reads as overdue from day 8, and
+is settled on day 10 unless the run window closes first. Real buyers keep the
+Product API's 14-day default. Baseline runs never call the operation, and
+replay reads saved frames rather than repeating it.
 
 `EXTERNAL_PRODUCT_API` mode disables the engine's internal Harvest allocation,
 approval and recovery policy. The saved-run coordinator then repeats:
