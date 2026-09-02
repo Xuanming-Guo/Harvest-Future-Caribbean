@@ -10,6 +10,73 @@ import { httpError } from "./http.js";
 
 const kilograms = (value: number) => ({ value, unit: "kg" });
 
+/** Crop-batch statuses whose produce may be promised and listed. */
+export const READY_BATCH_STATUSES = new Set(["HARVEST_READY", "HARVESTED"]);
+export const isReadyStatus = (status: string) => READY_BATCH_STATUSES.has(status);
+
+/** Product crop-batch status implied by a reported observation stage. */
+export function batchStatusForStage(cropStage: string): string {
+  switch (cropStage.toUpperCase()) {
+    case "HARVEST_READY": return "HARVEST_READY";
+    case "HARVESTED": return "HARVESTED";
+    case "PLANNED": return "PLANNED";
+    default: return "GROWING";
+  }
+}
+
+/**
+ * Flip listings whose window has closed to `EXPIRED` so they stop looking
+ * orderable. Matching already ignored them by date; the visible status did
+ * not agree, which #53 called out. Idempotent: an already-expired listing is
+ * never touched again.
+ */
+export async function expireListings(actorId: string, simulationRunId: string | null) {
+  const now = operationNow();
+  const stale = await prisma.listing.findMany({
+    where: { status: "ACTIVE", availableUntil: { lt: now }, simulationRunId },
+    orderBy: { id: "asc" },
+  });
+  if (stale.length === 0) return 0;
+  await prisma.$transaction(async (tx) => {
+    for (const listing of stale) {
+      await tx.listing.update({ where: { id: listing.id }, data: { status: "EXPIRED" } });
+      await recordEvent(tx, {
+        eventType: "LISTING_EXPIRED",
+        actorId,
+        entityId: listing.id,
+        traceId: randomUUID(),
+        provenance: Provenance.INFERRED,
+        simulationRunId,
+        payload: { listingId: listing.id, cropBatchId: listing.cropBatchId, availableUntil: listing.availableUntil.toISOString().slice(0, 10) },
+      });
+    }
+  });
+  return stale.length;
+}
+
+/**
+ * Give orders that were waiting for supply another matching pass once new
+ * supply of their crop is published. Oldest deadline first, one pass per
+ * trigger, no scheduler: the trigger is the listing publish itself.
+ */
+export async function rematchWaitingOrders(cropType: string, actorId: string, simulationRunId: string | null) {
+  const waiting = await prisma.order.findMany({
+    where: { lifecycleStatus: "REQUESTED", cropType, neededBy: { gt: operationNow() }, simulationRunId },
+    orderBy: [{ neededBy: "asc" }, { id: "asc" }],
+  });
+  const proposed: string[] = [];
+  for (const order of waiting) {
+    const traceId = order.traceId ?? randomUUID();
+    if (!order.traceId) {
+      await prisma.agentTrace.create({ data: { id: traceId, subjectType: "ORDER", subjectId: order.id, workflowType: "ORDER_FULFILMENT", stage: "ORDER_REQUESTED", status: "RUNNING", summary: "Re-matching a waiting order after new supply was published.", simulationRunId } });
+      await prisma.order.update({ where: { id: order.id }, data: { traceId } });
+    }
+    const result = await proposeAllocation(order.id, actorId, traceId);
+    if (result) proposed.push(order.id);
+  }
+  return proposed;
+}
+
 type ModelPrediction = {
   predictionId: string;
   requestId: string;
@@ -224,7 +291,11 @@ export async function produceFixturePrediction(
       _sum: { quantity: true },
     });
     const committedQuantity = committed._sum.quantity ?? 0;
-    const availableToPromise = Math.max(0, prediction.q10 - committedQuantity);
+    // Forecast evidence stays visible, but nothing is orderable until the
+    // farmer has reported the crop ready. Promising a growing crop was the
+    // first cause of empty delivery trips in #53.
+    const current = await tx.cropBatch.findUniqueOrThrow({ where: { id: cropBatchId }, select: { status: true } });
+    const availableToPromise = isReadyStatus(current.status) ? Math.max(0, prediction.q10 - committedQuantity) : 0;
     await tx.yieldPrediction.create({
       data: {
         id: prediction.predictionId,
@@ -282,7 +353,9 @@ export async function produceFixturePrediction(
         agentName: "Crop Intelligence Agent",
         toolName: config.modelAdapter === "http" ? "http-yield-model" : "fixture-yield-model",
         provenance: Provenance.MODEL_PREDICTED,
-        summary: `Forecast q10 is ${prediction.q10} kg; ${committedQuantity} kg is committed, leaving ${availableToPromise} kg ATP.`,
+        summary: isReadyStatus(current.status)
+          ? `Forecast q10 is ${prediction.q10} kg; ${committedQuantity} kg is committed, leaving ${availableToPromise} kg ATP.`
+          : `Forecast q10 is ${prediction.q10} kg, but the crop is ${current.status.toLowerCase().replaceAll("_", " ")} so ATP stays at 0 kg until it is reported harvest ready.`,
         confidence: prediction.confidence,
         simulationRunId: batch.simulationRunId,
       },
@@ -301,6 +374,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
     orderBy: { occurredAt: "desc" },
   });
 
+  await expireListings(actorId, order.simulationRunId);
   const requestedIds = order.listingIds as string[];
   const listings = await prisma.listing.findMany({
     where: {
@@ -317,6 +391,24 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
     where: { id: { in: [...new Set(listings.map((listing) => listing.cropBatchId))] }, simulationRunId: order.simulationRunId },
   });
   const remainingByBatch = new Map(batches.map((batch) => [batch.id, batch.availableToPromise]));
+  // Supply already proposed to another order is held softly until that
+  // approval resolves; otherwise re-matching several waiting orders against
+  // one new listing would over-promise the same kilograms and every approval
+  // but the first would be invalidated.
+  const pendingProposals = await prisma.allocation.findMany({
+    where: { status: "PROPOSED", orderId: { not: orderId }, simulationRunId: order.simulationRunId },
+    select: { id: true },
+  });
+  if (pendingProposals.length > 0) {
+    const softHeld = await prisma.allocationLine.groupBy({
+      by: ["cropBatchId"],
+      where: { allocationId: { in: pendingProposals.map((row) => row.id) }, cropBatchId: { in: [...remainingByBatch.keys()] } },
+      _sum: { quantity: true },
+    });
+    for (const held of softHeld) {
+      remainingByBatch.set(held.cropBatchId, Math.max(0, (remainingByBatch.get(held.cropBatchId) ?? 0) - (held._sum.quantity ?? 0)));
+    }
+  }
 
   let remaining = order.requestedQuantity;
   const lines: AllocationLineInput[] = [];
@@ -332,8 +424,17 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
   }
 
   if (remaining > 0.0001) {
+    const found = order.requestedQuantity - remaining;
     await prisma.$transaction(async (tx) => {
-      await tx.order.update({ where: { id: orderId }, data: { atRisk: false, lifecycleStatus: "REQUESTED" } });
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          atRisk: false,
+          lifecycleStatus: "REQUESTED",
+          outcomeCause: found > 0.0001 ? "INSUFFICIENT_SUPPLY" : "NO_READY_SUPPLY",
+          outcomeNote: `Found ${found} kg of ${order.requestedQuantity} kg of ready supply.`,
+        },
+      });
       await tx.agentTrace.update({
         where: { id: traceId },
         data: { status: "WAITING", stage: "AWAITING_SUPPLY", summary: "No complete safe allocation is currently available; the order remains open for supply." },
@@ -375,7 +476,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
         simulationRunId: order.simulationRunId,
       })),
     });
-    await tx.order.update({ where: { id: orderId }, data: { lifecycleStatus: "AWAITING_APPROVAL" } });
+    await tx.order.update({ where: { id: orderId }, data: { lifecycleStatus: "AWAITING_APPROVAL", outcomeCause: null, outcomeNote: null } });
     await tx.agentTrace.update({
       where: { id: traceId },
       data: { status: "AWAITING_APPROVAL", stage: "ALLOCATION_PROPOSED", summary: "Matched complete safe supply and paused before commitment for human approval." },
@@ -518,7 +619,7 @@ export async function approveAllocation(
         });
       if (invalidSupply) {
         await tx.allocation.update({ where: { id: allocation.id }, data: { status: "STALE" } });
-        await tx.order.update({ where: { id: order.id }, data: { lifecycleStatus: "REQUESTED", atRisk: false } });
+        await tx.order.update({ where: { id: order.id }, data: { lifecycleStatus: "REQUESTED", atRisk: false, outcomeCause: "SUPPLY_CHANGED", outcomeNote: "Safe supply changed before every participant approved." } });
         await tx.approval.updateMany({
           where: { subjectType: "ALLOCATION", subjectId: allocation.id, status: "PENDING" },
           data: { status: "CANCELLED", decidedAt, reason: "Cancelled because safe supply changed before commitment." },
@@ -674,7 +775,7 @@ export async function rejectApproval(approvalId: string, actorId: string, reason
     const updated = await tx.approval.update({ where: { id: approvalId }, data: { status: "REJECTED", decidedBy: actorId, decidedAt, reason } });
     if (approval.subjectType === "ALLOCATION") {
       const allocation = await tx.allocation.update({ where: { id: approval.subjectId }, data: { status: "REJECTED" } });
-      const order = await tx.order.update({ where: { id: allocation.orderId }, data: { lifecycleStatus: "REJECTED" } });
+      const order = await tx.order.update({ where: { id: allocation.orderId }, data: { lifecycleStatus: "REJECTED", outcomeCause: "APPROVAL_REJECTED", outcomeNote: reason ?? "A participant declined the proposed commitment." } });
       await tx.approval.updateMany({
         where: { subjectType: "ALLOCATION", subjectId: allocation.id, status: "PENDING" },
         data: { status: "CANCELLED", decidedAt, reason: "Cancelled after another participant rejected the allocation." },
