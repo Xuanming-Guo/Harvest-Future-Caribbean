@@ -180,7 +180,16 @@ export interface InjectedDisruption {
  * promised against is not also counted as a late delivery.
  */
 export const UNMET_CAUSES = [
-  /** The run's horizon closed before the buyer's window did. */
+  /**
+   * The run's horizon closed before the buyer's window did.
+   *
+   * Demand generation no longer raises an order it cannot follow through to
+   * settlement, so on the hero scenario this stays at zero. It is kept as a
+   * guard rather than deleted: a scenario, an injected effect or a future
+   * demand source could reintroduce one, and letting such an order fall
+   * through to `MISSION_LATE` would read as a coordination failure that
+   * never happened.
+   */
   'HORIZON_TRUNCATED',
   /** Nothing was promised: no batch had evidence recent enough to commit against. */
   'NO_READY_SUPPLY',
@@ -264,8 +273,17 @@ const EVIDENCE_LABEL =
 /** Above this daily rainfall a rain-sensitive road is treated as degraded. */
 const HEAVY_RAIN_MM = 45;
 
-/** How long a buyer waits past the deadline before sourcing elsewhere. */
-const SUBSTITUTION_GRACE_MS = 12 * HOUR_MS;
+/**
+ * How long a buyer waits past the deadline before sourcing elsewhere.
+ *
+ * It is also the tail the run has to be able to watch: a demand settles at
+ * `neededBy + SUBSTITUTION_GRACE_MS`, so a deadline leaving less than the grace
+ * before the horizon has no settlement event to reach.
+ *
+ * Exported so `tests/fulfilment.test.ts` can assert the generation guard
+ * against the real constant rather than a copy of it that could drift.
+ */
+export const SUBSTITUTION_GRACE_MS = 12 * HOUR_MS;
 
 /** Maximum extra journey time produced by the hidden severity of a storm. */
 const MAX_STORM_TRAVEL_DELAY_MS = 4 * HOUR_MS;
@@ -964,30 +982,55 @@ export class SimulationEngine {
     const stream = this.random.stream(`actor:${buyerId}:demand`);
     const quantityKg = Math.max(20, Math.round(stream.normal(buyer.typicalOrderKg, buyer.typicalOrderKg * 0.2)));
     const neededBy = this.clock + stream.int(3, 7) * DAY_MS;
+    // Drawn before the horizon guard below rather than after it, so this
+    // buyer's ordering rhythm, and every later draw on its stream, is the same
+    // whether or not this particular order is raised.
+    const nextOrderAt = this.clock + stream.int(4, 8) * DAY_MS;
 
-    const demand: BuyerDemand = {
-      demandId: this.ids.next(),
-      buyerId,
-      crop: 'cucumber',
-      quantity: { value: quantityKg, unit: 'kg' },
-      neededBy,
-      createdAt: this.clock,
-      status: 'PENDING',
-      acceptedKg: 0,
-      substitutedKg: 0,
-    };
-    this.world.observed.demands.set(demand.demandId, demand);
+    if (this.settlesWithinHorizon(neededBy)) {
+      const demand: BuyerDemand = {
+        demandId: this.ids.next(),
+        buyerId,
+        crop: 'cucumber',
+        quantity: { value: quantityKg, unit: 'kg' },
+        neededBy,
+        createdAt: this.clock,
+        status: 'PENDING',
+        acceptedKg: 0,
+        substitutedKg: 0,
+      };
+      this.world.observed.demands.set(demand.demandId, demand);
 
-    // In a connected run, the matching/approval workflow happens through the
-    // Product API and returns as validated Product events. Internal policy
-    // planning remains unchanged for headless and baseline comparisons.
-    if (this.coordinationMode === 'INTERNAL_POLICY') {
-      this.schedule(this.clock + 30 * MINUTE_MS, 'PLAN_ALLOCATION', Priority.Actor, { demandId: demand.demandId });
+      // In a connected run, the matching/approval workflow happens through the
+      // Product API and returns as validated Product events. Internal policy
+      // planning remains unchanged for headless and baseline comparisons.
+      if (this.coordinationMode === 'INTERNAL_POLICY') {
+        this.schedule(this.clock + 30 * MINUTE_MS, 'PLAN_ALLOCATION', Priority.Actor, { demandId: demand.demandId });
+      }
+      this.schedule(neededBy + SUBSTITUTION_GRACE_MS, 'DEMAND_DEADLINE', Priority.Observation, { demandId: demand.demandId });
     }
-    this.schedule(neededBy + SUBSTITUTION_GRACE_MS, 'DEMAND_DEADLINE', Priority.Observation, { demandId: demand.demandId });
 
-    // The buyer orders again later in the run.
-    this.schedule(this.clock + stream.int(4, 8) * DAY_MS, 'BUYER_DEMAND', Priority.Actor, { buyerId });
+    // The buyer orders again later in the run, whether or not this order stood.
+    this.schedule(nextOrderAt, 'BUYER_DEMAND', Priority.Actor, { buyerId });
+  }
+
+  /**
+   * Can the run watch this deadline through to its own settlement?
+   *
+   * `schedule` drops anything past the horizon, so a demand whose
+   * `DEMAND_DEADLINE` falls outside the window never fires one: it sits
+   * PENDING until `settleOutstandingDemand` sweeps it up and scores it short.
+   * The order was never given the days it asked for, so counting it against a
+   * coordinator measures the length of the run rather than the policy. Demand
+   * generation withholds those orders instead.
+   *
+   * Withholding rather than clamping is deliberate. Pulling `neededBy` back
+   * inside the window would keep the order but turn it into an unusually
+   * urgent one, manufacturing exactly the tight deadlines a coordination
+   * benchmark is most sensitive to.
+   */
+  private settlesWithinHorizon(neededBy: SimulationInstant): boolean {
+    return neededBy + SUBSTITUTION_GRACE_MS <= this.endsAt;
   }
 
   // ------------------------------------------------------------------
@@ -1624,10 +1667,12 @@ export class SimulationEngine {
    */
   private classifyDemand(demand: BuyerDemand): UnmetCause {
     // The scenario horizon closed before the buyer's window did, so this order
-    // was never given a chance rather than being coordinated badly. Classified
-    // only: clamping demand generation to the horizon is a separate question
-    // and would change what the benchmark measures.
-    if (demand.neededBy + SUBSTITUTION_GRACE_MS > this.endsAt) return 'HORIZON_TRUNCATED';
+    // was never given a chance rather than being coordinated badly. Demand
+    // generation now declines to raise these at all, so this rung should be
+    // unreachable on the hero scenario. It stays because a scenario or an
+    // injected effect could still produce one, and such an order must not be
+    // mistaken for a late delivery.
+    if (!this.settlesWithinHorizon(demand.neededBy)) return 'HORIZON_TRUNCATED';
 
     const commitments = [...this.world.observed.commitments.values()].filter(
       (candidate) => candidate.demandId === demand.demandId,
