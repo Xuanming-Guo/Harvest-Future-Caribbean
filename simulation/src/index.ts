@@ -8,7 +8,7 @@
  * room (issue #5) and the benchmark (issue #11) should consume.
  */
 
-export { SimulationEngine, runScenario } from './engine.js';
+export { SimulationEngine, UNMET_CAUSES, runScenario } from './engine.js';
 export type {
   CoordinationMode,
   DisruptionMissionImpact,
@@ -20,6 +20,7 @@ export type {
   RunMetrics,
   RunResult,
   RunStatus,
+  UnmetCause,
 } from './engine.js';
 
 export { compactReplayTimeline, frameAt, interpolateAlongPath, missionPositionAt } from './replay.js';
@@ -53,7 +54,7 @@ export type { Scenario, ScenarioContext } from './scenario/types.js';
 
 export { baselinePolicy } from './policy/baseline.js';
 export { harvestPolicy } from './policy/harvest.js';
-export type { CoordinationPolicy, DecisionRecord, PolicyContext } from './policy/types.js';
+export type { CoordinationPolicy, DecisionRecord, PolicyCapabilities, PolicyContext } from './policy/types.js';
 
 export { assertNoTruthLeak, toObservableWorld, worldDigest } from './world/observable.js';
 export type { ObservableWorldView } from './world/observable.js';
