@@ -8,7 +8,7 @@
  * could otherwise be mistaken for current operational state.
  */
 
-const CACHE = "harvest-shell-v1";
+const CACHE = "harvest-shell-v2";
 const SHELL_ROUTES = ["/", "/farmer", "/marketplace"];
 
 function isShellDocument(url) {
@@ -48,13 +48,20 @@ async function cacheFirst(request) {
 async function networkFirst(request) {
   try {
     const response = await fetch(request);
-    if (response.ok) await (await caches.open(CACHE)).put(request, response.clone());
+    if (response.ok) await (await caches.open(CACHE)).put(request.url, response.clone());
     return response;
   } catch (error) {
-    const cached = await caches.match(request, { ignoreSearch: true });
+    // Vary headers on Next.js documents would otherwise stop a navigation from
+    // matching the same URL warmed by a plain fetch.
+    const cached = await caches.match(request.url, { ignoreSearch: true, ignoreVary: true });
     if (cached) return cached;
     throw error;
   }
+}
+
+/** A navigation, or the workspace warming its own document while online. */
+function wantsDocument(request) {
+  return request.mode === "navigate" || (request.headers.get("accept") || "").includes("text/html");
 }
 
 self.addEventListener("fetch", (event) => {
@@ -66,7 +73,7 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(cacheFirst(request));
     return;
   }
-  if (request.mode === "navigate" && isShellDocument(url)) {
+  if (wantsDocument(request) && isShellDocument(url)) {
     event.respondWith(networkFirst(request));
   }
 });

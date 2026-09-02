@@ -2,6 +2,7 @@
 
 import { QueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
+import { usePathname } from "next/navigation";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 import {
@@ -58,6 +59,24 @@ export function Providers({ children }: { children: React.ReactNode }) {
       // An unavailable worker only costs the offline shell, never the workspace.
     });
   }, [offlineCapable]);
+
+  // Client-side routing never asks the network for a page's HTML, so a farmer
+  // who reached a crop page by clicking would find nothing cached on an offline
+  // reload. Warm the current document through the worker while online.
+  const pathname = usePathname();
+  useEffect(() => {
+    if (!offlineCapable || typeof navigator === "undefined" || !("serviceWorker" in navigator) || navigator.onLine === false) return;
+    let cancelled = false;
+    void navigator.serviceWorker.ready.then(() => {
+      if (cancelled) return;
+      return fetch(pathname, { headers: { accept: "text/html" }, cache: "no-store" });
+    }).catch(() => {
+      // Warming is best effort; the next successful navigation caches it anyway.
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [offlineCapable, pathname]);
 
   useEffect(() => {
     if (!offlineCapable || !actor) return;
