@@ -130,21 +130,21 @@ status            COMPLETED
 policy            HARVEST
 decisionMode      DETERMINISTIC
 decisionAdapter   deterministic
-frameCount        130
-eventsProcessed    82
+frameCount        119
+eventsProcessed    76
 totalDemandedKg   2956
-totalAcceptedKg    359
+totalAcceptedKg   1387.75
 ```
 
 `metrics.productActions` must also exist with positive attempted, succeeded and
 domain-event counts. For the deterministic seed-`42` run, expect:
 
 ```text
-attempted             154
-succeeded             154
+attempted             140
+succeeded             140
 rejected                0
-domainEventsCreated   242
-activeListings          7
+domainEventsCreated   222
+activeListings          3
 openDemands             11
 totalOrders             11
 activeMissions           0
@@ -156,18 +156,32 @@ metrics above. For deterministic seed `42`, expect:
 
 ```text
 total orders              11
-fulfilled                  2
-partially fulfilled        0
-unfulfilled                8
+fulfilled                  3
+partially fulfilled        2
+unfulfilled                5
 pending                    1
-approved commitments       8
-completed missions         8
+approved commitments       5
+completed missions         5
 ```
 
-`deliveryAcceptedKg` is the sum of the eight immutable delivery acceptances,
+`orderOutcomes.causes` explains every unfulfilled or partially fulfilled
+order. For seed `42`:
+
+```text
+INSUFFICIENT_SUPPLY        3
+DELIVERY_REJECTED          2
+NO_READY_SUPPLY            1
+SUPPLY_CHANGED             1
+```
+
+These values were re-recorded after the #53 readiness, expiry, and re-match
+fixes; earlier revisions of this document showed 2 fulfilled / 8 unfulfilled
+and 359 kg delivered for the same seed.
+
+`deliveryAcceptedKg` is the sum of the five immutable delivery acceptances,
 not the engine's `totalAcceptedKg`. The control room uses this Product API
 quantity for its Harvest **Delivered** card. For seed `42`, both values are
-`359 kg` because the engine applies the Product API delivery acceptances back
+`1387.75 kg` because the engine applies the Product API delivery acceptances back
 to physical state as each mission arrives.
 
 The `runId` is a fresh UUID. All evidence is explicitly labelled synthetic and
