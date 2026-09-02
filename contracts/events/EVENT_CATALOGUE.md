@@ -47,6 +47,7 @@ schema-validated envelope for every event type below.
 | `ORDER_PARTIALLY_FULFILLED` | Some committed quantity is accepted | order, final status, accepted and released quantities | Schedule unmet-demand handling or import/substitution fallback |
 | `ORDER_REJECTED` | No delivered quantity is accepted | order, final status, zero accepted and released quantities | Schedule fallback and record rejection economics |
 | `ORDER_CANCELLED` | An approved cancellation releases active work | order, final status, accepted and released quantities | Cancel future pickups and return actors/vehicles to availability |
+| `PAYMENT_CONFIRMED` | A buyer or coordinator records that the buyer paid a delivered order outside Harvest | order, paid time, agreed term, optional due time, amount, reference, days outstanding | No world mutation; records settlement evidence |
 | `SIMULATION_ACTOR_MOVED` | The simulation reports an observable position | actor and position | Update the observable world/control-room projection only |
 | `SIMULATION_DISRUPTION_OBSERVED` | A disruption becomes observable | type, affected entities, time, description | Start the corresponding visible exception/reaction path; do not publish hidden severity/outcome |
 | `SIMULATION_TASK_COMPLETED` | A scheduled observable actor task ends | task, type, actor, completion time | Update the observable world and run timeline |

@@ -151,8 +151,8 @@ The response is exactly:
 ```
 
 Allowed tools are farmer observation/listing/approval; buyer demand/order/
-approval/acceptance; transporter mission/progress/exception; and coordinator
-verification/approval. Unknown tools are rejected before any API call. Short
+approval/acceptance/payment confirmation; transporter mission/progress/
+exception; and coordinator verification/approval. Unknown tools are rejected before any API call. Short
 summaries may be shown in the control room; private chain-of-thought is never
 requested or stored.
 

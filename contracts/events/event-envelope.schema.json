@@ -46,6 +46,7 @@
         "ORDER_PARTIALLY_FULFILLED",
         "ORDER_REJECTED",
         "ORDER_CANCELLED",
+        "PAYMENT_CONFIRMED",
         "SIMULATION_ACTOR_MOVED",
         "SIMULATION_DISRUPTION_OBSERVED",
         "SIMULATION_TASK_COMPLETED",
@@ -96,6 +97,7 @@
         { "$ref": "#/$defs/RecoveryPayload" },
         { "$ref": "#/$defs/DeliveryAcceptedPayload" },
         { "$ref": "#/$defs/OrderOutcomePayload" },
+        { "$ref": "#/$defs/PaymentConfirmedPayload" },
         { "$ref": "#/$defs/SimulationActorMovedPayload" },
         { "$ref": "#/$defs/SimulationDisruptionPayload" },
         { "$ref": "#/$defs/SimulationTaskPayload" },
@@ -205,6 +207,10 @@
     {
       "if": { "properties": { "eventType": { "const": "ORDER_CANCELLED" } } },
       "then": { "properties": { "payload": { "allOf": [{ "$ref": "#/$defs/OrderOutcomePayload" }, { "properties": { "status": { "const": "CANCELLED" } } }] } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "PAYMENT_CONFIRMED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/PaymentConfirmedPayload" } } }
     },
     {
       "if": { "properties": { "eventType": { "const": "SIMULATION_ACTOR_MOVED" } } },
@@ -474,6 +480,21 @@
         "status": { "enum": ["FULFILLED", "PARTIALLY_FULFILLED", "REJECTED", "CANCELLED"] },
         "acceptedQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
         "releasedReservationQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" }
+      }
+    },
+    "PaymentConfirmedPayload": {
+      "description": "The buyer's own statement that it settled this order outside Harvest. Harvest records payment evidence; it never moves, holds, or verifies money.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["orderId", "paidAt", "paymentTermsDays"],
+      "properties": {
+        "orderId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "paidAt": { "$ref": "../common.schema.json#/$defs/UtcDateTime" },
+        "paymentTermsDays": { "type": "integer", "minimum": 0, "maximum": 90 },
+        "dueAt": { "$ref": "../common.schema.json#/$defs/UtcDateTime" },
+        "amount": { "$ref": "../common.schema.json#/$defs/Money" },
+        "reference": { "type": "string", "maxLength": 120 },
+        "daysOutstanding": { "type": "integer", "minimum": 0 }
       }
     },
     "SimulationActorMovedPayload": {
@@ -948,6 +969,20 @@
       "schemaVersion": "1.0",
       "provenance": "SYNTHETIC",
       "payload": {"pairId": "23000000-0000-4000-8000-000000000001", "baselineRunId": "b0000000-0000-4000-8000-000000000002", "harvestRunId": "b0000000-0000-4000-8000-000000000001", "metrics": {"localProcurementRate": 0.7, "fulfilmentRate": 0.91, "wasteQuantity": {"value": 80, "unit": "kg"}}}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000022",
+      "eventType": "PAYMENT_CONFIRMED",
+      "occurredAt": "2026-09-18T09:30:00Z",
+      "simulationRunId": null,
+      "actorId": "a0000000-0000-4000-8000-000000000002",
+      "entityId": "20000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000002",
+      "causationId": "e0000000-0000-4000-8000-000000000017",
+      "schemaVersion": "1.0",
+      "provenance": "OBSERVED",
+      "payload": {"orderId": "20000000-0000-4000-8000-000000000001", "paidAt": "2026-09-18T09:30:00Z", "paymentTermsDays": 14, "dueAt": "2026-09-18T14:15:00Z", "amount": {"amount": 148.5, "currency": "XCD"}, "reference": "Bank transfer 2026-09-18", "daysOutstanding": 13}
     }
   ]
 }

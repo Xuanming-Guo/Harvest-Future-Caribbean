@@ -130,7 +130,7 @@ status            COMPLETED
 policy            HARVEST
 decisionMode      DETERMINISTIC
 decisionAdapter   deterministic
-frameCount        127
+frameCount        129
 eventsProcessed    80
 totalDemandedKg   2956
 totalAcceptedKg   1545.13
@@ -140,10 +140,10 @@ totalAcceptedKg   1545.13
 domain-event counts. For the deterministic seed-`42` run, expect:
 
 ```text
-attempted             151
-succeeded             151
+attempted             153
+succeeded             153
 rejected                0
-domainEventsCreated   238
+domainEventsCreated   240
 activeListings          3
 openDemands             11
 totalOrders             11
@@ -162,7 +162,15 @@ unfulfilled                5
 pending                    0
 approved commitments       7
 completed missions         7
+overdue payments           0
 ```
+
+Two of the six delivered orders reach their tenth simulated day after
+acceptance inside the run window, so their synthetic buyers record paying them.
+The other four were accepted too late in the 21-day scenario for that day to
+arrive, and none of them breaches its 14-day term before the run ends, which is
+why `paymentOverdueCount` is `0`. Harvest tracks these payments; it moves no
+money.
 
 `orderOutcomes.causes` explains every unfulfilled or partially fulfilled
 order. For seed `42`:
@@ -184,28 +192,32 @@ before the order could be observed either way. It was previously counted as
 Every figure above is read from a real run, never edited by hand. The three
 columns show what each change to the fulfilment path moved:
 
-| Value | Before the #53 fixes | After readiness/expiry/re-match | After safe partial commitment |
-|---|---|---|---|
-| `frameCount` | 130 | 119 | 127 |
-| `eventsProcessed` | 82 | 76 | 80 |
-| `productActions.attempted` | 154 | 140 | 151 |
-| `productActions.domainEventsCreated` | 242 | 222 | 238 |
-| `activeListings` | 7 | 3 | 3 |
-| fulfilled | 2 | 3 | 4 |
-| partially fulfilled | 0 | 2 | 2 |
-| unfulfilled | 8 | 5 | 5 |
-| pending | 1 | 1 | 0 |
-| approved commitments | 8 | 5 | 7 |
-| completed missions | 8 | 5 | 7 |
-| `deliveryAcceptedKg` | 359 | 1387.75 | 1545.13 |
+| Value | Before the #53 fixes | After readiness/expiry/re-match | After safe partial commitment | After payment tracking |
+|---|---|---|---|---|
+| `frameCount` | 130 | 119 | 127 | 129 |
+| `eventsProcessed` | 82 | 76 | 80 | 80 |
+| `productActions.attempted` | 154 | 140 | 151 | 153 |
+| `productActions.domainEventsCreated` | 242 | 222 | 238 | 240 |
+| `activeListings` | 7 | 3 | 3 | 3 |
+| fulfilled | 2 | 3 | 4 | 4 |
+| partially fulfilled | 0 | 2 | 2 | 2 |
+| unfulfilled | 8 | 5 | 5 | 5 |
+| pending | 1 | 1 | 0 | 0 |
+| approved commitments | 8 | 5 | 7 | 7 |
+| completed missions | 8 | 5 | 7 | 7 |
+| `deliveryAcceptedKg` | 359 | 1387.75 | 1545.13 | 1545.13 |
+| overdue payments | n/a | n/a | n/a | 0 |
 
 The first column is the pre-#53 baseline this document recorded before the
 readiness fixes, when unready crop was still listable, so eight commitments
-were approved but only 359 kg survived to delivery. The middle column is the
-readiness, expiry, and re-match fixes. The last column adds safe partial
-commitment: two more orders reach a commitment they would previously have
-waited out, and the horizon-truncated order now carries a cause instead of
-sitting in `pending`.
+were approved but only 359 kg survived to delivery. The second column is the
+readiness, expiry, and re-match fixes. The third adds safe partial commitment:
+two more orders reach a commitment they would previously have waited out, and
+the horizon-truncated order now carries a cause instead of sitting in
+`pending`. The last column adds payment tracking: two synthetic buyers record
+paying a delivered order, which is two more product actions, two more domain
+events, and two more agent-cycle checkpoint frames. No physical outcome moves,
+because recording a payment mutates no world state.
 
 `deliveryAcceptedKg` is the sum of the seven immutable delivery acceptances,
 not the engine's `totalAcceptedKg`. The control room uses this Product API
@@ -259,7 +271,7 @@ $agentFrames = @($timeline.frames | Where-Object {
 Expected:
 
 ```text
-Frames             130
+Frames             129
 Farms              5
 Buyers             3
 Transporters       2

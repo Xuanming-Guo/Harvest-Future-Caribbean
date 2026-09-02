@@ -27,6 +27,7 @@ const frame = {
     deliveryAcceptedKg: 854,
     approvedCommitmentCount: 4,
     completedMissionCount: 4,
+    paymentOverdueCount: 2,
     activeMissionIds: [],
     openExceptionIds: [],
   },
@@ -42,6 +43,8 @@ describe("control-room outcome source", () => {
     expect(screen.getByText("Total orders").nextElementSibling).toHaveTextContent("12");
     expect(screen.getByText("Fulfilled").nextElementSibling).toHaveTextContent("4");
     expect(screen.getByText("Completed delivery missions").nextElementSibling).toHaveTextContent("4");
+    expect(screen.getByText("Overdue payments").nextElementSibling).toHaveTextContent("2");
+    expect(screen.getByText(/does not move money/i)).toBeInTheDocument();
     expect(screen.queryByText("Substituted")).not.toBeInTheDocument();
     expect(screen.getByText("Why orders were missed")).toBeInTheDocument();
     expect(screen.getByText("No ready supply").nextElementSibling).toHaveTextContent("3");
@@ -55,5 +58,6 @@ describe("control-room outcome source", () => {
     expect(screen.getByText(/physical simulation engine/i)).toBeInTheDocument();
     expect(screen.getByText("Substituted").nextElementSibling).toHaveTextContent("2,033");
     expect(screen.queryByText("Approved commitments")).not.toBeInTheDocument();
+    expect(screen.queryByText("Overdue payments")).not.toBeInTheDocument();
   });
 });
