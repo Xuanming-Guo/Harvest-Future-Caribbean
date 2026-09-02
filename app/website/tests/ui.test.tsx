@@ -1,8 +1,8 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Badge } from "@/components/ui";
+import { Badge, Disclosure, MoreDetail } from "@/components/ui";
 import { consumeDevelopmentPersona, currentActor, developmentPersonaFromHash, roleHome } from "@/lib/api";
 import { compactId, formatPercent, titleCase } from "@/lib/format";
 import { clearOnboardingStatus, readOnboardingStatus, roleTutorials, writeOnboardingStatus } from "@/lib/onboarding";
@@ -12,7 +12,10 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/");
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("website presentation helpers", () => {
   it("formats contract statuses without changing their value", () => {
@@ -99,5 +102,82 @@ describe("website presentation helpers", () => {
       expect(tutorial.steps.length).toBeGreaterThanOrEqual(4);
       expect(tutorial.steps.every((step) => step.target.startsWith('[data-tour="'))).toBe(true);
     }
+  });
+});
+
+describe("workspace disclosure", () => {
+  const openSummary = () => screen.getByRole("button", { name: /Track collection/ });
+
+  it("starts closed, names its panel, and opens on activation", () => {
+    render(
+      <Disclosure id="track-collection" title="Track collection" summary="2 collections planned">
+        <p>A driver comes to your farm.</p>
+      </Disclosure>,
+    );
+    const summary = openSummary();
+    const panel = document.getElementById("track-collection-panel");
+
+    // A real button, so Enter and Space already work without extra key handling.
+    expect(summary.tagName).toBe("BUTTON");
+    expect(summary).toHaveAttribute("type", "button");
+    expect(summary).toHaveAttribute("aria-expanded", "false");
+    expect(summary).toHaveAttribute("aria-controls", "track-collection-panel");
+    expect(panel).toHaveAttribute("aria-labelledby", "track-collection-summary");
+    expect(panel).not.toBeVisible();
+    expect(screen.getByText("2 collections planned")).toBeInTheDocument();
+
+    fireEvent.click(summary);
+    expect(summary).toHaveAttribute("aria-expanded", "true");
+    expect(panel).toBeVisible();
+    expect(screen.getByText("A driver comes to your farm.")).toBeVisible();
+
+    fireEvent.click(summary);
+    expect(summary).toHaveAttribute("aria-expanded", "false");
+    expect(panel).not.toBeVisible();
+  });
+
+  it("renders a primary section open from the start", () => {
+    render(
+      <Disclosure id="track-collection" title="Track collection" summary="2 collections planned" primary defaultOpen>
+        <p>A driver comes to your farm.</p>
+      </Disclosure>,
+    );
+    expect(openSummary()).toHaveAttribute("aria-expanded", "true");
+    expect(document.querySelector(".workspace-section-primary")).toBeInTheDocument();
+  });
+
+  it("opens itself when it becomes the recommended section, without closing a reader's choice", () => {
+    const { rerender } = render(
+      <Disclosure id="track-collection" title="Track collection" summary="2 collections planned">
+        <p>A driver comes to your farm.</p>
+      </Disclosure>,
+    );
+    expect(openSummary()).toHaveAttribute("aria-expanded", "false");
+
+    rerender(
+      <Disclosure id="track-collection" title="Track collection" summary="2 collections planned" defaultOpen>
+        <p>A driver comes to your farm.</p>
+      </Disclosure>,
+    );
+    expect(openSummary()).toHaveAttribute("aria-expanded", "true");
+
+    rerender(
+      <Disclosure id="track-collection" title="Track collection" summary="2 collections planned">
+        <p>A driver comes to your farm.</p>
+      </Disclosure>,
+    );
+    expect(openSummary()).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("keeps advanced information behind a second toggle", () => {
+    render(<MoreDetail id="collection" label="More detail: stops and distance"><div><span>Stops</span><b>3</b></div></MoreDetail>);
+    const toggle = screen.getByRole("button", { name: /More detail: stops and distance/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(document.getElementById("collection-detail")).not.toBeVisible();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Stops")).toBeVisible();
+    expect(screen.getByRole("button", { name: /Hide detail/ })).toBeInTheDocument();
   });
 });

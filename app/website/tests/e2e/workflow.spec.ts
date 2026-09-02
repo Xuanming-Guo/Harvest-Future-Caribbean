@@ -19,6 +19,17 @@ test("signs in to role-specific product workspaces and signs out", async ({ page
   await expect(page.getByRole("heading", { name: /Welcome, Ana/ })).toBeVisible();
   await expect(page.getByRole("link", { name: "My farm" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Simulation" })).toHaveCount(0);
+  await expect(page.getByText("Know what buyers need, show what you can supply, coordinate collection and keep a clear delivery history.")).toBeVisible();
+  await expect(page.getByText("Recommended now")).toBeVisible();
+  for (const section of ["Update what is growing", "Report produce ready", "View buyer demand", "Respond to an opportunity", "Track collection", "View previous deliveries"]) {
+    await expect(page.getByRole("button", { name: new RegExp(section) })).toBeVisible();
+  }
+  await expect(page.getByRole("button", { name: /Update what is growing/ })).toHaveAttribute("aria-expanded", "true");
+  const history = page.getByRole("button", { name: /View previous deliveries/ });
+  await expect(history).toHaveAttribute("aria-expanded", "false");
+  await history.click();
+  await expect(history).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator("#view-previous-deliveries-panel")).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("farmer-workspace.png"), fullPage: true });
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page).toHaveURL(/\/$/);
@@ -31,6 +42,22 @@ test("signs in to role-specific product workspaces and signs out", async ({ page
   await page.locator(".listing-card").first().click();
   await expect(page.getByRole("heading", { name: "Cucumber supply evidence" })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("buyer-marketplace.png"), fullPage: true });
+});
+
+test("keeps the farmer's recommended action reachable on a small screen", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await signIn(page, /Ana Joseph/);
+  await expect(page.getByText("Know what buyers need, show what you can supply, coordinate collection and keep a clear delivery history.")).toBeVisible();
+  const action = page.locator(".button-hero");
+  await expect(action).toBeVisible();
+  const button = await action.boundingBox();
+  expect(button!.height).toBeGreaterThanOrEqual(48);
+  const summary = await page.getByRole("button", { name: /Report produce ready/ }).boundingBox();
+  expect(summary!.height).toBeGreaterThanOrEqual(44);
+  const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+  expect(scrollWidth).toBeLessThanOrEqual(375);
+  await page.screenshot({ path: testInfo.outputPath("farmer-workspace-mobile.png"), fullPage: true });
 });
 
 test("guards a product route from the wrong role", async ({ page }) => {
