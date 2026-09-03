@@ -5,6 +5,7 @@ import { ArrowRight, CalendarDays, MapPin, Scale, Sprout, Truck, Wallet } from "
 import Link from "next/link";
 
 import { ApprovalList } from "@/components/approval-list";
+import { DeviceUpdateList, useOutbox } from "@/components/offline";
 import { OrderList } from "@/components/order-list";
 import { useSession } from "@/components/providers";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, Metric, PageHeader, SectionTitle } from "@/components/ui";
@@ -19,6 +20,7 @@ export default function FarmerHome() {
   const missions = useQuery({ queryKey: ["missions"], queryFn: () => api.missions(), refetchInterval: 5_000 });
   const orders = useQuery({ queryKey: ["orders"], queryFn: api.orders, refetchInterval: 5_000 });
   const owed = summarizeMoneyOwed(orders.data?.items ?? []);
+  const deviceUpdates = useOutbox();
 
   return (
     <>
@@ -55,6 +57,12 @@ export default function FarmerHome() {
             </Card>
             <ApprovalList compact />
           </div>
+          {deviceUpdates.length > 0 && (
+            <Card className="section-gap">
+              <SectionTitle title="Updates on this device" detail="Sent automatically when you reconnect" />
+              <DeviceUpdateList />
+            </Card>
+          )}
           <div className="section-gap"><OrderList limit={4} /></div>
           <div className="dashboard-grid section-gap">
             <Card>

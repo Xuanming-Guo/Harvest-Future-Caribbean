@@ -7,6 +7,7 @@ import { useParams } from "next/navigation";
 import { FormEvent, useState } from "react";
 
 import { ApprovalList } from "@/components/approval-list";
+import { OfflineHint, useOnlineStatus } from "@/components/offline";
 import { useSession } from "@/components/providers";
 import { Badge, Card, ErrorState, LoadingState, PageHeader, SectionTitle } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -25,6 +26,7 @@ function lifecycleFor(status: string) {
 export default function OrderDetailPage() {
   const { orderId } = useParams<{ orderId: string }>();
   const { actor } = useSession();
+  const online = useOnlineStatus();
   const queryClient = useQueryClient();
   const [lineValues, setLineValues] = useState<Record<string, { accepted: number; rejected: number }>>({});
   const [note, setNote] = useState("");
@@ -119,12 +121,13 @@ export default function OrderDetailPage() {
       {actor?.role === "BUYER" && mission?.status === "DELIVERED" && !order.data.deliveryAcceptance && (
         <Card className="section-gap">
           <SectionTitle title="Accept this delivery" detail="Record what arrived" />
-          <form className="form-grid" onSubmit={(event: FormEvent) => { event.preventDefault(); acceptance.mutate(); }}>
+          <form className="form-grid" onSubmit={(event: FormEvent) => { event.preventDefault(); if (online) acceptance.mutate(); }}>
             {resolvedLines.map((line) => <div className="field-full order-summary" key={line.cropBatchId}><span><strong>{line.quantity} kg crop batch</strong><small>{line.cropBatchId.slice(0, 8)}</small></span><label>Accepted (kg)<input type="number" min="0" max={line.quantity} step="0.1" value={line.accepted} onChange={(event) => setLineValues((current) => ({ ...current, [line.cropBatchId]: { accepted: Number(event.target.value), rejected: current[line.cropBatchId]?.rejected ?? line.rejected } }))} /></label><label>Rejected (kg)<input type="number" min="0" max={line.quantity} step="0.1" value={line.rejected} onChange={(event) => setLineValues((current) => ({ ...current, [line.cropBatchId]: { accepted: current[line.cropBatchId]?.accepted ?? line.accepted, rejected: Number(event.target.value) } }))} /></label></div>)}
             <div className="field"><label>Total accepted</label><input value={`${accepted} kg`} disabled /></div>
             <div className="field"><label>Total rejected</label><input value={`${rejected} kg`} disabled /></div>
             <div className="field field-full"><label>Note (optional)</label><textarea rows={2} value={note} onChange={(event) => setNote(event.target.value)} /></div>
-            <button className="button field-full" disabled={acceptance.isPending || Math.abs(accepted + rejected - mission.quantity.value) > 0.0001 || resolvedLines.some((line) => Math.abs(line.accepted + line.rejected - line.quantity) > 0.0001)}><CheckCircle2 size={17} />Confirm delivery</button>
+            {!online && <div className="field-full"><OfflineHint>Accepting a delivery settles what was received, so it is never queued. Reconnect to confirm.</OfflineHint></div>}
+            <button className="button field-full" aria-disabled={!online || undefined} disabled={acceptance.isPending || Math.abs(accepted + rejected - mission.quantity.value) > 0.0001 || resolvedLines.some((line) => Math.abs(line.accepted + line.rejected - line.quantity) > 0.0001)}><CheckCircle2 size={17} />Confirm delivery</button>
           </form>
           {(message || acceptance.error) && <p className={acceptance.error ? "form-error" : "form-success"}>{message ?? acceptance.error?.message}</p>}
         </Card>
