@@ -290,6 +290,19 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .role-card strong { font: 700 14px "Manrope", sans-serif; }
 .role-card em { margin-top: 3px; color: var(--muted); font-size: 11px; font-style: normal; }
 
+.connection-status { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-right: auto; }
+.connection-status .badge { gap: 5px; padding: 5px 10px; }
+.offline-hint { display: flex; align-items: flex-start; gap: 7px; margin: 10px 0 0; color: #8b620f; font-size: 12px; line-height: 1.5; }
+.offline-hint svg { flex: 0 0 auto; margin-top: 1px; }
+.button[aria-disabled="true"], .button[aria-disabled="true"]:hover { color: var(--muted); border-color: var(--line); background: #eef2ef; cursor: not-allowed; }
+.device-update-list { display: grid; gap: 10px; }
+.device-update { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; }
+.device-update h3 { margin: 7px 0 4px; font-size: 15px; }
+.device-update p, .device-update small { display: block; margin: 0; color: var(--muted); font-size: 12px; }
+.device-update small { margin-top: 3px; font-size: 11px; }
+.device-update-error { color: #a74334 !important; }
+.device-update .button { flex: 0 0 auto; }
+
 @media (max-width: 1100px) {
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
   .listing-grid { grid-template-columns: 1fr; }
@@ -322,6 +335,9 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
   .button-quiet { padding-inline: 8px; font-size: 0; }
   .button-quiet svg { margin: 0; }
   .inline-actions { flex-direction: column; align-items: stretch; }
+  .connection-status { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .connection-status .badge { padding: 3px 7px; font-size: 9px; }
+  .device-update { flex-direction: column; align-items: stretch; }
   .order-row { grid-template-columns: 1fr auto; }
   .order-row .badge { grid-column: 1; }
   .lifecycle { overflow-x: auto; grid-template-columns: repeat(6, 105px); padding-bottom: 8px; }
