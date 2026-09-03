@@ -35,7 +35,11 @@ export interface ControlRoomScene {
   startsAt: string;
   endsAt: string;
   farms: Array<{ farmId: string; islandId: string; name: string; position: GeoPoint; referencePlaceId?: string }>;
-  buyers: Array<{ buyerId: string; islandId: string; name: string; position: GeoPoint; referencePlaceId?: string }>;
+  /**
+   * `minimumAcceptableFraction` is the buyer's own stated policy, not hidden
+   * truth: it is what they would tell a supplier when placing the order.
+   */
+  buyers: Array<{ buyerId: string; islandId: string; name: string; position: GeoPoint; minimumAcceptableFraction: number; referencePlaceId?: string }>;
   transporters: Array<{ transporterId: string; islandId: string; name: string; homePosition: GeoPoint; capacityKg: number; referencePlaceId?: string }>;
   roads: Array<{ roadSegmentId: string; islandId: string; name: string; from: GeoPoint; to: GeoPoint; distanceKm: number }>;
   /** Licensed public geography, never a claim of Product participation. */
@@ -93,6 +97,13 @@ export interface SimulationOrderOutcomes {
   partiallyFulfilled: number;
   unfulfilled: number;
   pending: number;
+  /**
+   * Why each unfulfilled or partially fulfilled order missed, keyed by the
+   * Product API's `OrderOutcomeCause` vocabulary, plus `HORIZON_TRUNCATED` for
+   * an order whose deadline falls after the run window closes. Optional so
+   * saved frames from before this field existed still replay.
+   */
+  causes?: Record<string, number>;
 }
 
 /** A delivery mission, with the timings needed to animate it. */

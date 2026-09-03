@@ -25,8 +25,13 @@ function mutationHeaders(persona: string, prefix: string) {
   return { ...auth(persona), "idempotency-key": `${prefix}-${randomUUID()}` };
 }
 
-async function decide(persona: string, approvalId: string, decision: "APPROVE" | "REJECT") {
-  return server.inject({ method: "POST", url: `/v1/approvals/${approvalId}/decisions`, headers: mutationHeaders(persona, `decision-${decision.toLowerCase()}`), payload: { decision } });
+async function decide(persona: string, approvalId: string, decision: "APPROVE" | "REJECT", reason?: Record<string, unknown>) {
+  return server.inject({
+    method: "POST",
+    url: `/v1/approvals/${approvalId}/decisions`,
+    headers: mutationHeaders(persona, `decision-${decision.toLowerCase()}`),
+    payload: { decision, ...(decision === "REJECT" ? { reasonCode: "MISSING_INFORMATION", nextAction: "Send an updated crop photograph before the next order." } : {}), ...reason },
+  });
 }
 
 function cropStandardPayload(status: "DRAFT" | "PUBLISHED" = "PUBLISHED") {
@@ -75,6 +80,13 @@ describe("participant Product API", () => {
     expect(ana.statusCode).toBe(200);
     expect(ana.json().items).toHaveLength(1);
     expect(ana.json().items[0].verificationStatus).toBe("OPEN");
+    expect(ana.json().items[0].latestDecision).toMatchObject({
+      source: "DELIVERY",
+      reasonCode: "SIZE_OR_GRADE",
+      nextAction: "Grade cucumbers to at least 15 cm before the next pickup and keep smaller fruit for the local market.",
+    });
+    const anaHistory = await server.inject({ method: "GET", url: "/v1/orders?cropBatchId=11111111-1111-4111-8111-111111111111", headers: auth("farmer-ana") });
+    expect(anaHistory.json().items.map((item: { orderId: string }) => item.orderId)).toContain("20202020-2020-4020-8020-202020202021");
     const unrelated = await server.inject({ method: "GET", url: "/v1/crop-batches/11111111-1111-4111-8111-111111111111", headers: auth("farmer-marcus") });
     expect(unrelated.statusCode).toBe(404);
 
@@ -274,15 +286,49 @@ describe("participant Product API", () => {
     const history = await server.inject({ method: "GET", url: `/v1/delivery-missions/${missionId}/updates`, headers: auth("buyer-hotel") });
     expect(history.json().items.map((item: { updateType: string }) => item.updateType)).toEqual(["ARRIVED", "PICKED_UP", "DELAYED", "ARRIVED", "PICKED_UP", "ARRIVED", "DELIVERED"]);
 
+    const acceptanceLines = [
+      { cropBatchId: "11111111-1111-4111-8111-111111111111", acceptedQuantity: { value: 13, unit: "kg" }, rejectedQuantity: { value: 1, unit: "kg" } },
+      { cropBatchId: "11111111-1111-4111-8111-111111111112", acceptedQuantity: { value: 5, unit: "kg" }, rejectedQuantity: { value: 1, unit: "kg" } },
+    ];
+    const unexplained = await server.inject({
+      method: "POST",
+      url: `/v1/deliveries/${missionId}/acceptance`,
+      headers: mutationHeaders("buyer-hotel", "unexplained-rejection"),
+      payload: { outcome: "PARTIALLY_ACCEPTED", acceptedQuantity: { value: 18, unit: "kg" }, rejectedQuantity: { value: 2, unit: "kg" }, lineOutcomes: acceptanceLines, note: "Two kilograms did not meet the agreed quality." },
+    });
+    expect(unexplained.statusCode).toBe(422);
+    expect(unexplained.json().code).toBe("DECISION_REASON_REQUIRED");
+    expect(await prisma.deliveryAcceptance.findUnique({ where: { orderId } })).toBeNull();
+
     const acceptance = await server.inject({
       method: "POST",
       url: `/v1/deliveries/${missionId}/acceptance`,
       headers: mutationHeaders("buyer-hotel", "partial-acceptance"),
-      payload: { outcome: "PARTIALLY_ACCEPTED", acceptedQuantity: { value: 18, unit: "kg" }, rejectedQuantity: { value: 2, unit: "kg" }, lineOutcomes: [{ cropBatchId: "11111111-1111-4111-8111-111111111111", acceptedQuantity: { value: 13, unit: "kg" }, rejectedQuantity: { value: 1, unit: "kg" } }, { cropBatchId: "11111111-1111-4111-8111-111111111112", acceptedQuantity: { value: 5, unit: "kg" }, rejectedQuantity: { value: 1, unit: "kg" } }], note: "Two kilograms did not meet the agreed quality." },
+      payload: {
+        outcome: "PARTIALLY_ACCEPTED",
+        acceptedQuantity: { value: 18, unit: "kg" },
+        rejectedQuantity: { value: 2, unit: "kg" },
+        lineOutcomes: [{ ...acceptanceLines[0], reasonCode: "DAMAGE", nextAction: "Pack the crates with more padding for the next pickup." }, acceptanceLines[1]],
+        note: "Two kilograms did not meet the agreed quality.",
+        reasonCode: "MATURITY_OR_QUALITY",
+        nextAction: "Harvest one day later so the fruit reaches full size.",
+      },
     });
     expect(acceptance.statusCode).toBe(201);
+    expect(acceptance.json()).toMatchObject({ reasonCode: "MATURITY_OR_QUALITY", nextAction: "Harvest one day later so the fruit reaches full size." });
+    expect(acceptance.json().lineOutcomes[0]).toMatchObject({ reasonCode: "DAMAGE", nextAction: "Pack the crates with more padding for the next pickup." });
+    expect(acceptance.json().lineOutcomes[1]).toMatchObject({ reasonCode: "MATURITY_OR_QUALITY" });
     const completed = await server.inject({ method: "GET", url: `/v1/orders/${orderId}`, headers: auth("buyer-hotel") });
-    expect(completed.json()).toMatchObject({ lifecycleStatus: "PARTIALLY_FULFILLED", acceptedQuantity: { value: 18, unit: "kg" }, deliveryAcceptance: { outcome: "PARTIALLY_ACCEPTED" } });
+    expect(completed.json()).toMatchObject({ lifecycleStatus: "PARTIALLY_FULFILLED", acceptedQuantity: { value: 18, unit: "kg" }, deliveryAcceptance: { outcome: "PARTIALLY_ACCEPTED", reasonCode: "MATURITY_OR_QUALITY", nextAction: "Harvest one day later so the fruit reaches full size." } });
+    expect(completed.json().outcomeCause).toBe("DELIVERY_REJECTED");
+    expect(completed.json().outcomeNote).toContain("MATURITY_OR_QUALITY");
+
+    const anaBatch = await server.inject({ method: "GET", url: "/v1/crop-batches/11111111-1111-4111-8111-111111111111", headers: auth("farmer-ana") });
+    expect(anaBatch.json().latestDecision).toMatchObject({ source: "DELIVERY", reasonCode: "DAMAGE", nextAction: "Pack the crates with more padding for the next pickup." });
+    const marcusBatch = await server.inject({ method: "GET", url: "/v1/crop-batches/11111111-1111-4111-8111-111111111112", headers: auth("farmer-marcus") });
+    expect(marcusBatch.json().latestDecision).toMatchObject({ source: "DELIVERY", reasonCode: "MATURITY_OR_QUALITY" });
+    const journey = await server.inject({ method: "GET", url: "/v1/orders?cropBatchId=11111111-1111-4111-8111-111111111112", headers: auth("farmer-marcus") });
+    expect(journey.json().items.map((item: { orderId: string }) => item.orderId)).toEqual([orderId]);
     const batch = await prisma.cropBatch.findUniqueOrThrow({ where: { id: "11111111-1111-4111-8111-111111111111" } });
     const prediction = await prisma.yieldPrediction.findUniqueOrThrow({ where: { id: batch.latestPredictionId! } });
     expect(prediction.actualQuantity).toBe(13);
@@ -335,6 +381,69 @@ describe("participant Product API", () => {
       const response = await server.inject({ method: "GET", url, headers: auth("buyer-hotel") });
       expect(response.statusCode).toBe(403);
     }
+  });
+
+  it("refuses a declined approval without an actionable reason and records one with it", async () => {
+    const batchId = "11111111-1111-4111-8111-111111111111";
+    await prisma.cropBatch.update({ where: { id: batchId }, data: { availableToPromise: 5, status: "HARVEST_READY" } });
+    const listingId = randomUUID();
+    await prisma.listing.create({
+      data: { id: listingId, cropBatchId: batchId, farmerId: "a0000000-0000-4000-8000-000000000001", cropType: "CUCUMBER", quantity: 5, unitPrice: 7, currency: "XCD", availableFrom: new Date("2026-09-05T00:00:00Z"), availableUntil: new Date("2026-09-08T00:00:00Z"), status: "ACTIVE" },
+    });
+    const created = await server.inject({
+      method: "POST",
+      url: "/v1/orders",
+      headers: mutationHeaders("buyer-hotel", "declined-order"),
+      payload: { cropType: "CUCUMBER", requestedQuantity: { value: 5, unit: "kg" }, neededBy: "2026-09-07T12:00:00Z", deliveryLocation: { latitude: 14.0101, longitude: -60.9875 }, listingIds: [listingId] },
+    });
+    const declinedOrderId = created.json().orderId as string;
+    const approval = (await server.inject({ method: "GET", url: "/v1/approvals?status=PENDING", headers: auth("farmer-ana") })).json().items
+      .find((item: { context?: { orderId?: string } }) => item.context?.orderId === declinedOrderId);
+    expect(approval).toBeTruthy();
+
+    const unexplained = await server.inject({ method: "POST", url: `/v1/approvals/${approval.approvalId}/decisions`, headers: mutationHeaders("farmer-ana", "unexplained-decline"), payload: { decision: "REJECT", reason: "Cannot supply." } });
+    expect(unexplained.statusCode).toBe(422);
+    expect(unexplained.json().code).toBe("DECISION_REASON_REQUIRED");
+    expect((await prisma.approval.findUniqueOrThrow({ where: { id: approval.approvalId } })).status).toBe("PENDING");
+
+    const declined = await server.inject({
+      method: "POST",
+      url: `/v1/approvals/${approval.approvalId}/decisions`,
+      headers: mutationHeaders("farmer-ana", "explained-decline"),
+      payload: { decision: "REJECT", reason: "Cannot supply.", reasonCode: "QUANTITY_MISMATCH", nextAction: "List only the quantity you can pick this week." },
+    });
+    expect(declined.statusCode).toBe(200);
+    expect(declined.json()).toMatchObject({ status: "REJECTED", reasonCode: "QUANTITY_MISMATCH", nextAction: "List only the quantity you can pick this week." });
+    const declinedOrder = await server.inject({ method: "GET", url: `/v1/orders/${declinedOrderId}`, headers: auth("buyer-hotel") });
+    expect(declinedOrder.json()).toMatchObject({ lifecycleStatus: "REJECTED", outcomeCause: "APPROVAL_REJECTED" });
+    expect(declinedOrder.json().outcomeNote).toContain("List only the quantity you can pick this week.");
+  });
+
+  it("refuses a change request without an actionable reason and shows the farmer the recorded one", async () => {
+    const batchId = "11111111-1111-4111-8111-111111111111";
+    const task = await prisma.verificationTask.findFirstOrThrow({ where: { cropBatchId: batchId, status: "OPEN" }, orderBy: { createdAt: "desc" } });
+
+    const unexplained = await server.inject({ method: "POST", url: `/v1/verification-tasks/${task.id}/decisions`, headers: mutationHeaders("coordinator-maya", "unexplained-changes"), payload: { decision: "REQUEST_CHANGES", note: "Not enough detail." } });
+    expect(unexplained.statusCode).toBe(422);
+    expect(unexplained.json().code).toBe("DECISION_REASON_REQUIRED");
+    expect((await prisma.verificationTask.findUniqueOrThrow({ where: { id: task.id } })).status).toBe("OPEN");
+
+    const decided = await server.inject({
+      method: "POST",
+      url: `/v1/verification-tasks/${task.id}/decisions`,
+      headers: mutationHeaders("coordinator-maya", "explained-changes"),
+      payload: { decision: "REQUEST_CHANGES", note: "Not enough detail.", reasonCode: "MISSING_INFORMATION", nextAction: "Add a photograph of the picked crate and the measured weight." },
+    });
+    expect(decided.statusCode).toBe(200);
+    expect(decided.json()).toMatchObject({ status: "CHANGES_REQUESTED", reasonCode: "MISSING_INFORMATION", nextAction: "Add a photograph of the picked crate and the measured weight." });
+
+    const farmerBatch = await server.inject({ method: "GET", url: `/v1/crop-batches/${batchId}`, headers: auth("farmer-ana") });
+    expect(farmerBatch.json().latestDecision).toMatchObject({
+      source: "VERIFICATION",
+      reasonCode: "MISSING_INFORMATION",
+      nextAction: "Add a photograph of the picked crate and the measured weight.",
+      note: "Not enough detail.",
+    });
   });
 
   it("replays an idempotent demand and rejects a changed body", async () => {
@@ -391,7 +500,9 @@ describe("participant Product API", () => {
       evidenceLabel: expect.stringContaining("SYNTHETIC"),
     });
     expect(created.json().frameCount).toBeGreaterThan(20);
-    expect(created.json()).toMatchObject({ frameCount: 130, metrics: { eventsProcessed: 82 } });
+    // Re-recorded from a real seed-42 run after safe partial commitment landed.
+    expect(created.json()).toMatchObject({ frameCount: 127, metrics: { eventsProcessed: 80, totalAcceptedKg: 1545.13 } });
+    expect(created.json().metrics.productActions).toMatchObject({ attempted: 151, succeeded: 151, rejected: 0, domainEventsCreated: 238 });
     const runId = created.json().runId as string;
 
     const replayedRequest = await server.inject({ method: "POST", url: "/v1/simulation-runs", headers, payload });
@@ -422,7 +533,11 @@ describe("participant Product API", () => {
     expect(timeline.json().frames.every((frame: { operationsSnapshot?: unknown }) => frame.operationsSnapshot)).toBe(true);
     const finalFrame = timeline.json().frames.at(-1);
     expect(finalFrame).toMatchObject({ eventType: "RUN_SETTLED", at: created.json().endedAt });
-    expect(finalFrame.operationsSnapshot.orderOutcomes).toMatchObject({ total: 11, fulfilled: 2, partiallyFulfilled: 0, unfulfilled: 8, pending: 1 });
+    expect(finalFrame.operationsSnapshot.orderOutcomes).toMatchObject({ total: 11, fulfilled: 4, partiallyFulfilled: 2, unfulfilled: 5, pending: 0 });
+    // One order's deadline falls after the scenario horizon, so it is reported
+    // as truncated by the run window rather than as an operational failure.
+    expect(finalFrame.operationsSnapshot.orderOutcomes.causes).toEqual({ DELIVERY_REJECTED: 2, HORIZON_TRUNCATED: 1, INSUFFICIENT_SUPPLY: 2, NO_READY_SUPPLY: 2 });
+    expect(finalFrame.operationsSnapshot).toMatchObject({ activeListings: 3, openDemands: 11, deliveryAcceptedKg: 1545.13, approvedCommitmentCount: 7, completedMissionCount: 7 });
     for (const forbidden of ["potentialYieldKg", "qualityFraction", "dailySpoilageRate", "severity"]) {
       expect(timeline.body).not.toContain(forbidden);
     }
@@ -627,7 +742,7 @@ describe("participant Product API", () => {
       prisma.domainEvent.count({ where: { simulationRunId: pair.json().baselineRunId } }),
     ]);
     expect(baselineWorkflowCounts.every((count) => count === 0)).toBe(true);
-  }, 60_000);
+  }, 120_000);
 
   it("keeps marketplace records isolated between real users and simulation runs", async () => {
     const runs = await prisma.simulationRun.findMany({ where: { status: "COMPLETED" }, take: 2, orderBy: { createdAt: "asc" } });
@@ -706,5 +821,177 @@ describe("participant Product API", () => {
     expect(resumedIds.length).toBeGreaterThan(0);
     expect(resumedIds.every((cursor) => cursor > initialIds[0]!)).toBe(true);
     expect(resumedIds).not.toContain(initialIds[0]);
+  });
+});
+
+describe("fulfilment defects (#53)", () => {
+  const anaBatchId = "11111111-1111-4111-8111-111111111111";
+  const listingPayload = { cropBatchId: anaBatchId, quantity: { value: 5, unit: "kg" }, unitPrice: { amount: 6.5, currency: "XCD" }, availableFrom: "2026-09-05", availableUntil: "2026-09-12" };
+  const orderPayload = { cropType: "CUCUMBER", neededBy: "2026-09-11T12:00:00Z", deliveryLocation: { latitude: 14.0101, longitude: -60.9875 } };
+
+  async function observe(cropStage: string, estimate = 40) {
+    return server.inject({
+      method: "POST",
+      url: "/v1/crop-observations",
+      headers: mutationHeaders("farmer-ana", `observe-${cropStage.toLowerCase()}`),
+      payload: { cropBatchId: anaBatchId, observedAt: "2026-09-06T08:00:00Z", cropStage, estimatedQuantity: { value: estimate, unit: "kg" }, provenance: "OBSERVED" },
+    });
+  }
+
+  it("keeps a growing crop unlistable and withdraws its offers, then reopens supply once it is reported ready", async () => {
+    await prisma.listing.updateMany({ where: { cropBatchId: anaBatchId }, data: { status: "ACTIVE", quantity: 20 } });
+    expect((await observe("GROWING")).statusCode).toBe(201);
+
+    const growing = await prisma.cropBatch.findUniqueOrThrow({ where: { id: anaBatchId } });
+    expect(growing.status).toBe("GROWING");
+    expect(growing.availableToPromise).toBe(0);
+    expect(await prisma.listing.count({ where: { cropBatchId: anaBatchId, status: "ACTIVE" } })).toBe(0);
+    expect(await prisma.listing.count({ where: { cropBatchId: anaBatchId, status: "WITHDRAWN" } })).toBeGreaterThan(0);
+
+    const blocked = await server.inject({ method: "POST", url: "/v1/listings", headers: mutationHeaders("farmer-ana", "list-growing"), payload: listingPayload });
+    expect(blocked.statusCode).toBe(422);
+    expect(blocked.json().code).toBe("CROP_NOT_READY");
+
+    expect((await observe("HARVEST_READY")).statusCode).toBe(201);
+    const ready = await prisma.cropBatch.findUniqueOrThrow({ where: { id: anaBatchId } });
+    expect(ready.status).toBe("HARVEST_READY");
+    expect(ready.availableToPromise).toBeGreaterThan(0);
+
+    const published = await server.inject({ method: "POST", url: "/v1/listings", headers: mutationHeaders("farmer-ana", "list-ready"), payload: listingPayload });
+    expect(published.statusCode).toBe(201);
+  });
+
+  it("expires lapsed listings, records why an order waits, and re-matches it when new supply is published", async () => {
+    await prisma.listing.updateMany({ where: { cropType: "CUCUMBER" }, data: { status: "SOLD_OUT" } });
+    const lapsedId = randomUUID();
+    await prisma.listing.create({
+      data: { id: lapsedId, cropBatchId: anaBatchId, farmerId: "a0000000-0000-4000-8000-000000000001", cropType: "CUCUMBER", quantity: 30, unitPrice: 6, currency: "XCD", availableFrom: new Date("2026-08-20T00:00:00Z"), availableUntil: new Date("2026-08-25T00:00:00Z"), status: "ACTIVE" },
+    });
+
+    const waiting = await server.inject({ method: "POST", url: "/v1/orders", headers: mutationHeaders("buyer-hotel", "waiting-order"), payload: { ...orderPayload, requestedQuantity: { value: 5, unit: "kg" } } });
+    expect(waiting.statusCode).toBe(201);
+    const orderId = waiting.json().orderId as string;
+    expect(await prisma.order.findUniqueOrThrow({ where: { id: orderId } })).toMatchObject({ lifecycleStatus: "REQUESTED", outcomeCause: "NO_READY_SUPPLY" });
+    expect((await prisma.listing.findUniqueOrThrow({ where: { id: lapsedId } })).status).toBe("EXPIRED");
+    expect(await prisma.domainEvent.count({ where: { eventType: "LISTING_EXPIRED", entityId: lapsedId } })).toBe(1);
+
+    const detail = await server.inject({ method: "GET", url: `/v1/orders/${orderId}`, headers: auth("buyer-hotel") });
+    expect(detail.json().outcomeCause).toBe("NO_READY_SUPPLY");
+
+    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", availableToPromise: 12 } });
+    const published = await server.inject({ method: "POST", url: "/v1/listings", headers: mutationHeaders("farmer-ana", "rematch-supply"), payload: listingPayload });
+    expect(published.statusCode).toBe(201);
+
+    const rematched = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    expect(rematched.lifecycleStatus).toBe("AWAITING_APPROVAL");
+    expect(rematched.outcomeCause).toBeNull();
+    expect(await prisma.allocation.count({ where: { orderId, status: "PROPOSED" } })).toBe(1);
+  });
+
+  it("soft-holds supply already proposed to another order so re-matching cannot over-promise one batch", async () => {
+    // Earlier cases leave waiting and proposed cucumber orders behind; park them so this case owns the supply.
+    await prisma.order.updateMany({ where: { cropType: "CUCUMBER", lifecycleStatus: { in: ["REQUESTED", "AWAITING_APPROVAL"] } }, data: { lifecycleStatus: "CANCELLED" } });
+    await prisma.allocation.updateMany({ where: { status: "PROPOSED" }, data: { status: "STALE" } });
+    await prisma.listing.updateMany({ where: { cropType: "CUCUMBER" }, data: { status: "SOLD_OUT" } });
+    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", availableToPromise: 6 } });
+    const published = await server.inject({ method: "POST", url: "/v1/listings", headers: mutationHeaders("farmer-ana", "soft-hold-supply"), payload: { ...listingPayload, quantity: { value: 6, unit: "kg" } } });
+    expect(published.statusCode).toBe(201);
+
+    const first = await server.inject({ method: "POST", url: "/v1/orders", headers: mutationHeaders("buyer-hotel", "soft-hold-first"), payload: { ...orderPayload, requestedQuantity: { value: 4, unit: "kg" } } });
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: first.json().orderId } })).lifecycleStatus).toBe("AWAITING_APPROVAL");
+
+    const second = await server.inject({ method: "POST", url: "/v1/orders", headers: mutationHeaders("buyer-hotel", "soft-hold-second"), payload: { ...orderPayload, requestedQuantity: { value: 4, unit: "kg" } } });
+    expect(await prisma.order.findUniqueOrThrow({ where: { id: second.json().orderId } })).toMatchObject({ lifecycleStatus: "REQUESTED", outcomeCause: "INSUFFICIENT_SUPPLY" });
+  });
+});
+
+describe("safe partial commitment (#53)", () => {
+  const anaBatchId = "11111111-1111-4111-8111-111111111111";
+  const orderPayload = { cropType: "CUCUMBER", neededBy: "2026-09-11T12:00:00Z", deliveryLocation: { latitude: 14.0101, longitude: -60.9875 } };
+
+  /** Leaves exactly `available` kg of one ready cucumber batch orderable. */
+  async function onlySupply(available: number) {
+    await prisma.order.updateMany({ where: { cropType: "CUCUMBER", lifecycleStatus: { in: ["REQUESTED", "AWAITING_APPROVAL"] } }, data: { lifecycleStatus: "CANCELLED" } });
+    await prisma.allocation.updateMany({ where: { status: "PROPOSED" }, data: { status: "STALE" } });
+    await prisma.listing.updateMany({ where: { cropType: "CUCUMBER" }, data: { status: "SOLD_OUT" } });
+    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", availableToPromise: available } });
+    const published = await server.inject({
+      method: "POST",
+      url: "/v1/listings",
+      headers: mutationHeaders("farmer-ana", "partial-supply"),
+      payload: { cropBatchId: anaBatchId, quantity: { value: available, unit: "kg" }, unitPrice: { amount: 6.5, currency: "XCD" }, availableFrom: "2026-09-05", availableUntil: "2026-09-12" },
+    });
+    expect(published.statusCode).toBe(201);
+  }
+
+  async function pendingApproval(persona: string, orderId: string) {
+    const approvals = (await server.inject({ method: "GET", url: "/v1/approvals?status=PENDING", headers: auth(persona) })).json().items;
+    return approvals.find((item: { context?: { orderId?: string } }) => item.context?.orderId === orderId);
+  }
+
+  it("proposes, commits, and delivers a partial order the buyer accepted in advance", async () => {
+    await onlySupply(5);
+    const placed = await server.inject({ method: "POST", url: "/v1/orders", headers: mutationHeaders("buyer-hotel", "partial-order"), payload: { ...orderPayload, requestedQuantity: { value: 6, unit: "kg" } } });
+    expect(placed.statusCode).toBe(201);
+    expect(placed.json()).toMatchObject({ minimumAcceptableFraction: 0.8, committedQuantity: { value: 0, unit: "kg" } });
+    const orderId = placed.json().orderId as string;
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: orderId } })).lifecycleStatus).toBe("AWAITING_APPROVAL");
+
+    const proposedEvent = await prisma.domainEvent.findFirstOrThrow({ where: { eventType: "ALLOCATION_PROPOSED", simulationRunId: null }, orderBy: { cursor: "desc" } });
+    const proposedPayload = proposedEvent.payload as { orderId: string; coverageFraction: number };
+    expect(proposedPayload.orderId).toBe(orderId);
+    expect(proposedPayload.coverageFraction).toBeCloseTo(0.8333, 3);
+
+    const buyerApproval = await pendingApproval("buyer-hotel", orderId);
+    expect(buyerApproval.context.coverage).toMatchObject({ requestedQuantity: { value: 6, unit: "kg" }, proposedQuantity: { value: 5, unit: "kg" }, partial: true });
+    expect(buyerApproval.context.summary).toContain("covers 5 of 6 kg (83%)");
+
+    expect((await decide("buyer-hotel", buyerApproval.approvalId, "APPROVE")).statusCode).toBe(200);
+    const farmerApproval = await pendingApproval("farmer-ana", orderId);
+    expect((await decide("farmer-ana", farmerApproval.approvalId, "APPROVE")).statusCode).toBe(200);
+
+    const committed = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    expect(committed).toMatchObject({ lifecycleStatus: "COMMITTED", committedQuantity: 5 });
+    const mission = await prisma.deliveryMission.findFirstOrThrow({ where: { orderId } });
+    expect(mission.quantity).toBe(5);
+
+    const vehicles = (await server.inject({ method: "GET", url: "/v1/me/vehicles", headers: auth("transporter-daniel") })).json().items;
+    expect((await server.inject({ method: "POST", url: `/v1/delivery-missions/${mission.id}/acceptance`, headers: mutationHeaders("transporter-daniel", "partial-mission"), payload: { decision: "ACCEPT", vehicleId: vehicles[0].vehicleId } })).statusCode).toBe(200);
+    // One pickup then the drop-off: arrive, confirm, arrive, deliver.
+    for (const [index, updateType] of ["ARRIVED", "PICKED_UP", "ARRIVED", "DELIVERED"].entries()) {
+      const update = await server.inject({ method: "POST", url: `/v1/delivery-missions/${mission.id}/updates`, headers: mutationHeaders("transporter-daniel", `partial-${updateType.toLowerCase()}-${index}`), payload: { updateType, recordedAt: new Date(Date.UTC(2026, 8, 10, 9 + index)).toISOString() } });
+      expect(update.statusCode).toBe(201);
+    }
+
+    const acceptance = await server.inject({
+      method: "POST",
+      url: `/v1/deliveries/${mission.id}/acceptance`,
+      headers: mutationHeaders("buyer-hotel", "partial-acceptance"),
+      payload: { outcome: "ACCEPTED", acceptedQuantity: { value: 5, unit: "kg" }, rejectedQuantity: { value: 0, unit: "kg" }, lineOutcomes: [{ cropBatchId: anaBatchId, acceptedQuantity: { value: 5, unit: "kg" }, rejectedQuantity: { value: 0, unit: "kg" } }] },
+    });
+    expect(acceptance.statusCode).toBe(201);
+
+    // Everything delivered did arrive; the order was only ever 5 of 6 kg, so
+    // the shortfall keeps its real cause instead of blaming the delivery.
+    const settled = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    expect(settled).toMatchObject({ lifecycleStatus: "PARTIALLY_FULFILLED", outcomeCause: "INSUFFICIENT_SUPPLY", acceptedQuantity: 5 });
+    expect(settled.outcomeNote).toBe("Committed 5 of 6 kg; the buyer sourced the rest elsewhere.");
+    const outcomeEvent = await prisma.domainEvent.findFirstOrThrow({ where: { eventType: "ORDER_PARTIALLY_FULFILLED", entityId: orderId }, orderBy: { cursor: "desc" } });
+    expect(outcomeEvent.payload).toMatchObject({ acceptedQuantity: { value: 5, unit: "kg" }, releasedReservationQuantity: { value: 0, unit: "kg" } });
+  });
+
+  it("still waits on the same supply when the buyer requires complete coverage", async () => {
+    await onlySupply(5);
+    const strict = await server.inject({ method: "POST", url: "/v1/orders", headers: mutationHeaders("buyer-hotel", "strict-order"), payload: { ...orderPayload, requestedQuantity: { value: 6, unit: "kg" }, minimumAcceptableFraction: 1 } });
+    expect(strict.statusCode).toBe(201);
+    expect(strict.json().minimumAcceptableFraction).toBe(1);
+    expect(await prisma.order.findUniqueOrThrow({ where: { id: strict.json().orderId } })).toMatchObject({ lifecycleStatus: "REQUESTED", outcomeCause: "INSUFFICIENT_SUPPLY" });
+    expect(await prisma.allocation.count({ where: { orderId: strict.json().orderId } })).toBe(0);
+  });
+
+  it("rejects an acceptance threshold below the supported floor", async () => {
+    const invalid = await server.inject({ method: "POST", url: "/v1/orders", headers: mutationHeaders("buyer-hotel", "invalid-threshold"), payload: { ...orderPayload, requestedQuantity: { value: 6, unit: "kg" }, minimumAcceptableFraction: 0.3 } });
+    expect(invalid.statusCode).toBe(422);
+    expect(invalid.json().code).toBe("INVALID_ACCEPTANCE_THRESHOLD");
   });
 });

@@ -49,6 +49,18 @@ const MINIMUM_CONFIDENCE_FACTOR = 0.35;
 const UNOBSERVED_AVAILABLE_KG = 0;
 
 /**
+ * Longest a batch reported ready is left in the field before collection.
+ *
+ * Cucumbers lose six to fourteen percent of themselves a day once ready, so a
+ * pickup scheduled to arrive just before a delivery deadline three days out can
+ * lose a third of the promise before the vehicle leaves. Half a day is the
+ * slack a coordinator would allow for arranging a run; past that, go and get it.
+ * SYNTHETIC and rule-based, like the discount above.
+ */
+export const MAX_READY_HOLD_DAYS = 0.5;
+export const MAX_READY_HOLD_MS = MAX_READY_HOLD_DAYS * DAY_MS;
+
+/**
  * How much the grower's reports have disagreed, as a coefficient of variation.
  *
  * Returns 0 when there are fewer than two reports: with one data point there is
@@ -71,6 +83,16 @@ export const harvestPolicy: CoordinationPolicy = {
   description:
     'Coordinated: uncertainty-discounted available-to-promise, multi-farm allocation, an explicit human ' +
     'approval gate, and deterministic recovery from observed disruptions.',
+
+  // Something holds the whole picture here, so a reported-ready crop is
+  // collected rather than left waiting for the delivery deadline, and an order
+  // that could not be filled when it arrived is matched again when new supply
+  // is reported.
+  capabilities: {
+    collectOnReadiness: true,
+    maxHoldMs: MAX_READY_HOLD_MS,
+    rematchOnNewSupply: true,
+  },
 
   estimateAvailableKg(context: PolicyContext, batch: ObservedCropBatch): number {
     const latest = batch.observations.at(-1);
@@ -116,36 +138,47 @@ export const harvestPolicy: CoordinationPolicy = {
       // across runs. An unstable tiebreak would make the benchmark irreproducible.
       .sort((a, b) => b.availableKg - a.availableKg || a.batch.batchId.localeCompare(b.batch.batchId));
 
-    // Where the evidence is missing, go and ask for it rather than simply
-    // declining. Any batch whose stated window has opened is a plausible
-    // source that nobody has looked at recently enough to promise against.
+    // Where the evidence is missing or old, go and ask for it rather than
+    // promising on it. Two groups qualify, and the second is the one a policy
+    // that only chases missing evidence never asks about:
+    //
+    //   - a plausible batch nobody has looked at recently enough to promise
+    //     against at all, when the ready supply on hand does not cover the
+    //     order. Its stated window has opened, so it might be ready even though
+    //     the last report predates that;
+    //   - a batch still carrying a READY report that has itself gone stale.
+    //     That report is the very thing being promised against, and a five-day
+    //     old sighting of a crop losing a tenth of itself a day is the least
+    //     trustworthy evidence in the set, whether or not the order is covered.
     const promised0 = candidates.reduce((total, candidate) => total + candidate.availableKg, 0);
-    if (promised0 < wanted) {
-      const worthChecking = [...context.observed.batches.values()]
-        .filter((batch) => batch.crop === demand.crop)
-        .filter((batch) => context.farms.get(batch.farmId)?.islandId === buyer.islandId)
-        .filter((batch) => batch.lastReportedStage !== 'READY')
-        .filter((batch) => batch.lastReportedStage !== 'HARVESTED' && batch.lastReportedStage !== 'SPOILED')
-        // Its stated window has opened, so it might be ready even though the
-        // last report predates that.
-        .filter((batch) => batch.expectedReadyFrom <= demand.neededBy)
-        .filter((batch) => batch.lastObservedAt === null || context.now - batch.lastObservedAt > STALE_OBSERVATION_MS / 2)
-        .sort((a, b) => a.batchId.localeCompare(b.batchId));
+    const staleBy = (batch: ObservedCropBatch, horizonMs: number): boolean =>
+      batch.lastObservedAt === null || context.now - batch.lastObservedAt > horizonMs;
 
-      for (const batch of worthChecking) context.requestObservation(batch.batchId);
+    const worthChecking = [...context.observed.batches.values()]
+      .filter((batch) => batch.crop === demand.crop)
+      .filter((batch) => context.farms.get(batch.farmId)?.islandId === buyer.islandId)
+      .filter((batch) => batch.lastReportedStage !== 'HARVESTED' && batch.lastReportedStage !== 'SPOILED')
+      .filter((batch) => batch.expectedReadyFrom <= demand.neededBy)
+      .filter((batch) =>
+        batch.lastReportedStage === 'READY'
+          ? staleBy(batch, STALE_OBSERVATION_MS)
+          : promised0 < wanted && staleBy(batch, STALE_OBSERVATION_MS / 2),
+      )
+      .sort((a, b) => a.batchId.localeCompare(b.batchId));
 
-      if (worthChecking.length > 0) {
-        context.record({
-          kind: 'HARVEST_REQUEST_OBSERVATION',
-          summary: `Asked ${worthChecking.length} grower(s) to check and report, rather than promising on stale evidence.`,
-          evidence: {
-            demandId: demand.demandId,
-            batchesAsked: worthChecking.length,
-            coveredKg: Number(promised0.toFixed(2)),
-            requestedKg: wanted,
-          },
-        });
-      }
+    for (const batch of worthChecking) context.requestObservation(batch.batchId);
+
+    if (worthChecking.length > 0) {
+      context.record({
+        kind: 'HARVEST_REQUEST_OBSERVATION',
+        summary: `Asked ${worthChecking.length} grower(s) to check and report, rather than promising on stale evidence.`,
+        evidence: {
+          demandId: demand.demandId,
+          batchesAsked: worthChecking.length,
+          coveredKg: Number(promised0.toFixed(2)),
+          requestedKg: wanted,
+        },
+      });
     }
 
     if (candidates.length === 0) {

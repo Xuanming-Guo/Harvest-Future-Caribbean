@@ -242,6 +242,8 @@ model VerificationTask {
   resolvedBy  String?  @map("resolved_by") @db.Uuid
   resolvedAt  DateTime? @map("resolved_at") @db.Timestamptz(3)
   note        String?
+  reasonCode  String?  @map("reason_code")
+  nextAction  String?  @map("next_action")
   simulationRunId String? @map("simulation_run_id") @db.Uuid
 
   @@index([farmId, status])
@@ -311,7 +313,10 @@ model Order {
   buyerId            String   @map("buyer_id") @db.Uuid
   cropType           String   @map("crop_type")
   requestedQuantity  Float    @map("requested_quantity")
+  committedQuantity  Float    @default(0) @map("committed_quantity")
   acceptedQuantity   Float    @default(0) @map("accepted_quantity")
+  /// Smallest share of requestedQuantity this buyer accepts as a commitment.
+  minimumAcceptableFraction Float @default(0.8) @map("minimum_acceptable_fraction")
   neededBy           DateTime @map("needed_by") @db.Timestamptz(3)
   latitude           Float
   longitude          Float
@@ -320,6 +325,8 @@ model Order {
   atRisk             Boolean  @default(false) @map("at_risk")
   activeExceptionIds Json     @map("active_exception_ids")
   cropStandardId     String?  @map("crop_standard_id") @db.Uuid
+  outcomeCause       String?  @map("outcome_cause")
+  outcomeNote        String?  @map("outcome_note")
   traceId            String?  @map("trace_id") @db.Uuid
   simulationRunId    String?  @map("simulation_run_id") @db.Uuid
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -371,6 +378,8 @@ model Approval {
   decidedBy   String?   @map("decided_by") @db.Uuid
   decidedAt   DateTime? @map("decided_at") @db.Timestamptz(3)
   reason      String?
+  reasonCode  String?   @map("reason_code")
+  nextAction  String?   @map("next_action")
   simulationRunId String? @map("simulation_run_id") @db.Uuid
 
   @@map("approvals")
@@ -433,6 +442,8 @@ model DeliveryAcceptance {
   acceptedQuantity Float    @map("accepted_quantity")
   rejectedQuantity Float    @map("rejected_quantity")
   note             String?
+  reasonCode       String?  @map("reason_code")
+  nextAction       String?  @map("next_action")
   acceptedBy       String   @map("accepted_by") @db.Uuid
   acceptedAt       DateTime @map("accepted_at") @db.Timestamptz(3)
   lineOutcomes     Json     @map("line_outcomes")

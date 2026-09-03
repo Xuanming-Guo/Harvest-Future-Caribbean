@@ -128,6 +128,15 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .field textarea { resize: vertical; }
 .field input:focus, .field select:focus, .field textarea:focus, .filter-row input:focus { border-color: var(--leaf); box-shadow: 0 0 0 3px rgba(91,166,75,.12); }
 .field input:disabled { color: var(--muted); background: #f3f5f2; }
+.field-label { color: var(--muted); font-size: 11px; font-weight: 800; }
+.field-hint { color: var(--muted); font-size: 11px; }
+/* Custom acceptance-threshold control: a native select would expose OS chrome. */
+.segmented { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid #cfdcd3; border-radius: 999px; background: white; }
+.segmented-option { min-height: 34px; padding: 4px 10px; border-radius: 999px; }
+.segmented-option .badge { background: transparent; color: var(--muted); }
+.segmented-option.selected { background: var(--forest); }
+.segmented-option.selected .badge { color: white; }
+.segmented-option:focus-visible { outline: 2px solid var(--leaf); outline-offset: 2px; }
 .form-inline { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 12px; }
 .form-success, .form-error { display: flex; align-items: center; gap: 7px; margin: 15px 0 0; padding: 10px 12px; border-radius: 9px; font-size: 12px; }
 .form-success { color: #276a4c; background: var(--mint); }
@@ -224,6 +233,38 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .verification-grid strong, .verification-grid small { display: block; }
 .verification-grid small { color: var(--muted); }
 
+.farm-map { position: relative; width: 100%; aspect-ratio: 800 / 480; overflow: hidden; border-radius: 14px; background: var(--mint); }
+.farm-map-field { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.farm-horizon { fill: var(--mint); opacity: .4; }
+.farm-fence polyline { fill: none; stroke: var(--forest-dark); stroke-width: 2.5; opacity: .5; }
+.farm-fence line { stroke: var(--forest-dark); stroke-width: 2.5; opacity: .5; }
+.farm-plot-resting { fill: none; stroke: var(--line); stroke-width: 2; stroke-dasharray: 5 5; opacity: .6; }
+.farm-tree-trunk { fill: var(--forest-dark); }
+.farm-tree-back { fill: var(--forest); }
+.farm-tree-front { fill: var(--leaf); opacity: .92; }
+.farm-map-plots { position: absolute; inset: 0; }
+.farm-plot { position: absolute; display: block; min-width: 44px; min-height: 34px; transform: translate(-50%, -50%); border-radius: 10px; outline-offset: 3px; }
+.farm-plot:focus-visible { outline: 3px solid var(--forest); outline-offset: 4px; }
+.farm-plot svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.farm-plot-shadow { fill: var(--ink); opacity: .14; }
+.farm-plot-shape { stroke: var(--line); stroke-width: 2.5; }
+.farm-plot-furrows line { stroke: var(--ink); stroke-width: 1.6; opacity: .16; }
+.farm-plot-planned .farm-plot-shape { fill: var(--cream); }
+.farm-plot-growing .farm-plot-shape { fill: var(--mint); stroke: var(--leaf); }
+.farm-plot-harvest-ready .farm-plot-shape { fill: var(--mint); stroke: var(--forest); stroke-width: 3.5; }
+.farm-plot-harvested .farm-plot-shape { fill: var(--cream); stroke: var(--muted); }
+.farm-plot-closed { opacity: .55; }
+.farm-plot-closed .farm-plot-shape { fill: var(--line); stroke: var(--muted); }
+.farm-plot-sprouts line { stroke: var(--leaf); stroke-width: 3; stroke-linecap: round; }
+.farm-plot-crop circle { fill: var(--leaf); stroke: var(--forest); stroke-width: 1.5; }
+.farm-plot-stubble line { stroke: var(--muted); stroke-width: 2.5; stroke-linecap: round; }
+.farm-plot-soil circle { fill: var(--muted); opacity: .6; }
+.farm-badge { fill: var(--amber); stroke: var(--cream); stroke-width: 2.5; }
+.farm-truck { transform-box: fill-box; transform-origin: center; animation: farm-truck-drift 2.6s ease-in-out infinite; }
+@keyframes farm-truck-drift { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(10px); } }
+.farm-legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 2px; }
+.farm-list { display: none; }
+
 .state-panel, .empty-state, .full-page-state { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 130px; padding: 25px; color: var(--muted); text-align: center; }
 .state-panel { flex-direction: column; border: 1px dashed #c8d6cc; border-radius: 14px; }
 .state-panel.error { color: var(--red); background: #fff8f6; }
@@ -277,6 +318,56 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .role-card strong { font: 700 14px "Manrope", sans-serif; }
 .role-card em { margin-top: 3px; color: var(--muted); font-size: 11px; font-style: normal; }
 
+/* Structured decision reasons: custom pill chooser, never a native select. */
+.reason-chooser { gap: 9px; }
+.reason-chooser-label { color: var(--muted); font-size: 11px; font-weight: 800; }
+.reason-options { display: flex; flex-wrap: wrap; gap: 9px; }
+.reason-option { min-height: 44px; padding: 11px 16px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); background: white; font-size: 13px; font-weight: 700; }
+.reason-option:hover:not(:disabled) { border-color: #aac9b7; background: var(--mint); }
+.reason-option[aria-pressed="true"] { color: white; border-color: var(--forest); background: var(--forest); }
+.reason-option[aria-pressed="true"]:hover:not(:disabled) { background: var(--forest-dark); }
+.reason-option:focus-visible { outline: 3px solid rgba(91,166,75,.35); outline-offset: 2px; }
+
+.decline-panel { width: 100%; margin-top: 13px; padding: 15px; border: 1px solid var(--line); border-radius: 12px; background: var(--cream); }
+.decline-actions { justify-content: flex-end; }
+
+.decision-card { border-left: 4px solid var(--amber); }
+.decision-source { margin: 0 0 11px; color: var(--muted); font-size: 13px; }
+.decision-explanation { display: grid; gap: 6px; padding: 14px; border-radius: 11px; background: #fff4da; }
+.decision-explanation strong { font: 700 15px "Manrope", sans-serif; color: #7d5710; }
+.decision-explanation p { margin: 0; color: #6b4f14; font-size: 13px; line-height: 1.5; }
+.decision-next-action { font-weight: 700; }
+.decision-note { font-style: italic; }
+.decision-list { display: grid; gap: 11px; }
+.decision-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 15px; border: 1px solid var(--line); border-radius: 13px; transition: .18s ease; }
+.decision-row:hover { border-color: #aac9b7; transform: translateY(-1px); }
+.decision-row h3 { margin: 8px 0 4px; font-size: 15px; }
+.decision-row p { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+
+.journey { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.journey li { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 15px; padding: 0 0 20px; }
+.journey li:last-child { padding-bottom: 0; }
+.journey li::before { content: ""; position: absolute; top: 18px; bottom: 0; left: 6px; width: 2px; background: var(--line); }
+.journey li:last-child::before { display: none; }
+.journey-marker { position: relative; z-index: 1; width: 14px; height: 14px; margin-top: 5px; border: 3px solid var(--forest); border-radius: 50%; background: white; }
+.journey strong { display: block; font: 700 14px "Manrope", sans-serif; }
+.journey p { margin: 4px 0 0; font-size: 13px; }
+.journey small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
+.journey .text-link { margin-top: 8px; font-size: 13px; }
+.journey-outcome { display: grid; gap: 5px; margin-top: 9px; padding: 11px; border-radius: 10px; background: var(--mint); font-size: 12px; }
+.connection-status { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-right: auto; }
+.connection-status .badge { gap: 5px; padding: 5px 10px; }
+.offline-hint { display: flex; align-items: flex-start; gap: 7px; margin: 10px 0 0; color: #8b620f; font-size: 12px; line-height: 1.5; }
+.offline-hint svg { flex: 0 0 auto; margin-top: 1px; }
+.button[aria-disabled="true"], .button[aria-disabled="true"]:hover { color: var(--muted); border-color: var(--line); background: #eef2ef; cursor: not-allowed; }
+.device-update-list { display: grid; gap: 10px; }
+.device-update { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; }
+.device-update h3 { margin: 7px 0 4px; font-size: 15px; }
+.device-update p, .device-update small { display: block; margin: 0; color: var(--muted); font-size: 12px; }
+.device-update small { margin-top: 3px; font-size: 11px; }
+.device-update-error { color: #a74334 !important; }
+.device-update .button { flex: 0 0 auto; }
+
 @media (max-width: 1100px) {
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
   .listing-grid { grid-template-columns: 1fr; }
@@ -293,6 +384,7 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
   .main-column main { padding: 30px 20px 55px; }
   .dashboard-grid, .two-column, .marketplace-layout { grid-template-columns: 1fr; }
   .sticky-card { position: static; }
+  .farm-list { display: grid; }
   .sign-in-page { grid-template-columns: 1fr; padding: 30px 20px !important; }
   .sign-in-page::before { inset: 0 0 48% 0; }
   .sign-in-copy .eyebrow { margin-top: 30px; }
@@ -307,7 +399,13 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
   .profile-summary div { display: none; }
   .button-quiet { padding-inline: 8px; font-size: 0; }
   .button-quiet svg { margin: 0; }
+  .reason-option { padding-inline: 14px; font-size: 13px; }
+  .decision-row { grid-template-columns: 1fr; }
+  .decision-row svg { display: none; }
   .inline-actions { flex-direction: column; align-items: stretch; }
+  .connection-status { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .connection-status .badge { padding: 3px 7px; font-size: 9px; }
+  .device-update { flex-direction: column; align-items: stretch; }
   .order-row { grid-template-columns: 1fr auto; }
   .order-row .badge { grid-column: 1; }
   .lifecycle { overflow-x: auto; grid-template-columns: repeat(6, 105px); padding-bottom: 8px; }

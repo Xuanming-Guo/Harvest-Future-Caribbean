@@ -5,6 +5,7 @@ import {
   Compass,
   Leaf,
   LogOut,
+  Map,
   Menu,
   PackageCheck,
   ShoppingBasket,
@@ -17,12 +18,14 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { roleHome, type ProductRole } from "@/lib/api";
+import { ConnectionStatus } from "./offline";
 import { OnboardingGuide } from "./onboarding-guide";
 import { useSession } from "./providers";
 
 const navigation = {
   FARMER: [
     ["/farmer", "My farm", Sprout],
+    ["/farmer/farm", "Farm map", Map],
     ["/orders", "Orders", PackageCheck],
   ],
   BUYER: [
@@ -109,6 +112,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <button className="icon-button mobile-menu" onClick={() => setOpen((value) => !value)} aria-label="Toggle navigation">
             {open ? <X /> : <Menu />}
           </button>
+          <ConnectionStatus />
           <div className="profile-summary">
             <span className="avatar">{actor.name.slice(0, 1)}</span>
             <div><strong>{actor.name}</strong><small>{actor.role.toLowerCase()}</small></div>

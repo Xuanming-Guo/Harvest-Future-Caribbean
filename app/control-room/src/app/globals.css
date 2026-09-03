@@ -415,6 +415,35 @@ a:focus-visible {
   background: rgba(18, 48, 40, 0.55);
 }
 
+.metrics-causes {
+  margin-top: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(18, 48, 40, 0.55);
+}
+
+.metrics-cause-list {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+
+.metrics-cause-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.metrics-cause-count {
+  font-family: "Manrope", sans-serif;
+  font-weight: 800;
+}
+
 .metric-label {
   color: var(--text-dim);
   font-size: 10px;

@@ -12,11 +12,13 @@ import { operationNow, registerOperationClock } from "./clock.js";
 import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { recordEvent } from "./events.js";
-import { assertObjectBody, httpError, idempotent, readLocation, readQuantity, sendProblem } from "./http.js";
+import { assertObjectBody, decisionReasonKeys, httpError, idempotent, readDecisionReason, readLocation, readQuantity, requireDecisionReason, sendProblem, type DecisionReasonCode } from "./http.js";
 import { registerSimulationRoutes } from "./simulation-routes.js";
+import { batchStatusForStage, isReadyStatus } from "./workflows.js";
 import {
   approvalDto,
   cropBatchDto,
+  type BatchDecision,
   cropObservationIntakeDto,
   cropStandardDto,
   deliveryAcceptanceDto,
@@ -159,6 +161,61 @@ async function verificationStatuses(batchIds: string[]) {
   return statuses;
 }
 
+type StoredLineOutcome = { cropBatchId?: unknown; rejectedQuantity?: { value?: unknown }; reasonCode?: unknown; nextAction?: unknown };
+
+/** Narrows the caller's visible orders to those committing one crop batch. */
+async function orderIdsForCropBatch(cropBatchId: string, visible: string[]) {
+  if (!visible.length) return [];
+  const lines = await prisma.allocationLine.findMany({ where: { cropBatchId }, select: { allocationId: true } });
+  if (!lines.length) return [];
+  const allocations = await prisma.allocation.findMany({ where: { id: { in: [...new Set(lines.map((line) => line.allocationId))] } }, select: { orderId: true } });
+  const matched = new Set(allocations.map((allocation) => allocation.orderId));
+  return visible.filter((orderId) => matched.has(orderId));
+}
+
+/**
+ * Builds the farmer-facing explanation for each batch: the most recent
+ * coordinator change request or rejected delivery line, whichever is later.
+ * Rows recorded before structured reasons existed simply carry no codes.
+ */
+async function latestBatchDecisions(actor: AuthActor, batchIds: string[]) {
+  const decisions = new Map<string, BatchDecision>();
+  if (!batchIds.length) return decisions;
+  const [changeRequests, acceptances] = await Promise.all([
+    prisma.verificationTask.findMany({ where: { cropBatchId: { in: batchIds }, status: "CHANGES_REQUESTED" }, orderBy: { createdAt: "desc" } }),
+    prisma.deliveryAcceptance.findMany({ where: { ...actorRunScope(actor), rejectedQuantity: { gt: 0 } }, orderBy: { acceptedAt: "desc" } }),
+  ]);
+  const considered = new Set(batchIds);
+  const remember = (cropBatchId: string, candidate: BatchDecision) => {
+    const current = decisions.get(cropBatchId);
+    if (!current || current.decidedAt < candidate.decidedAt) decisions.set(cropBatchId, candidate);
+  };
+  for (const task of changeRequests) {
+    if (!considered.has(task.cropBatchId)) continue;
+    remember(task.cropBatchId, {
+      source: "VERIFICATION",
+      decidedAt: task.resolvedAt ?? task.createdAt,
+      reasonCode: task.reasonCode,
+      nextAction: task.nextAction,
+      note: task.note,
+    });
+  }
+  for (const acceptance of acceptances) {
+    for (const line of (acceptance.lineOutcomes as StoredLineOutcome[] | null) ?? []) {
+      const cropBatchId = typeof line?.cropBatchId === "string" ? line.cropBatchId : null;
+      if (!cropBatchId || !considered.has(cropBatchId) || Number(line.rejectedQuantity?.value ?? 0) <= 0) continue;
+      remember(cropBatchId, {
+        source: "DELIVERY",
+        decidedAt: acceptance.acceptedAt,
+        reasonCode: typeof line.reasonCode === "string" ? line.reasonCode : acceptance.reasonCode,
+        nextAction: typeof line.nextAction === "string" ? line.nextAction : acceptance.nextAction,
+        note: acceptance.note,
+      });
+    }
+  }
+  return decisions;
+}
+
 async function canSeeMission(actor: AuthActor, mission: { orderId: string; status: string; transporterId: string | null; simulationRunId: string | null }) {
   if (mission.simulationRunId !== actor.simulationRunId) return false;
   return actor.role === "ADMIN" || actor.role === "OPERATIONS" ||
@@ -205,12 +262,27 @@ async function approvalContext(row: { subjectType: string; subjectId: string; re
   const amount = visibleLines.reduce((sum, line) => sum + line.quantity, 0);
   const estimatedPrice = visibleLines.reduce((sum, line) => sum + line.quantity * (listingById.get(line.listingId)?.unitPrice ?? 0), 0);
   const currency = listingById.get(visibleLines[0]?.listingId)?.currency ?? "XCD";
+  // The order total is what the buyer asked for; the allocation total is what
+  // this proposal actually covers. Naming both stops a buyer approving a
+  // partial commitment while believing the whole order is covered.
+  const proposedTotal = lines.reduce((sum, line) => sum + line.quantity, 0);
+  const coveragePercent = order.requestedQuantity > 0 ? Math.round((proposedTotal / order.requestedQuantity) * 100) : 0;
+  const partial = proposedTotal + 0.0001 < order.requestedQuantity;
+  const coverage = `covers ${proposedTotal} of ${order.requestedQuantity} kg (${coveragePercent}%)`;
   return {
     title: `${order.cropType.toLowerCase()} supply commitment`,
-    summary: `Confirm ${amount} kg for delivery by ${order.neededBy.toISOString()}.`,
+    summary: partial
+      ? `Confirm ${amount} kg for delivery by ${order.neededBy.toISOString()}. This commitment ${coverage}; the buyer sources the remainder elsewhere.`
+      : `Confirm ${amount} kg for delivery by ${order.neededBy.toISOString()}.`,
     orderId: order.id,
     cropType: order.cropType,
     quantity: quantity(amount),
+    coverage: {
+      requestedQuantity: quantity(order.requestedQuantity),
+      proposedQuantity: quantity(proposedTotal),
+      coverageFraction: Number((order.requestedQuantity > 0 ? proposedTotal / order.requestedQuantity : 0).toFixed(4)),
+      partial,
+    },
     estimatedPrice: { amount: Number(estimatedPrice.toFixed(2)), currency },
     neededBy: order.neededBy.toISOString(),
   };
@@ -307,7 +379,8 @@ export async function buildServer() {
       take: queryLimit(query.limit),
     });
     const statuses = await verificationStatuses(rows.map((row) => row.id));
-    return { items: rows.map((row) => cropBatchDto(row, statuses.get(row.id))), pageInfo };
+    const decisions = await latestBatchDecisions(actor, rows.map((row) => row.id));
+    return { items: rows.map((row) => cropBatchDto(row, statuses.get(row.id), decisions.get(row.id))), pageInfo };
   });
 
   server.get("/v1/crop-batches/:cropBatchId", async (request) => {
@@ -317,7 +390,8 @@ export async function buildServer() {
     const row = await prisma.cropBatch.findUnique({ where: { id: cropBatchId } });
     if (!row) throw httpError(404, "CROP_BATCH_NOT_FOUND", "Crop batch was not found.");
     const statuses = await verificationStatuses([row.id]);
-    return cropBatchDto(row, statuses.get(row.id));
+    const decisions = await latestBatchDecisions(actor, [row.id]);
+    return cropBatchDto(row, statuses.get(row.id), decisions.get(row.id));
   });
 
   server.get("/v1/crop-standards", async (request) => {
@@ -474,7 +548,15 @@ export async function buildServer() {
       }
       await tx.traceStep.create({ data: { traceId, recordedAt, kind: "INPUT", agentName: "Intake Agent", toolName: "confirm-human-observation", provenance, summary: `Human confirmed ${asString(body.cropStage, "cropStage")} observation${estimatedQuantity !== null ? ` with ${estimatedQuantity} kg estimate` : ""}.`, simulationRunId: actor.simulationRunId } });
       await tx.cropObservation.create({ data: { id: observationId, cropBatchId, actorId: actor.id, observedAt, recordedAt, cropStage: asString(body.cropStage, "cropStage"), notes: typeof body.notes === "string" ? body.notes : null, estimatedQuantity, provenance, traceId, simulationRunId: actor.simulationRunId } });
-      await tx.cropBatch.update({ where: { id: cropBatchId }, data: { latestObservationId: observationId, provenance } });
+      // The reported stage drives the batch status, which gates ATP and
+      // listings. Leaving readiness withdraws any remaining active offer so a
+      // buyer cannot be matched to produce that is no longer there.
+      const previous = await tx.cropBatch.findUniqueOrThrow({ where: { id: cropBatchId }, select: { status: true } });
+      const nextStatus = batchStatusForStage(asString(body.cropStage, "cropStage"));
+      await tx.cropBatch.update({ where: { id: cropBatchId }, data: { latestObservationId: observationId, provenance, status: nextStatus } });
+      if (isReadyStatus(previous.status) && !isReadyStatus(nextStatus)) {
+        await tx.listing.updateMany({ where: { cropBatchId, status: "ACTIVE", simulationRunId: actor.simulationRunId }, data: { status: "WITHDRAWN" } });
+      }
       const intakeEvent = intake ? await tx.domainEvent.findFirst({ where: { eventType: "CROP_OBSERVATION_INTAKE_DRAFTED", entityId: intake.id }, orderBy: { occurredAt: "desc" } }) : null;
       const createdEvent = await recordEvent(tx, { eventType: "CROP_OBSERVATION_SUBMITTED", actorId: actor.id, entityId: cropBatchId, traceId, correlationId: intakeEvent?.correlationId, causationId: intakeEvent?.id, provenance, simulationRunId: actor.simulationRunId, payload: { observationId, cropBatchId, observedAt: observedAt.toISOString(), cropStage: body.cropStage as string, ...(intake ? { intakeId: intake.id } : {}) } });
       const batch = await tx.cropBatch.findUniqueOrThrow({ where: { id: cropBatchId } });
@@ -615,6 +697,7 @@ export async function buildServer() {
     if (!(await canAccessBatch(actor, cropBatchId))) throw httpError(404, "CROP_BATCH_NOT_FOUND", "Crop batch was not found.");
     const batch = await prisma.cropBatch.findUniqueOrThrow({ where: { id: cropBatchId } });
     const amount = readQuantity(body.quantity);
+    if (!isReadyStatus(batch.status)) throw httpError(422, "CROP_NOT_READY", "Only a crop reported harvest ready can be listed.");
     if (amount > batch.availableToPromise) throw httpError(422, "ATP_EXCEEDED", "Listing quantity exceeds available-to-promise supply.");
     const money = body.unitPrice as JsonObject;
     if (!money || typeof money.amount !== "number" || typeof money.currency !== "string") throw httpError(400, "VALIDATION_FAILED", "unitPrice requires amount and currency.");
@@ -629,6 +712,9 @@ export async function buildServer() {
       await recordEvent(tx, { eventType: "LISTING_PUBLISHED", actorId: actor.id, entityId: listingId, traceId, provenance: batch.provenance, simulationRunId: actor.simulationRunId, payload: { listingId, cropBatchId, quantity: quantity(amount), availableFrom: listing.availableFrom.toISOString().slice(0, 10) } });
       return listing;
     });
+    // New supply is the moment a waiting order can move; nothing else
+    // re-runs matching, so do it here rather than hoping a buyer reorders.
+    await agentCoordinator.rematchWaitingOrders(batch.cropType, actor.id, actor.simulationRunId);
     return listingDto(row);
   }));
 
@@ -658,15 +744,23 @@ export async function buildServer() {
   server.get("/v1/orders", async (request) => {
     const actor = requireRole(request, [...productRoles]);
     const query = request.query as JsonObject;
-    const rows = await prisma.order.findMany({ where: { id: { in: await visibleOrderIds(actor) }, ...(typeof query.status === "string" ? { lifecycleStatus: query.status } : {}), ...(typeof query.atRisk === "string" ? { atRisk: query.atRisk === "true" } : {}) }, orderBy: { updatedAt: "desc" }, take: queryLimit(query.limit) });
+    const visibleIds = await visibleOrderIds(actor);
+    const orderIds = typeof query.cropBatchId === "string" ? await orderIdsForCropBatch(query.cropBatchId, visibleIds) : visibleIds;
+    const rows = await prisma.order.findMany({ where: { id: { in: orderIds }, ...(typeof query.status === "string" ? { lifecycleStatus: query.status } : {}), ...(typeof query.atRisk === "string" ? { atRisk: query.atRisk === "true" } : {}) }, orderBy: { updatedAt: "desc" }, take: queryLimit(query.limit) });
     return { items: rows.map(orderDto), pageInfo };
   });
 
   server.post("/v1/orders", async (request, reply) => idempotent(request, reply, 201, async () => {
     const actor = requireRole(request, ["BUYER", "ADMIN"]);
-    const body = assertObjectBody(request.body, ["cropType", "requestedQuantity", "neededBy", "deliveryLocation", "listingIds"], ["cropType", "requestedQuantity", "neededBy", "deliveryLocation"]);
+    const body = assertObjectBody(request.body, ["cropType", "requestedQuantity", "neededBy", "deliveryLocation", "minimumAcceptableFraction", "listingIds"], ["cropType", "requestedQuantity", "neededBy", "deliveryLocation"]);
     const listingIds = body.listingIds === undefined ? [] : body.listingIds;
     if (!Array.isArray(listingIds) || !listingIds.every((id) => typeof id === "string")) throw httpError(400, "VALIDATION_FAILED", "listingIds must be an array of UUID strings.");
+    // A buyer may accept part of an order, but not an arbitrarily small part:
+    // below half the request the delivery costs more than the produce is worth.
+    const minimumAcceptableFraction = body.minimumAcceptableFraction === undefined ? 0.8 : body.minimumAcceptableFraction;
+    if (typeof minimumAcceptableFraction !== "number" || !Number.isFinite(minimumAcceptableFraction) || minimumAcceptableFraction < 0.5 || minimumAcceptableFraction > 1) {
+      throw httpError(422, "INVALID_ACCEPTANCE_THRESHOLD", "minimumAcceptableFraction must be a number between 0.5 and 1.");
+    }
     const location = readLocation(body.deliveryLocation);
     const orderId = randomUUID();
     const traceId = randomUUID();
@@ -674,9 +768,9 @@ export async function buildServer() {
     const cropType = asString(body.cropType, "cropType").toUpperCase();
     const row = await prisma.$transaction(async (tx) => {
       const cropStandard = await tx.cropStandard.findFirst({ where: { cropType, status: "PUBLISHED" }, orderBy: [{ createdAt: "desc" }, { version: "desc" }] });
-      const order = await tx.order.create({ data: { id: orderId, buyerId: actor.id, cropType, requestedQuantity, acceptedQuantity: 0, neededBy: asDate(body.neededBy, "neededBy"), latitude: location.latitude, longitude: location.longitude, listingIds, lifecycleStatus: "REQUESTED", atRisk: false, activeExceptionIds: [], cropStandardId: cropStandard?.id, traceId, simulationRunId: actor.simulationRunId } });
+      const order = await tx.order.create({ data: { id: orderId, buyerId: actor.id, cropType, requestedQuantity, committedQuantity: 0, acceptedQuantity: 0, minimumAcceptableFraction, neededBy: asDate(body.neededBy, "neededBy"), latitude: location.latitude, longitude: location.longitude, listingIds, lifecycleStatus: "REQUESTED", atRisk: false, activeExceptionIds: [], cropStandardId: cropStandard?.id, traceId, simulationRunId: actor.simulationRunId } });
       await tx.agentTrace.create({ data: { id: traceId, subjectType: "ORDER", subjectId: orderId, workflowType: "ORDER_FULFILMENT", stage: "ORDER_REQUESTED", status: "RUNNING", summary: "Validating safe supply for a buyer order.", simulationRunId: actor.simulationRunId } });
-      await tx.traceStep.create({ data: { traceId, recordedAt: operationNow(), kind: "INPUT", agentName: "Market Balance Agent", toolName: "read-order-request", provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, summary: `Buyer requested ${requestedQuantity} kg of ${order.cropType}.`, simulationRunId: actor.simulationRunId } });
+      await tx.traceStep.create({ data: { traceId, recordedAt: operationNow(), kind: "INPUT", agentName: "Market Balance Agent", toolName: "read-order-request", provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, summary: `Buyer requested ${requestedQuantity} kg of ${order.cropType} and accepts at least ${Math.round(minimumAcceptableFraction * 100)}% of it.`, simulationRunId: actor.simulationRunId } });
       await recordEvent(tx, { eventType: "ORDER_REQUESTED", actorId: actor.id, entityId: orderId, traceId, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, simulationRunId: actor.simulationRunId, payload: { orderId, cropType: order.cropType, requestedQuantity: quantity(requestedQuantity), status: "REQUESTED" } });
       return order;
     });
@@ -729,11 +823,13 @@ export async function buildServer() {
   server.post("/v1/approvals/:approvalId/decisions", async (request, reply) => idempotent(request, reply, 200, async () => {
     const actor = requireRole(request, ["FARMER", "BUYER", "COORDINATOR", "ADMIN"]);
     const { approvalId } = request.params as { approvalId: string };
-    const body = assertObjectBody(request.body, ["decision", "reason"], ["decision"]);
+    const body = assertObjectBody(request.body, ["decision", "reason", ...decisionReasonKeys], ["decision"]);
     const decision = asString(body.decision, "decision");
     const reason = typeof body.reason === "string" ? body.reason : undefined;
     if (decision !== "APPROVE" && decision !== "REJECT") throw httpError(400, "VALIDATION_FAILED", "decision must be APPROVE or REJECT.");
-    const row = await agentCoordinator.decideApproval(approvalId, actor.id, decision, reason);
+    const decisionReason = readDecisionReason(body);
+    if (decision === "REJECT") requireDecisionReason(decisionReason, "Declining a request needs a reasonCode and a nextAction so the affected participant knows what to do.");
+    const row = await agentCoordinator.decideApproval(approvalId, actor.id, decision, reason, decisionReason);
     return approvalDto(row, await approvalContext(row));
   }));
 
@@ -870,9 +966,11 @@ export async function buildServer() {
   server.post("/v1/verification-tasks/:taskId/decisions", async (request, reply) => idempotent(request, reply, 200, async () => {
     const actor = requireRole(request, ["COORDINATOR", "ADMIN"]);
     const { taskId } = request.params as { taskId: string };
-    const body = assertObjectBody(request.body, ["decision", "note"], ["decision"]);
+    const body = assertObjectBody(request.body, ["decision", "note", ...decisionReasonKeys], ["decision"]);
     const decision = asString(body.decision, "decision");
     if (!["VERIFY", "REQUEST_CHANGES"].includes(decision)) throw httpError(422, "INVALID_VERIFICATION_DECISION", "decision must be VERIFY or REQUEST_CHANGES.");
+    const decisionReason = readDecisionReason(body);
+    if (decision === "REQUEST_CHANGES") requireDecisionReason(decisionReason, "Requesting changes needs a reasonCode and a nextAction so the farmer knows what to fix.");
     const task = await prisma.verificationTask.findUnique({ where: { id: taskId } });
     const farmIds = actor.role === "ADMIN" ? [task?.farmId] : await visibleFarmIds(actor);
     if (!task || task.simulationRunId !== actor.simulationRunId || !farmIds.includes(task.farmId)) throw httpError(404, "VERIFICATION_TASK_NOT_FOUND", "Verification task was not found.");
@@ -881,7 +979,7 @@ export async function buildServer() {
     const observation = await prisma.cropObservation.findUnique({ where: { id: task.subjectId } });
     const traceId = observation?.traceId ?? randomUUID();
     const row = await prisma.$transaction(async (tx) => {
-      const updated = await tx.verificationTask.update({ where: { id: taskId }, data: { status, resolvedBy: actor.id, resolvedAt: operationNow(), note: typeof body.note === "string" ? body.note : null } });
+      const updated = await tx.verificationTask.update({ where: { id: taskId }, data: { status, resolvedBy: actor.id, resolvedAt: operationNow(), note: typeof body.note === "string" ? body.note : null, reasonCode: decisionReason.reasonCode, nextAction: decisionReason.nextAction } });
       await recordEvent(tx, {
         eventType: "VERIFICATION_DECIDED",
         actorId: actor.id,
@@ -889,7 +987,15 @@ export async function buildServer() {
         traceId,
         provenance: Provenance.OBSERVED,
         simulationRunId: actor.simulationRunId,
-        payload: { taskId, cropBatchId: task.cropBatchId, observationId: task.subjectId, status, ...(typeof body.note === "string" ? { note: body.note } : {}) },
+        payload: {
+          taskId,
+          cropBatchId: task.cropBatchId,
+          observationId: task.subjectId,
+          status,
+          ...(typeof body.note === "string" ? { note: body.note } : {}),
+          ...(decisionReason.reasonCode ? { reasonCode: decisionReason.reasonCode } : {}),
+          ...(decisionReason.nextAction ? { nextAction: decisionReason.nextAction } : {}),
+        },
       });
       return updated;
     });
@@ -1004,7 +1110,7 @@ export async function buildServer() {
   server.post("/v1/deliveries/:deliveryId/acceptance", async (request, reply) => idempotent(request, reply, 201, async () => {
     const actor = requireRole(request, ["BUYER", "ADMIN"]);
     const { deliveryId } = request.params as { deliveryId: string };
-    const body = assertObjectBody(request.body, ["outcome", "acceptedQuantity", "rejectedQuantity", "lineOutcomes", "note"], ["outcome", "acceptedQuantity", "rejectedQuantity", "lineOutcomes"]);
+    const body = assertObjectBody(request.body, ["outcome", "acceptedQuantity", "rejectedQuantity", "lineOutcomes", "note", ...decisionReasonKeys], ["outcome", "acceptedQuantity", "rejectedQuantity", "lineOutcomes"]);
     const mission = await prisma.deliveryMission.findUnique({ where: { id: deliveryId } });
     if (!mission || mission.simulationRunId !== actor.simulationRunId) throw httpError(404, "DELIVERY_NOT_FOUND", "Delivery mission was not found.");
     const order = await prisma.order.findUniqueOrThrow({ where: { id: mission.orderId } });
@@ -1016,7 +1122,15 @@ export async function buildServer() {
     if (Math.abs(accepted + rejected - mission.quantity) > 0.0001) throw httpError(422, "DELIVERY_QUANTITY_MISMATCH", "Accepted and rejected quantities must equal the delivered quantity.");
     const outcome = asString(body.outcome, "outcome");
     if (!["ACCEPTED", "PARTIALLY_ACCEPTED", "REJECTED"].includes(outcome)) throw httpError(422, "INVALID_DELIVERY_OUTCOME", "The delivery outcome is not supported.");
-    const lifecycleStatus = outcome === "ACCEPTED" ? "FULFILLED" : outcome === "PARTIALLY_ACCEPTED" ? "PARTIALLY_FULFILLED" : "REJECTED";
+    // A fully accepted delivery still leaves the order short when only part of
+    // it was ever committed, so the shortfall keeps its real cause: the supply
+    // was never there, not that the buyer refused produce on arrival.
+    const shortCommitment = order.committedQuantity > 0 && order.committedQuantity + 0.0001 < order.requestedQuantity;
+    const lifecycleStatus = outcome === "REJECTED"
+      ? "REJECTED"
+      : outcome === "PARTIALLY_ACCEPTED" || shortCommitment
+        ? "PARTIALLY_FULFILLED"
+        : "FULFILLED";
     const acceptanceId = randomUUID();
     const acceptedAt = operationNow();
     if (!Array.isArray(body.lineOutcomes) || body.lineOutcomes.length === 0) throw httpError(400, "VALIDATION_FAILED", "lineOutcomes must contain each committed crop batch.");
@@ -1025,13 +1139,17 @@ export async function buildServer() {
     const allocationLines = await prisma.allocationLine.findMany({ where: { allocationId: allocation.id } });
     const committedByBatch = new Map<string, number>();
     for (const line of allocationLines) committedByBatch.set(line.cropBatchId, (committedByBatch.get(line.cropBatchId) ?? 0) + line.quantity);
+    const sharedReason = readDecisionReason(body);
     const rawLineOutcomes = body.lineOutcomes as unknown[];
     const lineOutcomes = rawLineOutcomes.map((item, index) => {
-      const value = assertObjectBody(item, ["cropBatchId", "acceptedQuantity", "rejectedQuantity"], ["cropBatchId", "acceptedQuantity", "rejectedQuantity"]);
+      const value = assertObjectBody(item, ["cropBatchId", "acceptedQuantity", "rejectedQuantity", ...decisionReasonKeys], ["cropBatchId", "acceptedQuantity", "rejectedQuantity"]);
+      const lineReason = readDecisionReason(value, `lineOutcomes[${index}]`);
       return {
         cropBatchId: asString(value.cropBatchId, `lineOutcomes[${index}].cropBatchId`),
         accepted: readQuantity(value.acceptedQuantity, `lineOutcomes[${index}].acceptedQuantity`),
         rejected: readQuantity(value.rejectedQuantity, `lineOutcomes[${index}].rejectedQuantity`),
+        reasonCode: (lineReason.reasonCode ?? sharedReason.reasonCode) as DecisionReasonCode | null,
+        nextAction: lineReason.nextAction ?? sharedReason.nextAction,
       };
     });
     if (new Set(lineOutcomes.map((line) => line.cropBatchId)).size !== lineOutcomes.length || lineOutcomes.length !== committedByBatch.size) throw httpError(422, "DELIVERY_LINE_MISMATCH", "Provide exactly one outcome for every committed crop batch.");
@@ -1040,12 +1158,37 @@ export async function buildServer() {
       if (!line || Math.abs(line.accepted + line.rejected - committedQuantity) > 0.0001) throw httpError(422, "DELIVERY_LINE_MISMATCH", "Each line outcome must equal its committed allocation quantity.");
     }
     if (Math.abs(lineOutcomes.reduce((sum, line) => sum + line.accepted, 0) - accepted) > 0.0001 || Math.abs(lineOutcomes.reduce((sum, line) => sum + line.rejected, 0) - rejected) > 0.0001) throw httpError(422, "DELIVERY_TOTAL_MISMATCH", "Line outcomes must equal the delivery acceptance totals.");
-    const serializedLineOutcomes = lineOutcomes.map((line) => ({ cropBatchId: line.cropBatchId, acceptedQuantity: quantity(line.accepted), rejectedQuantity: quantity(line.rejected) }));
+    for (const line of lineOutcomes) {
+      if (line.rejected > 0) requireDecisionReason(line, `Rejecting produce needs a reasonCode and a nextAction so the farmer of batch ${line.cropBatchId} knows what happened and what to do next.`);
+    }
+    const rejectionReason = sharedReason.reasonCode && sharedReason.nextAction ? sharedReason : lineOutcomes.find((line) => line.rejected > 0) ?? sharedReason;
+    if (rejected > 0) requireDecisionReason(rejectionReason, "Rejecting produce needs a reasonCode and a nextAction so the affected farmer knows what happened and what to do next.");
+    const serializedLineOutcomes = lineOutcomes.map((line) => ({
+      cropBatchId: line.cropBatchId,
+      acceptedQuantity: quantity(line.accepted),
+      rejectedQuantity: quantity(line.rejected),
+      ...(line.rejected > 0 && line.reasonCode ? { reasonCode: line.reasonCode } : {}),
+      ...(line.rejected > 0 && line.nextAction ? { nextAction: line.nextAction } : {}),
+    }));
     const trace = await prisma.agentTrace.findFirst({ where: { subjectType: "ORDER", subjectId: order.id } });
     const priorEvent = await prisma.domainEvent.findFirst({ where: { traceId: trace?.id, entityId: { in: [order.id, mission.id] } }, orderBy: { occurredAt: "desc" } });
     const acceptance = await prisma.$transaction(async (tx) => {
-      const created = await tx.deliveryAcceptance.create({ data: { id: acceptanceId, orderId: order.id, outcome, acceptedQuantity: accepted, rejectedQuantity: rejected, lineOutcomes: serializedLineOutcomes, note: typeof body.note === "string" ? body.note : null, acceptedBy: actor.id, acceptedAt, simulationRunId: actor.simulationRunId } });
-      await tx.order.update({ where: { id: order.id }, data: { lifecycleStatus, acceptedQuantity: accepted, atRisk: false, activeExceptionIds: [] } });
+      const created = await tx.deliveryAcceptance.create({ data: { id: acceptanceId, orderId: order.id, outcome, acceptedQuantity: accepted, rejectedQuantity: rejected, lineOutcomes: serializedLineOutcomes, note: typeof body.note === "string" ? body.note : null, reasonCode: rejected > 0 ? rejectionReason.reasonCode : null, nextAction: rejected > 0 ? rejectionReason.nextAction : null, acceptedBy: actor.id, acceptedAt, simulationRunId: actor.simulationRunId } });
+      await tx.order.update({
+        where: { id: order.id },
+        data: {
+          lifecycleStatus,
+          acceptedQuantity: accepted,
+          atRisk: false,
+          activeExceptionIds: [],
+          outcomeCause: lifecycleStatus === "FULFILLED" ? null : rejected > 0.0001 ? "DELIVERY_REJECTED" : "INSUFFICIENT_SUPPLY",
+          outcomeNote: lifecycleStatus === "FULFILLED"
+            ? null
+            : rejected > 0.0001
+              ? `${rejected} kg of ${mission.quantity} kg rejected at delivery${rejectionReason.reasonCode ? ` (${rejectionReason.reasonCode})` : ""}${typeof body.note === "string" && body.note ? `: ${body.note}` : "."}`
+              : `Committed ${order.committedQuantity} of ${order.requestedQuantity} kg; the buyer sourced the rest elsewhere.`,
+        },
+      });
       await tx.reservation.updateMany({ where: { allocationId: { in: (await tx.allocation.findMany({ where: { orderId: order.id }, select: { id: true } })).map((row) => row.id) } }, data: { status: "RELEASED" } });
       for (const line of lineOutcomes) {
         const batch = await tx.cropBatch.findUnique({ where: { id: line.cropBatchId } });
@@ -1061,8 +1204,8 @@ export async function buildServer() {
         await tx.agentTrace.update({ where: { id: trace.id }, data: { status: "COMPLETED", stage: "DELIVERY_OUTCOME_RECORDED", summary: `Delivery finished with ${accepted} kg accepted and ${rejected} kg rejected.` } });
         await tx.traceStep.create({ data: { traceId: trace.id, recordedAt: acceptedAt, kind: "STATE_CHANGE", agentName: "Traceability Agent", toolName: "record-delivery-outcome", provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, summary: `Recorded ${outcome.toLowerCase().replaceAll("_", " ")}: ${accepted} kg accepted and ${rejected} kg rejected; reservations were released and model outcomes updated.`, simulationRunId: actor.simulationRunId } });
       }
-      const deliveryEvent = await recordEvent(tx, { eventType: "DELIVERY_ACCEPTED", actorId: actor.id, entityId: acceptanceId, traceId: trace?.id ?? randomUUID(), correlationId: priorEvent?.correlationId, causationId: priorEvent?.id, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, simulationRunId: actor.simulationRunId, payload: { deliveryId: acceptanceId, orderId: order.id, acceptedQuantity: quantity(accepted), rejectedQuantity: quantity(rejected), outcome, lineOutcomes: serializedLineOutcomes } });
-      await recordEvent(tx, { eventType: `ORDER_${lifecycleStatus}`, actorId: actor.id, entityId: order.id, traceId: trace?.id ?? randomUUID(), correlationId: deliveryEvent.correlationId, causationId: deliveryEvent.id, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, simulationRunId: actor.simulationRunId, payload: { orderId: order.id, status: lifecycleStatus, acceptedQuantity: quantity(accepted), releasedReservationQuantity: quantity(Math.max(0, order.requestedQuantity - accepted)) } });
+      const deliveryEvent = await recordEvent(tx, { eventType: "DELIVERY_ACCEPTED", actorId: actor.id, entityId: acceptanceId, traceId: trace?.id ?? randomUUID(), correlationId: priorEvent?.correlationId, causationId: priorEvent?.id, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, simulationRunId: actor.simulationRunId, payload: { deliveryId: acceptanceId, orderId: order.id, acceptedQuantity: quantity(accepted), rejectedQuantity: quantity(rejected), outcome, lineOutcomes: serializedLineOutcomes, ...(rejected > 0 && rejectionReason.reasonCode ? { reasonCode: rejectionReason.reasonCode } : {}), ...(rejected > 0 && rejectionReason.nextAction ? { nextAction: rejectionReason.nextAction } : {}) } });
+      await recordEvent(tx, { eventType: `ORDER_${lifecycleStatus}`, actorId: actor.id, entityId: order.id, traceId: trace?.id ?? randomUUID(), correlationId: deliveryEvent.correlationId, causationId: deliveryEvent.id, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, simulationRunId: actor.simulationRunId, payload: { orderId: order.id, status: lifecycleStatus, acceptedQuantity: quantity(accepted), releasedReservationQuantity: quantity(Number(Math.max(0, mission.quantity - accepted).toFixed(4))) } });
       return created;
     });
     return deliveryAcceptanceDto(acceptance);
