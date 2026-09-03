@@ -15,7 +15,7 @@ import { formatMoney, isAwaitingPayment, PAYMENT_STATUS_LABELS } from "@/lib/pay
 export default function BuyerHome() {
   const { actor } = useSession();
   const queryClient = useQueryClient();
-  const orders = useQuery({ queryKey: ["orders"], queryFn: api.orders, refetchInterval: 5_000 });
+  const orders = useQuery({ queryKey: ["orders"], queryFn: () => api.orders(), refetchInterval: 5_000 });
   const demands = useQuery({ queryKey: ["demands"], queryFn: api.demands, refetchInterval: 15_000 });
   const missions = useQuery({ queryKey: ["missions"], queryFn: () => api.missions(), refetchInterval: 5_000 });
   const orderItems = orders.data?.items ?? [];

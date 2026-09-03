@@ -5,6 +5,7 @@ import { ArrowRight, CalendarDays, MapPin, Scale, Sprout, Truck, Wallet } from "
 import Link from "next/link";
 
 import { ApprovalList } from "@/components/approval-list";
+import { DecisionExplanation, decisionReasonLabel } from "@/components/decision-reason";
 import { DeviceUpdateList, useOutbox } from "@/components/offline";
 import { OrderList } from "@/components/order-list";
 import { useSession } from "@/components/providers";
@@ -18,9 +19,11 @@ export default function FarmerHome() {
   const batches = useQuery({ queryKey: ["crop-batches"], queryFn: api.cropBatches, refetchInterval: 15_000 });
   const opportunities = useQuery({ queryKey: ["market-opportunities"], queryFn: () => api.marketOpportunities(), refetchInterval: 15_000 });
   const missions = useQuery({ queryKey: ["missions"], queryFn: () => api.missions(), refetchInterval: 5_000 });
-  const orders = useQuery({ queryKey: ["orders"], queryFn: api.orders, refetchInterval: 5_000 });
+  const orders = useQuery({ queryKey: ["orders"], queryFn: () => api.orders(), refetchInterval: 5_000 });
   const owed = summarizeMoneyOwed(orders.data?.items ?? []);
   const deviceUpdates = useOutbox();
+
+  const needsAction = (batches.data?.items ?? []).filter((batch) => batch.latestDecision);
 
   return (
     <>
@@ -42,6 +45,24 @@ export default function FarmerHome() {
             />
           </div>
           <p className="payment-disclaimer">Harvest tracks payment; it does not move money. These are the amounts hotels have agreed to pay you for produce they already accepted.</p>
+          {needsAction.length > 0 && (
+            <Card className="decision-card">
+              <SectionTitle title="What was wrong, and what to do next" detail={`${needsAction.length} crop ${needsAction.length === 1 ? "batch needs" : "batches need"} your attention`} />
+              <div className="decision-list">
+                {needsAction.map((batch) => (
+                  <Link className="decision-row" href={`/crops/${batch.cropBatchId}`} key={batch.cropBatchId}>
+                    <div>
+                      <Badge tone="high">{decisionReasonLabel(batch.latestDecision?.reasonCode)}</Badge>
+                      <h3>{titleCase(batch.cropType)}</h3>
+                      <p>{batch.latestDecision?.source === "DELIVERY" ? "A buyer did not accept part of this crop at delivery." : "A coordinator asked for changes to this crop update."}</p>
+                      {batch.latestDecision && <DecisionExplanation decision={batch.latestDecision} title={`Recorded ${formatDate(batch.latestDecision.decidedAt)}`} />}
+                    </div>
+                    <ArrowRight size={18} />
+                  </Link>
+                ))}
+              </div>
+            </Card>
+          )}
           <div className="dashboard-grid">
             <Card>
               <SectionTitle title="My crops" detail="Update at any time" />

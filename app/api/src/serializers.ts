@@ -62,7 +62,16 @@ export function orderPaymentDto(
   };
 }
 
-export function cropBatchDto(row: CropBatch, verificationStatus = "UNVERIFIED") {
+/** Latest actionable rejection shown to the farmer who owns the batch. */
+export interface BatchDecision {
+  source: "VERIFICATION" | "DELIVERY";
+  decidedAt: Date;
+  reasonCode: string | null;
+  nextAction: string | null;
+  note: string | null;
+}
+
+export function cropBatchDto(row: CropBatch, verificationStatus = "UNVERIFIED", latestDecision?: BatchDecision) {
   return {
     cropBatchId: row.id,
     farmId: row.farmId,
@@ -73,6 +82,17 @@ export function cropBatchDto(row: CropBatch, verificationStatus = "UNVERIFIED") 
     availableToPromise: quantity(row.availableToPromise),
     provenance: row.provenance,
     verificationStatus,
+    ...(latestDecision
+      ? {
+          latestDecision: {
+            source: latestDecision.source,
+            decidedAt: latestDecision.decidedAt.toISOString(),
+            ...(latestDecision.reasonCode ? { reasonCode: latestDecision.reasonCode } : {}),
+            ...(latestDecision.nextAction ? { nextAction: latestDecision.nextAction } : {}),
+            ...(latestDecision.note ? { note: latestDecision.note } : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -166,6 +186,8 @@ export function approvalDto(row: Approval, context?: Record<string, unknown>) {
     ...(row.decidedBy ? { decidedBy: row.decidedBy } : {}),
     ...(row.decidedAt ? { decidedAt: row.decidedAt.toISOString() } : {}),
     ...(row.reason ? { reason: row.reason } : {}),
+    ...(row.reasonCode ? { reasonCode: row.reasonCode } : {}),
+    ...(row.nextAction ? { nextAction: row.nextAction } : {}),
     ...(context ? { context } : {}),
   };
 }
@@ -248,6 +270,8 @@ export function verificationTaskDto(row: VerificationTask) {
     ...(row.resolvedBy ? { resolvedBy: row.resolvedBy } : {}),
     ...(row.resolvedAt ? { resolvedAt: row.resolvedAt.toISOString() } : {}),
     ...(row.note ? { note: row.note } : {}),
+    ...(row.reasonCode ? { reasonCode: row.reasonCode } : {}),
+    ...(row.nextAction ? { nextAction: row.nextAction } : {}),
   };
 }
 
@@ -270,6 +294,8 @@ export function deliveryAcceptanceDto(row: DeliveryAcceptance) {
     rejectedQuantity: quantity(row.rejectedQuantity),
     lineOutcomes: row.lineOutcomes,
     ...(row.note ? { note: row.note } : {}),
+    ...(row.reasonCode ? { reasonCode: row.reasonCode } : {}),
+    ...(row.nextAction ? { nextAction: row.nextAction } : {}),
     acceptedBy: row.acceptedBy,
     acceptedAt: row.acceptedAt.toISOString(),
   };

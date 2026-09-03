@@ -19,7 +19,7 @@ export default function CoordinatorHome() {
   const exceptions = useQuery({ queryKey: ["exceptions"], queryFn: api.exceptions, refetchInterval: 5_000 });
   const batches = useQuery({ queryKey: ["crop-batches"], queryFn: api.cropBatches, refetchInterval: 15_000 });
   const verification = useQuery({ queryKey: ["verification-tasks", "OPEN"], queryFn: () => api.verificationTasks("OPEN"), refetchInterval: 5_000 });
-  const orders = useQuery({ queryKey: ["orders"], queryFn: api.orders, refetchInterval: 15_000 });
+  const orders = useQuery({ queryKey: ["orders"], queryFn: () => api.orders(), refetchInterval: 15_000 });
   const exceptionDetail = useQuery({ queryKey: ["exception", selectedExceptionId], queryFn: () => api.exception(selectedExceptionId!), enabled: Boolean(selectedExceptionId), refetchInterval: 5_000 });
   const decideVerification = useMutation({
     mutationFn: ({ taskId, decision }: { taskId: string; decision: "VERIFY" | "REQUEST_CHANGES" }) => api.decideVerificationTask(taskId, decision),
