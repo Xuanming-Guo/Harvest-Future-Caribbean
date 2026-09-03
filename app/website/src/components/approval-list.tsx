@@ -13,6 +13,9 @@ import { Badge, Card, EmptyState, ErrorState, LoadingState, SectionTitle } from 
 /** `embedded` drops the card shell when the caller already provides one. */
 export function ApprovalList({ compact = false, embedded = false }: { compact?: boolean; embedded?: boolean }) {
   const queryClient = useQueryClient();
+  const [decliningId, setDecliningId] = useState<string | null>(null);
+  const [reasonCode, setReasonCode] = useState<DecisionReasonCode | null>(null);
+  const [nextAction, setNextAction] = useState("");
   const online = useOnlineStatus();
   const [decliningId, setDecliningId] = useState<string | null>(null);
   const [reasonCode, setReasonCode] = useState<DecisionReasonCode | null>(null);
@@ -43,7 +46,6 @@ export function ApprovalList({ compact = false, embedded = false }: { compact?: 
 
   // The Product API refuses a decline without a reason and a next action.
   const declineBlocked = !reasonCode || !nextAction.trim();
-
   const body = (
     <>
       <div className="task-list">
@@ -56,7 +58,7 @@ export function ApprovalList({ compact = false, embedded = false }: { compact?: 
               {!compact && <small>Requested {formatDate(approval.requestedAt)}</small>}
             </div>
             <div className="inline-actions">
-              <button className="button button-danger" disabled={decision.isPending} aria-disabled={!online || undefined} onClick={() => { if (!online) return; if (decliningId === approval.approvalId) closeDecline(); else setDecliningId(approval.approvalId); }}><X size={16} />Decline</button>
+              <button className="button button-danger" disabled={decision.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) { if (decliningId === approval.approvalId) closeDecline(); else setDecliningId(approval.approvalId); } }}><X size={16} />Decline</button>
               <button className="button" disabled={decision.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) decision.mutate({ id: approval.approvalId, value: "APPROVE" }); }}><Check size={16} />Approve</button>
             </div>
             {decliningId === approval.approvalId && (
@@ -75,7 +77,7 @@ export function ApprovalList({ compact = false, embedded = false }: { compact?: 
                 />
                 <div className="field-full inline-actions decline-actions">
                   <button className="button button-quiet" disabled={decision.isPending} onClick={closeDecline} type="button">Cancel</button>
-                  <button className="button button-danger" disabled={decision.isPending || declineBlocked} onClick={() => decision.mutate({ id: approval.approvalId, value: "REJECT" })} type="button"><X size={16} />Confirm decline</button>
+                  <button className="button button-danger" disabled={decision.isPending || declineBlocked || !online} aria-disabled={!online || undefined} onClick={() => { if (online) decision.mutate({ id: approval.approvalId, value: "REJECT" }); }} type="button"><X size={16} />Confirm decline</button>
                 </div>
                 {declineBlocked && <p className="form-error field-full">Choose a reason and say what should happen next before declining.</p>}
               </div>

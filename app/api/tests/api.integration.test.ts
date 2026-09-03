@@ -21,6 +21,19 @@ function auth(persona: string) {
   return { authorization: `Bearer ${tokens[persona]}` };
 }
 
+/** The OrderOutcomeCause vocabulary declared in contracts/openapi.yaml. */
+const ORDER_OUTCOME_CAUSES = [
+  "NO_READY_SUPPLY",
+  "INSUFFICIENT_SUPPLY",
+  "SUPPLY_CHANGED",
+  "APPROVAL_REJECTED",
+  "APPROVAL_TIMEOUT",
+  "MISSION_LATE",
+  "DELIVERY_REJECTED",
+  "CANCELLED",
+  "HORIZON_TRUNCATED",
+];
+
 function mutationHeaders(persona: string, prefix: string) {
   return { ...auth(persona), "idempotency-key": `${prefix}-${randomUUID()}` };
 }
@@ -500,11 +513,21 @@ describe("participant Product API", () => {
       evidenceLabel: expect.stringContaining("SYNTHETIC"),
     });
     expect(created.json().frameCount).toBeGreaterThan(20);
-    // Exact frame and event counts are recorded in docs/simulation_api_local_testing.md
-    // and re-recorded whenever the engine or Product API changes; the determinism
-    // checks below are what guard the run, so a hard-coded count here would only
-    // fail every time the world legitimately moves.
+    // Exact frame, event, and action counts are recorded in
+    // docs/simulation_api_local_testing.md and re-recorded whenever the engine or
+    // Product API changes; the determinism and arithmetic checks below are what
+    // guard the run, so a hard-coded count here would only fail every time the
+    // world legitimately moves.
     expect(created.json().metrics.eventsProcessed).toBeGreaterThan(20);
+    expect(created.json().metrics.totalAcceptedKg).toBeGreaterThan(0);
+    // Every action the run attempted against the Product API was accepted, and
+    // each accepted action recorded at least one domain event. That is the
+    // invariant the recorded counts were really guarding.
+    const productActions = created.json().metrics.productActions;
+    expect(productActions.attempted).toBeGreaterThan(0);
+    expect(productActions.succeeded).toBe(productActions.attempted);
+    expect(productActions.rejected).toBe(0);
+    expect(productActions.domainEventsCreated).toBeGreaterThanOrEqual(productActions.succeeded);
     const runId = created.json().runId as string;
 
     const replayedRequest = await server.inject({ method: "POST", url: "/v1/simulation-runs", headers, payload });
@@ -535,23 +558,41 @@ describe("participant Product API", () => {
     expect(timeline.json().frames.every((frame: { operationsSnapshot?: unknown }) => frame.operationsSnapshot)).toBe(true);
     const finalFrame = timeline.json().frames.at(-1);
     expect(finalFrame).toMatchObject({ eventType: "RUN_SETTLED", at: created.json().endedAt });
-    const finalOutcomes = finalFrame.operationsSnapshot.orderOutcomes;
+    const finalSnapshot = finalFrame.operationsSnapshot;
+    const finalOutcomes = finalSnapshot.orderOutcomes;
     expect(finalOutcomes.total).toBeGreaterThan(0);
     expect(finalOutcomes.fulfilled + finalOutcomes.partiallyFulfilled + finalOutcomes.unfulfilled + finalOutcomes.pending).toBe(finalOutcomes.total);
-    // Every recorded outcome cause is one the catalogue defines, and the causes
-    // account for exactly the orders that did not finish whole.
-    expect(Object.keys(finalOutcomes.causes ?? {}).every((cause) => ["DELIVERY_REJECTED", "HORIZON_TRUNCATED", "INSUFFICIENT_SUPPLY", "NO_READY_SUPPLY"].includes(cause))).toBe(true);
-    expect(Object.values(finalOutcomes.causes ?? {}).reduce((sum: number, count) => sum + Number(count), 0)).toBe(finalOutcomes.partiallyFulfilled + finalOutcomes.unfulfilled);
-    // Payment behaviour is asserted by its arithmetic, not by a recorded count:
-    // synthetic buyers pay on simulated 7-day terms, so every settled order
-    // carries that term and the overdue count returns to zero once they land.
-    const overduePerFrame = timeline.json().frames.map((frame: { operationsSnapshot?: { paymentOverdueCount?: number } }) => frame.operationsSnapshot?.paymentOverdueCount ?? 0);
-    expect(finalFrame.operationsSnapshot.paymentOverdueCount).toBe(0);
-    expect(Math.max(...overduePerFrame)).toBeGreaterThan(0);
+    // Every order that did not fully settle carries exactly one cause, and each
+    // cause is one the contract names. The counts themselves are recorded in
+    // docs/simulation_api_local_testing.md rather than pinned here.
+    const causeCounts = finalOutcomes.causes as Record<string, number>;
+    expect(Object.values(causeCounts).reduce((sum, count) => sum + count, 0)).toBe(finalOutcomes.partiallyFulfilled + finalOutcomes.unfulfilled);
+    expect(Object.keys(causeCounts).every((cause) => ORDER_OUTCOME_CAUSES.includes(cause))).toBe(true);
+    // The engine no longer raises demand it cannot settle inside the run window,
+    // so no order can be truncated by the horizon.
+    expect(causeCounts.HORIZON_TRUNCATED ?? 0).toBe(0);
+    // The Product API's delivery acceptances are what the engine applies back to
+    // physical state, so the projection and the engine metric agree.
+    expect(finalSnapshot.deliveryAcceptedKg).toBe(created.json().metrics.totalAcceptedKg);
+    expect(finalSnapshot.openDemands).toBe(finalOutcomes.total);
+    expect(finalSnapshot.completedMissionCount).toBeGreaterThan(0);
+    expect(finalSnapshot.approvedCommitmentCount).toBeGreaterThanOrEqual(finalSnapshot.completedMissionCount);
+    // Payment behaviour is asserted by its arithmetic rather than by recorded
+    // counts, which live in docs/simulation_api_local_testing.md. Synthetic
+    // buyers order on simulated 7-day terms and pay once their wait elapses, so
+    // nothing is paid for that was never delivered and the overdue count is back
+    // to zero by the horizon.
+    const overduePerFrame = timeline.json().frames.map((frame: { operationsSnapshot?: { paymentOverdueCount?: number } }) => frame.operationsSnapshot?.paymentOverdueCount);
+    expect(overduePerFrame.every((count: number | undefined) => typeof count === "number")).toBe(true);
+    expect(overduePerFrame.at(-1)).toBe(finalSnapshot.paymentOverdueCount);
+    expect(finalSnapshot.paymentOverdueCount).toBe(0);
     const paymentConfirmations = await prisma.domainEvent.count({ where: { simulationRunId: runId, eventType: "PAYMENT_CONFIRMED" } });
-    expect(paymentConfirmations).toBeGreaterThan(0);
     const settled = await prisma.order.findMany({ where: { simulationRunId: runId, paidAt: { not: null } }, select: { paymentTermsDays: true } });
     expect(settled).toHaveLength(paymentConfirmations);
+    // A buyer can only pay for produce it accepted, and every order that ever
+    // ran late was settled, because none is still overdue at the horizon.
+    expect(settled.length).toBeLessThanOrEqual(finalOutcomes.fulfilled + finalOutcomes.partiallyFulfilled);
+    expect(Math.max(...(overduePerFrame as number[]))).toBeLessThanOrEqual(paymentConfirmations);
     expect(settled.every((order) => order.paymentTermsDays === 7)).toBe(true);
     for (const forbidden of ["potentialYieldKg", "qualityFraction", "dailySpoilageRate", "severity"]) {
       expect(timeline.body).not.toContain(forbidden);
@@ -1058,8 +1099,8 @@ describe("payment terms and status (#74)", () => {
         acceptedQuantity: { value: acceptedKg, unit: "kg" },
         rejectedQuantity: { value: rejectedKg, unit: "kg" },
         lineOutcomes: [{ cropBatchId: anaBatchId, acceptedQuantity: { value: acceptedKg, unit: "kg" }, rejectedQuantity: { value: rejectedKg, unit: "kg" } }],
-        // Rejecting produce needs an actionable reason (#75), so a priced
-        // delivery that is short still tells the farmer what to do next.
+        // The Product API refuses a rejection without an actionable reason, so a
+        // priced delivery that is short still tells the farmer what to do next.
         ...(rejectedKg > 0 ? { reasonCode: "MATURITY_OR_QUALITY", nextAction: "Harvest one day later so the fruit reaches full size." } : {}),
       },
     });

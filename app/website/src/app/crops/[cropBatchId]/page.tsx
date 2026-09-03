@@ -23,7 +23,6 @@ import {
   type ObservationBody,
   type OutboxItem,
 } from "@/lib/outbox";
-
 /** A queued write is a success for the farmer, so both paths share one result. */
 type SubmitResult = { queued: boolean };
 
@@ -46,6 +45,12 @@ export default function CropDetailPage() {
   const [message, setMessage] = useState<string | null>(null);
 
   const batch = useQuery({ queryKey: ["crop-batch", cropBatchId], queryFn: () => api.cropBatch(cropBatchId), refetchInterval: 15_000 });
+  const standards = useQuery({
+    queryKey: ["crop-standards", batch.data?.cropType],
+    queryFn: () => api.cropStandards(batch.data!.cropType),
+    enabled: Boolean(batch.data?.cropType),
+    refetchInterval: 15_000,
+  });
   // Composed client-side from existing read endpoints. No new endpoint, and no
   // private farm coordinates are exposed here.
   const journey = useQuery({
@@ -61,12 +66,6 @@ export default function CropDetailPage() {
       }));
     },
     refetchInterval: 30_000,
-  });
-  const standards = useQuery({
-    queryKey: ["crop-standards", batch.data?.cropType],
-    queryFn: () => api.cropStandards(batch.data!.cropType),
-    enabled: Boolean(batch.data?.cropType),
-    refetchInterval: 15_000,
   });
   const prediction = useQuery({
     queryKey: ["prediction", batch.data?.latestPredictionId],

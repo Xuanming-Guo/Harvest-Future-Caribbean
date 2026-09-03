@@ -76,13 +76,13 @@ export default function OrderDetailPage() {
   if (!order.data) return <LoadingState label="Loading order..." />;
   const lifecycle = lifecycleFor(order.data.lifecycleStatus);
   const currentIndex = lifecycle.indexOf(order.data.lifecycleStatus);
+  const appliedStandard = standards.data?.items.find((standard) => standard.standardId === order.data.cropStandardId);
   const requested = order.data.requestedQuantity.value;
   const committed = order.data.committedQuantity.value;
   // Only worth saying once something is actually committed and it is short.
   const partialCommitment = committed > 0 && committed + 0.0001 < requested;
   const committedSummary = `Committed ${committed} of ${requested} kg (${Math.round((committed / requested) * 100)}%)`;
   const payment = order.data.payment;
-  const appliedStandard = standards.data?.items.find((standard) => standard.standardId === order.data.cropStandardId);
 
   return (
     <>
@@ -175,6 +175,7 @@ export default function OrderDetailPage() {
             {rejected > 0 && (
               <DecisionReasonFields
                 idPrefix="delivery"
+                disabled={!online || acceptance.isPending}
                 nextAction={nextAction}
                 onNextAction={setNextAction}
                 onReasonCode={setReasonCode}
@@ -183,9 +184,9 @@ export default function OrderDetailPage() {
               />
             )}
             <div className="field field-full"><label htmlFor="acceptance-note">Note (optional)</label><textarea id="acceptance-note" rows={2} value={note} onChange={(event) => setNote(event.target.value)} /></div>
-            {reasonMissing && <p className="form-error field-full">Choose a reason and say what the farmer should do next before recording a rejection.</p>}
             {!online && <div className="field-full"><OfflineHint>Accepting a delivery settles what was received, so it is never queued. Reconnect to confirm.</OfflineHint></div>}
-            <button className="button field-full" aria-disabled={!online || undefined} disabled={acceptance.isPending || reasonMissing || Math.abs(accepted + rejected - mission.quantity.value) > 0.0001 || resolvedLines.some((line) => Math.abs(line.accepted + line.rejected - line.quantity) > 0.0001)}><CheckCircle2 size={17} />Confirm delivery</button>
+            {reasonMissing && <p className="form-error field-full">Choose a reason and say what the farmer should do next before recording a rejection.</p>}
+            <button className="button field-full" aria-disabled={!online || undefined} disabled={acceptance.isPending || !online || reasonMissing || Math.abs(accepted + rejected - mission.quantity.value) > 0.0001 || resolvedLines.some((line) => Math.abs(line.accepted + line.rejected - line.quantity) > 0.0001)}><CheckCircle2 size={17} />Confirm delivery</button>
           </form>
           {(message || acceptance.error) && <p className={acceptance.error ? "form-error" : "form-success"}>{message ?? acceptance.error?.message}</p>}
         </Card>

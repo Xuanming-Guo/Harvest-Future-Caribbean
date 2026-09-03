@@ -123,10 +123,11 @@ $run | Select-Object runId, status, policy, decisionMode,
   decisionAdapter, frameCount, decisionCount, metrics
 ```
 
-Expected engine values for seed `42`, re-recorded from a real run on the
-integrated #53 stack. The connected-run test asserts determinism and outcome
-arithmetic rather than these exact counts, so a legitimate change to the world
-does not fail CI; when the counts move, re-record them here from a real run:
+Expected engine values for seed `42`, re-recorded from a real run after the
+horizon clamp and payment tracking. These move whenever the engine or the Product API changes, so
+the connected-run test checks determinism, outcome arithmetic, and the cause
+vocabulary rather than pinning these counts; this document is where the counts
+themselves are kept:
 
 ```text
 status            COMPLETED
@@ -148,10 +149,10 @@ succeeded             125
 rejected                0
 domainEventsCreated   201
 activeListings          5
-openDemands             8
-totalOrders             8
-activeMissions          0
-openExceptions          0
+openDemands              8
+totalOrders              8
+activeMissions           0
+openExceptions           0
 ```
 
 The final Product API outcome summary is separate from the physical engine
@@ -196,58 +197,60 @@ INSUFFICIENT_SUPPLY        2
 NO_READY_SUPPLY            2
 ```
 
-`HORIZON_TRUNCATED` no longer appears for seed `42`. It marked an order whose
-deadline fell after the 21-day scenario horizon, so the run window closed
-before the order could be observed either way. The horizon clamp (#69) stops
-that demand being raised at all, so the cause is still defined and still
-reported when a deadline is truncated; this scenario simply no longer produces
-one. The remaining causes still account for every unfulfilled or partially
-fulfilled order.
+`HORIZON_TRUNCATED` no longer appears. The engine used to raise orders whose
+deadline fell after the 21-day scenario horizon, and the run window closed
+before they could be observed either way; a buyer now withholds such an order
+instead of raising one it cannot settle. The classification stays in the
+Product API as a guard, so a scenario or an injected effect that does produce
+such an order still gets it named rather than recorded as an operational
+failure.
 
 ### Where the seed-42 numbers came from
 
-Every figure above is read from a real run, never edited by hand. The three
+Every figure above is read from a real run, never edited by hand. The five
 columns show what each change to the fulfilment path moved:
 
-| Value | Before the #53 fixes | After readiness/expiry/re-match | After safe partial commitment | After payment tracking | Integrated #53 stack |
+| Value | Before the #53 fixes | After readiness/expiry/re-match | After safe partial commitment | After the horizon clamp | After payment tracking |
 |---|---|---|---|---|---|
-| `frameCount` | 130 | 119 | 127 | 129 | 119 |
-| `eventsProcessed` | 82 | 76 | 80 | 80 | 76 |
-| `productActions.attempted` | 154 | 140 | 151 | 153 | 125 |
-| `productActions.domainEventsCreated` | 242 | 222 | 238 | 240 | 201 |
-| `activeListings` | 7 | 3 | 3 | 3 | 5 |
-| total orders | 11 | 11 | 11 | 11 | 8 |
-| fulfilled | 2 | 3 | 4 | 4 | 3 |
-| partially fulfilled | 0 | 2 | 2 | 2 | 1 |
-| unfulfilled | 8 | 5 | 5 | 5 | 4 |
+| `frameCount` | 130 | 119 | 127 | 117 | 119 |
+| `eventsProcessed` | 82 | 76 | 80 | 76 | 76 |
+| `productActions.attempted` | 154 | 140 | 151 | 123 | 125 |
+| `productActions.domainEventsCreated` | 242 | 222 | 238 | 199 | 201 |
+| `activeListings` | 7 | 3 | 3 | 5 | 5 |
+| total orders | 11 | 11 | 11 | 8 | 8 |
+| fulfilled | 2 | 3 | 4 | 3 | 3 |
+| partially fulfilled | 0 | 2 | 2 | 1 | 1 |
+| unfulfilled | 8 | 5 | 5 | 4 | 4 |
 | pending | 1 | 1 | 0 | 0 | 0 |
-| approved commitments | 8 | 5 | 7 | 7 | 5 |
-| completed missions | 8 | 5 | 7 | 7 | 5 |
-| `deliveryAcceptedKg` | 359 | 1387.75 | 1545.13 | 1545.13 | 1000.63 |
-| overdue payments at run end | n/a | n/a | n/a | 0 | 0 |
-| frames showing an overdue payment | n/a | n/a | n/a | 19 | 19 |
+| approved commitments | 8 | 5 | 7 | 5 | 5 |
+| completed missions | 8 | 5 | 7 | 5 | 5 |
+| `deliveryAcceptedKg` | 359 | 1387.75 | 1545.13 | 1000.63 | 1000.63 |
+| overdue payments at run end | n/a | n/a | n/a | n/a | 0 |
+| frames showing an overdue payment | n/a | n/a | n/a | n/a | 19 |
 
 The first column is the pre-#53 baseline this document recorded before the
 readiness fixes, when unready crop was still listable, so eight commitments
 were approved but only 359 kg survived to delivery. The second column is the
 readiness, expiry, and re-match fixes. The third adds safe partial commitment:
 two more orders reach a commitment they would previously have waited out, and
-the horizon-truncated order now carries a cause instead of sitting in
-`pending`. The fourth column adds payment tracking: two synthetic buyers record
-paying a delivered order, which is two more product actions, two more domain
-events, and two more agent-cycle checkpoint frames. No physical outcome moves,
-because recording a payment mutates no world state, and giving the synthetic
-buyers 7-day terms changes none of these totals either: it changes only which
-payment status those same orders report.
+the horizon-truncated order carries a cause instead of sitting in `pending`.
 
-The last column is the integrated stack, re-recorded on a fresh database with
-every branch merged. Eleven orders become eight because of the horizon clamp
-(#69): demand whose deadline falls past the 21-day scenario horizon is no
-longer raised, so three orders that previously existed only to be truncated are
-never created. Fewer orders means fewer commitments, missions and delivered
-kilograms, and the `HORIZON_TRUNCATED` cause disappears with the demand that
-produced it. Payment behaviour is unchanged: two buyers still settle inside the
-window and the overdue count still rises and falls across nineteen frames.
+The fourth column is the horizon clamp, and it is the only one of the five
+that changes the world rather than how the world is handled. Three of the eleven
+orders are no longer raised at all, because their deadline fell outside the
+run window, so every downstream count drops with them: fewer orders means less
+demand, fewer commitments, fewer missions, and less delivered weight. Read the
+column as a smaller order book, not as a regression. The rate is what survives
+the comparison, and it holds: 4 of 11 fully met before, 3 of 8 after, with one
+partial on each side. `activeListings` rises because supply that would have
+been committed to a withheld order stays on the marketplace instead.
+
+The last column adds payment tracking on top of that smaller order book: two
+synthetic buyers record paying a delivered order, which is two more product
+actions, two more domain events, and two more agent-cycle checkpoint frames.
+No physical outcome moves, because recording a payment mutates no world state,
+and giving the synthetic buyers 7-day terms changes none of these totals
+either: it changes only which payment status those same orders report.
 
 `deliveryAcceptedKg` is the sum of the five immutable delivery acceptances,
 not the engine's `totalAcceptedKg`. The control room uses this Product API
