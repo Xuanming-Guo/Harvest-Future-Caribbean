@@ -226,6 +226,38 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .verification-grid strong, .verification-grid small { display: block; }
 .verification-grid small { color: var(--muted); }
 
+.farm-map { position: relative; width: 100%; aspect-ratio: 800 / 480; overflow: hidden; border-radius: 14px; background: var(--mint); }
+.farm-map-field { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.farm-horizon { fill: var(--mint); opacity: .4; }
+.farm-fence polyline { fill: none; stroke: var(--forest-dark); stroke-width: 2.5; opacity: .5; }
+.farm-fence line { stroke: var(--forest-dark); stroke-width: 2.5; opacity: .5; }
+.farm-plot-resting { fill: none; stroke: var(--line); stroke-width: 2; stroke-dasharray: 5 5; opacity: .6; }
+.farm-tree-trunk { fill: var(--forest-dark); }
+.farm-tree-back { fill: var(--forest); }
+.farm-tree-front { fill: var(--leaf); opacity: .92; }
+.farm-map-plots { position: absolute; inset: 0; }
+.farm-plot { position: absolute; display: block; min-width: 44px; min-height: 34px; transform: translate(-50%, -50%); border-radius: 10px; outline-offset: 3px; }
+.farm-plot:focus-visible { outline: 3px solid var(--forest); outline-offset: 4px; }
+.farm-plot svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.farm-plot-shadow { fill: var(--ink); opacity: .14; }
+.farm-plot-shape { stroke: var(--line); stroke-width: 2.5; }
+.farm-plot-furrows line { stroke: var(--ink); stroke-width: 1.6; opacity: .16; }
+.farm-plot-planned .farm-plot-shape { fill: var(--cream); }
+.farm-plot-growing .farm-plot-shape { fill: var(--mint); stroke: var(--leaf); }
+.farm-plot-harvest-ready .farm-plot-shape { fill: var(--mint); stroke: var(--forest); stroke-width: 3.5; }
+.farm-plot-harvested .farm-plot-shape { fill: var(--cream); stroke: var(--muted); }
+.farm-plot-closed { opacity: .55; }
+.farm-plot-closed .farm-plot-shape { fill: var(--line); stroke: var(--muted); }
+.farm-plot-sprouts line { stroke: var(--leaf); stroke-width: 3; stroke-linecap: round; }
+.farm-plot-crop circle { fill: var(--leaf); stroke: var(--forest); stroke-width: 1.5; }
+.farm-plot-stubble line { stroke: var(--muted); stroke-width: 2.5; stroke-linecap: round; }
+.farm-plot-soil circle { fill: var(--muted); opacity: .6; }
+.farm-badge { fill: var(--amber); stroke: var(--cream); stroke-width: 2.5; }
+.farm-truck { transform-box: fill-box; transform-origin: center; animation: farm-truck-drift 2.6s ease-in-out infinite; }
+@keyframes farm-truck-drift { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(10px); } }
+.farm-legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 2px; }
+.farm-list { display: none; }
+
 .state-panel, .empty-state, .full-page-state { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 130px; padding: 25px; color: var(--muted); text-align: center; }
 .state-panel { flex-direction: column; border: 1px dashed #c8d6cc; border-radius: 14px; }
 .state-panel.error { color: var(--red); background: #fff8f6; }
@@ -295,6 +327,7 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
   .main-column main { padding: 30px 20px 55px; }
   .dashboard-grid, .two-column, .marketplace-layout { grid-template-columns: 1fr; }
   .sticky-card { position: static; }
+  .farm-list { display: grid; }
   .sign-in-page { grid-template-columns: 1fr; padding: 30px 20px !important; }
   .sign-in-page::before { inset: 0 0 48% 0; }
   .sign-in-copy .eyebrow { margin-top: 30px; }
