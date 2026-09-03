@@ -181,6 +181,25 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .forecast-range .forecast-main small { color: rgba(255,255,255,.7); }
 .split { display: flex; justify-content: space-between; align-items: center; gap: 15px; padding-bottom: 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .notice { display: grid; gap: 3px; padding: 12px; border-radius: 9px; color: #7d5710; background: #fff4da; font-size: 12px; }
+.crop-standard-card { display: grid; gap: 18px; }
+.crop-standard-card .section-title { margin-bottom: 0; }
+.crop-standard-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 9px 16px; color: var(--muted); font-size: 12px; }
+.crop-standard-source { margin-top: -7px; }
+.crop-standard-checklist { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.crop-standard-checklist li { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 11px; padding: 12px; border-radius: 10px; background: var(--cream); }
+.crop-standard-checklist svg { margin-top: 2px; color: var(--leaf); }
+.crop-standard-checklist strong, .crop-standard-checklist small { display: block; }
+.crop-standard-checklist small { margin-top: 3px; color: var(--muted); line-height: 1.45; }
+.crop-standard-toggle { width: 100%; min-height: 44px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; padding: 10px 13px; border: 1px solid var(--line); border-radius: 10px; color: var(--forest); background: var(--mint); font-weight: 800; text-align: left; cursor: pointer; }
+.crop-standard-toggle:hover { border-color: #aac9b7; }
+.crop-standard-toggle:focus-visible { outline: 3px solid rgba(91,166,75,.3); outline-offset: 2px; }
+.crop-standard-toggle .open { transform: rotate(180deg); }
+.crop-standard-guidance { display: grid; gap: 14px; }
+.crop-standard-guidance article { padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.crop-standard-guidance article:last-child { padding-bottom: 0; border-bottom: 0; }
+.crop-standard-guidance p { margin: 5px 0 8px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.crop-standard-guidance .text-link { font-size: 12px; }
+.crop-standard-applied { padding: 10px 12px; border-radius: 9px; background: var(--mint); font-size: 13px; }
 .info-list { display: grid; gap: 13px; }
 .info-list > div { display: flex; gap: 12px; align-items: center; padding: 12px; border-radius: 10px; background: var(--cream); }
 .info-list svg { color: var(--forest); }

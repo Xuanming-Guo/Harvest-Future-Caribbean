@@ -1,7 +1,9 @@
+import type { ApiSchema } from "@harvest/shared";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { CropStandardCard } from "@/components/crop-standard-card";
 import { DecisionExplanation, ReasonChooser, decisionReasonCodes, decisionReasonLabel } from "@/components/decision-reason";
 import { Badge, Disclosure, MoreDetail } from "@/components/ui";
 import { consumeDevelopmentPersona, currentActor, developmentPersonaFromHash, roleHome } from "@/lib/api";
@@ -29,6 +31,31 @@ describe("website presentation helpers", () => {
     expect(compactId("20202020-2020-4020-8020-202020202020")).toBe("20202020...");
     expect(formatPercent(0.7)).toBe("70%");
     expect(titleCase("MODEL_PREDICTED")).toBe("Model Predicted");
+  });
+
+  it("renders a sourced buyer checklist and reveals farmer guidance", () => {
+    const standard = {
+      standardId: "57575757-5757-4757-8757-575757575701",
+      cropType: "CUCUMBER",
+      publisherActorId: "a0000000-0000-4000-8000-000000000002",
+      publisherName: "Bay Gardens Hotel",
+      version: 2,
+      status: "PUBLISHED",
+      reviewedAt: "2026-09-03T12:00:00Z",
+      geography: "Saint Lucia",
+      source: { title: "Cucumber quality reference", url: "https://example.com/cucumber-quality", licence: "Reference licence", retrievedAt: "2026-09-03" },
+      checklist: [{ key: "SIZE_AND_GRADE", requirement: "Keep each package uniform in size." }],
+      images: [],
+      guidance: [{ topic: "HARVEST_READINESS", text: "Harvest while fruit is firm and green.", source: { title: "Harvest guide", url: "https://example.com/cucumber-harvest", retrievedAt: "2026-09-03" } }],
+    } satisfies ApiSchema<"CropStandard">;
+
+    render(<CropStandardCard standard={standard} />);
+    expect(screen.getByRole("heading", { name: "What buyers expect" })).toBeInTheDocument();
+    expect(screen.getByText("Bay Gardens Hotel v2")).toBeInTheDocument();
+    expect(screen.getByText("Keep each package uniform in size.")).toBeInTheDocument();
+    expect(screen.queryByText("Harvest while fruit is firm and green.")).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Growing and harvest guidance" }));
+    expect(screen.getByText("Harvest while fruit is firm and green.")).toBeVisible();
   });
 
   it("maps each participant role to its own workspace", () => {
