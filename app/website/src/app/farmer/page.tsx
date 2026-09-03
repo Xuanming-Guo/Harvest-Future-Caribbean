@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, CalendarDays, MapPin, Scale, Sprout, Truck } from "lucide-react";
+import { ArrowRight, CalendarDays, MapPin, Scale, Sprout, Truck, Wallet } from "lucide-react";
 import Link from "next/link";
 
 import { ApprovalList } from "@/components/approval-list";
@@ -10,12 +10,15 @@ import { useSession } from "@/components/providers";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, Metric, PageHeader, SectionTitle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatDate, titleCase } from "@/lib/format";
+import { formatMoney, summarizeMoneyOwed } from "@/lib/payments";
 
 export default function FarmerHome() {
   const { actor } = useSession();
   const batches = useQuery({ queryKey: ["crop-batches"], queryFn: api.cropBatches, refetchInterval: 15_000 });
   const opportunities = useQuery({ queryKey: ["market-opportunities"], queryFn: () => api.marketOpportunities(), refetchInterval: 15_000 });
   const missions = useQuery({ queryKey: ["missions"], queryFn: () => api.missions(), refetchInterval: 5_000 });
+  const orders = useQuery({ queryKey: ["orders"], queryFn: api.orders, refetchInterval: 5_000 });
+  const owed = summarizeMoneyOwed(orders.data?.items ?? []);
 
   return (
     <>
@@ -26,7 +29,17 @@ export default function FarmerHome() {
             <Metric label="Crop batches" value={batches.data.items.length} detail="Visible to you" icon={Sprout} />
             <Metric label="Safe to promise" value={`${batches.data.items.reduce((sum, batch) => sum + batch.availableToPromise.value, 0)} kg`} detail="Across your crops" icon={Scale} tone="blue" />
             <Metric label="Harvest ready" value={batches.data.items.filter((batch) => batch.status === "HARVEST_READY").length} detail="Ready for market" icon={CalendarDays} tone="amber" />
+            <Metric
+              label="Money owed to you"
+              value={formatMoney(owed.amount, owed.currency)}
+              detail={owed.count === 0
+                ? "Nothing outstanding"
+                : `${owed.count} delivered order${owed.count === 1 ? "" : "s"} · longest wait ${owed.oldestDaysOutstanding} day${owed.oldestDaysOutstanding === 1 ? "" : "s"}${owed.overdueCount ? ` · ${owed.overdueCount} overdue` : ""}`}
+              icon={Wallet}
+              tone={owed.overdueCount ? "red" : owed.count ? "amber" : "green"}
+            />
           </div>
+          <p className="payment-disclaimer">Harvest tracks payment; it does not move money. These are the amounts hotels have agreed to pay you for produce they already accepted.</p>
           <div className="dashboard-grid">
             <Card>
               <SectionTitle title="My crops" detail="Update at any time" />

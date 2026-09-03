@@ -307,7 +307,8 @@ scope, not only the role name.
 
 - Callers: buyer; coordinator with authorised buyer scope.
 - Request: `cropType`, `requestedQuantity`, `neededBy`, `deliveryLocation`;
-  optional `minimumAcceptableFraction` and candidate `listingIds`.
+  optional `minimumAcceptableFraction`, `paymentTermsDays`, and candidate
+  `listingIds`.
 - Response: order ID, buyer ID, requested/committed/accepted quantities, the
   buyer's `minimumAcceptableFraction`, lifecycle status, risk overlay,
   timestamps, and `outcomeCause`/`outcomeNote` once matching has run.
@@ -321,6 +322,13 @@ scope, not only the role name.
 - `committedQuantity` is what approval actually reserved. It is `0` until an
   allocation is approved and below `requestedQuantity` on a safe partial
   commitment.
+- `paymentTermsDays` is the number of days after a delivery is accepted that
+  the buyer has to pay. It is a whole number from 0 to 90 and defaults to `14`.
+  That default is **stakeholder-calibrated**, from farmer feedback that hotels
+  currently take one, two, or more months to pay, which is what limits farm
+  cash flow. A value outside 0 to 90 fails with `INVALID_PAYMENT_TERMS`.
+  Harvest records the term and derives the resulting status; it never moves
+  money, holds funds, or verifies a transfer.
 - Product state/event: store `REQUESTED`, start matching, and emit
   `ORDER_REQUESTED`. Creation does not reserve stock. An order whose safe cover
   falls below `minimumAcceptableFraction` stays `REQUESTED` with `outcomeCause`
@@ -336,8 +344,8 @@ scope, not only the role name.
 
 - Callers: the buyer, participating farmers, and authorised coordinators.
 - Request: optional lifecycle status, risk overlay, cursor, and limit filters.
-- Response: a role-filtered order page using the same lifecycle representation
-  as order detail.
+- Response: a role-filtered order page using the same lifecycle and payment
+  representation as order detail.
 - Product state/event and simulation effect: none.
 - Consumers: buyer, farmer, and coordinator order lists.
 
@@ -347,7 +355,8 @@ scope, not only the role name.
   coordinator/operations/admin.
 - Request: order UUID.
 - Response: requested/committed/accepted quantities, the buyer's
-  `minimumAcceptableFraction`, deadline, lifecycle status, `atRisk`, active
+  `minimumAcceptableFraction`, `paymentTermsDays` and the derived `payment`
+  record, deadline, lifecycle status, `atRisk`, active
   exception IDs, timestamps, safe allocation, approval totals and the caller's
   approval,
   trace ID, related delivery mission, immutable delivery acceptance when
@@ -355,10 +364,43 @@ scope, not only the role name.
   order is not fulfilled: `NO_READY_SUPPLY`, `INSUFFICIENT_SUPPLY`,
   `SUPPLY_CHANGED`, `APPROVAL_REJECTED`, `DELIVERY_REJECTED`, `CANCELLED`).
   Private farm coordinates are not exposed here.
+- `payment` is present once an approved commitment prices the order and absent
+  before then, because nothing is owed until supply is reserved. It carries
+  `status`, `amount`, `dueAt`, `paidAt`, `reference`, and `daysOutstanding`.
+- `payment.status` is derived on every read rather than stored, so no scheduled
+  job can leave a stale status behind: `PAID` when a confirmation was recorded;
+  otherwise `NOT_DUE` before the delivery is accepted or while the term is
+  still running, `DUE` on the day the term expires, and `OVERDUE` on any later
+  day. `dueAt` is `deliveryAcceptance.acceptedAt` plus `paymentTermsDays`;
+  `daysOutstanding` counts whole days from acceptance to payment, or to now
+  while the order is unpaid.
+- `payment.amount` is the committed line quantity multiplied by that line's
+  listing price at commitment, recomputed on the accepted quantities when the
+  delivery outcome is recorded. Rejected produce is not billed.
 - Product state/event: none.
 - Simulation effect: none.
 - Consumers: buyer/farmer order status and coordinator order detail.
 - Rules/failures: role-filter sensitive farm, buyer, route, and location data.
+
+#### `POST /v1/orders/{orderId}/payment-confirmations`
+
+- Callers: the order's buyer, an authorised coordinator, or admin.
+- Request: optional `reference` of at most 120 characters, the buyer's own
+  reference for the transfer it made outside Harvest.
+- Response: `orderId` and the resulting `payment` record with status `PAID`.
+- Product state/event: store `paidAt` and `paymentReference`, append an outcome
+  trace step, and emit `PAYMENT_CONFIRMED`. Nothing else changes.
+- Simulation effect: none. The event records settlement evidence and mutates no
+  world state.
+- Consumers: buyer payment list, farmer money-owed summary, coordinator overdue
+  count, order payment card.
+- Rules/failures: the order must be `FULFILLED` or `PARTIALLY_FULFILLED`, else
+  `PAYMENT_NOT_PAYABLE`; an order that already carries a payment fails with
+  `PAYMENT_ALREADY_CONFIRMED`; an order the caller cannot see is `404`. Replay
+  with the same `Idempotency-Key` and body returns the first response.
+- **Harvest does not move money.** This operation records the buyer's own
+  statement that it paid. Harvest holds no funds, initiates no transfer, and
+  verifies nothing with any financial institution.
 
 ### Approvals and delivery
 
@@ -543,7 +585,9 @@ scope, not only the role name.
   against a partial commitment derives `ORDER_PARTIALLY_FULFILLED` with
   `outcomeCause` `INSUFFICIENT_SUPPLY`, because the shortfall came from supply
   and not from produce being refused on arrival. `releasedReservationQuantity`
-  is what was reserved and not accepted.
+  is what was reserved and not accepted. The order's payment amount is
+  recomputed here on the accepted quantities at their committed listing prices,
+  and the payment term starts from this acceptance time.
 - Simulation effect: record actual farmer/transporter economics and model
   evaluation data. Each crop line updates its latest prediction's accepted
   actual quantity and absolute error. Fulfilment satisfies demand and ends remaining order tasks;
@@ -575,7 +619,12 @@ scope, not only the role name.
 - Response: generation time and role-filtered counts/IDs for supply, demand,
   raw order states, active missions, and open exceptions. It also returns a
   deadline-aware order outcome summary, summed accepted delivery kilograms,
-  approved commitment count, and completed mission count.
+  approved commitment count, completed mission count, and `paymentOverdueCount`.
+- `paymentOverdueCount` counts visible orders whose payment term has expired
+  with nothing recorded as paid, using the same derivation as the order reads.
+  An order with no delivery acceptance is never counted, however late it is,
+  because the term only starts when produce is accepted. The field is additive,
+  so a saved projection from before payment tracking still replays without it.
 - Outcome rules: `FULFILLED` and `PARTIALLY_FULFILLED` retain those outcomes;
   rejected/cancelled orders and incomplete orders at or past `neededBy` are
   unfulfilled; other incomplete orders are pending. Every visible order is in
@@ -766,15 +815,15 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
 
 | Interface | Reads | Writes/actions | Live events |
 |---|---|---|---|
-| Farmer website | Owned crop batches, prediction, participating orders and missions | Crop observation, forecast request, safe listing, own approval decision | Crop/forecast/listing/allocation/order/delivery outcomes |
-| Buyer website | Listings, owned demand/orders, relevant approval and delivery | Buyer demand, order, own approval decision, delivery acceptance | Demand/allocation/mission/delivery/order outcomes |
+| Farmer website | Owned crop batches, prediction, participating orders and missions, money owed for accepted deliveries | Crop observation, forecast request, safe listing, own approval decision | Crop/forecast/listing/allocation/order/delivery/payment outcomes |
+| Buyer website | Listings, owned demand/orders, relevant approval and delivery, payments due | Buyer demand, order, own approval decision, delivery acceptance, payment confirmation | Demand/allocation/mission/delivery/order/payment outcomes |
 | Transporter website | Available and assigned mission detail | Mission acceptance, delivery updates, exception | Mission/update/exception/recovery/order outcome |
-| Coordinator website | Permitted crops, relevant orders, targeted approvals and exceptions | Approval decision, verified update, exception escalation | Scoped operational events |
+| Coordinator website | Permitted crops, relevant orders, targeted approvals and exceptions, overdue payment count | Approval decision, verified update, exception escalation, payment confirmation on a permitted order | Scoped operational events |
 | 3D control room | Saved runs, timelines, individual frames, participants and snapshots | Create run, derived run or paired run; open replay participant | Run-scoped operational events |
 | Future benchmark view | Paired-run status/result | Create paired run | Benchmark result and run progress |
 | Future trace/evidence view | Agent trace and relevant entity detail | None | Trace-linked events |
 | Harvest simulated farmer | Same crop/listing/approval operations as farmer | Same request bodies as farmer | Run-scoped events |
-| Harvest simulated buyer | Same listing/demand/order/acceptance operations as buyer | Same request bodies as buyer | Run-scoped events |
+| Harvest simulated buyer | Same listing/demand/order/acceptance/payment operations as buyer | Same request bodies as buyer | Run-scoped events |
 | Harvest simulated transporter | Same mission/update/exception operations as transporter | Same request bodies as transporter | Run-scoped events |
 | Model service | No public Product API reads | Internal prediction response only | None |
 
@@ -811,6 +860,7 @@ missing event or apply an event whose schema it cannot validate.
 | Order fulfilled / `ORDER_FULFILLED` | Finalises order and releases unused reservations | Satisfies buyer demand, ends remaining tasks, records local procurement/fulfilment | Fulfilled order and dashboard totals update |
 | Partial/rejected / `ORDER_PARTIALLY_FULFILLED`, `ORDER_REJECTED` | Stores actual accepted quantity and releases remainder | Schedules unmet-demand/import/substitution fallback | Partial/rejected state and exception path appear |
 | Cancelled / `ORDER_CANCELLED` | Releases reservations and cancels operational work | Cancels future pickups and returns actors/vehicles to availability | Supply, routes, and order state update |
+| Payment confirmed / `PAYMENT_CONFIRMED` | Stores `paidAt` and the buyer's reference; no other state changes | None; the payload is settlement evidence only | Farmer money-owed total drops and the order shows paid |
 
 The full event list and payload purpose is in
 [`EVENT_CATALOGUE.md`](../contracts/events/EVENT_CATALOGUE.md).
@@ -829,6 +879,12 @@ REQUESTED
 `AT_RISK` is not a lifecycle status. It is an active-exception overlay while an
 order remains in its underlying state. Resolving all active exceptions clears
 the overlay without pretending that the order moved backward.
+
+Payment status is not a lifecycle status either. It is derived from the
+delivery acceptance time plus the order's `paymentTermsDays` on every read, and
+only `paidAt` is stored. Harvest tracks payment terms and status so a farmer
+can see what a hotel owes and how long it has been outstanding; it does not
+move money, hold funds, or verify a transfer.
 
 Matching proposes an allocation once safe cover reaches the order's
 `minimumAcceptableFraction`, so a commitment may be for less than the requested
@@ -872,6 +928,17 @@ through authenticated Product API queries; only the API-owned bootstrap and
 outbox adapter touch Prisma.
 
 ### Connected execution order
+
+A synthetic buyer places its orders on 7-day payment terms and then records
+paying its own accepted delivery a fixed ten simulated days later, in sorted
+order-ID order so the run stays deterministic. Both numbers are
+**stakeholder-calibrated** and scaled to the 21-day scenario: hotels quote
+short terms and pay in one to two months, a gap no 21-day window can contain,
+so 7 against 10 preserves "paid late" at demonstration scale. A delivered
+simulated order therefore falls due on day 7, reads as overdue from day 8, and
+is settled on day 10 unless the run window closes first. Real buyers keep the
+Product API's 14-day default. Baseline runs never call the operation, and
+replay reads saved frames rather than repeating it.
 
 `EXTERNAL_PRODUCT_API` mode disables the engine's internal Harvest allocation,
 approval and recovery policy. The saved-run coordinator then repeats:

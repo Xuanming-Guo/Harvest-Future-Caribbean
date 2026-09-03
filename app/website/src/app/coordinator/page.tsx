@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowRight, Check, CheckCircle2, ClipboardCheck, Sprout, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, CheckCircle2, ClipboardCheck, Sprout, Wallet, X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -17,6 +17,7 @@ export default function CoordinatorHome() {
   const exceptions = useQuery({ queryKey: ["exceptions"], queryFn: api.exceptions, refetchInterval: 5_000 });
   const batches = useQuery({ queryKey: ["crop-batches"], queryFn: api.cropBatches, refetchInterval: 15_000 });
   const verification = useQuery({ queryKey: ["verification-tasks", "OPEN"], queryFn: () => api.verificationTasks("OPEN"), refetchInterval: 5_000 });
+  const orders = useQuery({ queryKey: ["orders"], queryFn: api.orders, refetchInterval: 15_000 });
   const exceptionDetail = useQuery({ queryKey: ["exception", selectedExceptionId], queryFn: () => api.exception(selectedExceptionId!), enabled: Boolean(selectedExceptionId), refetchInterval: 5_000 });
   const decideVerification = useMutation({
     mutationFn: ({ taskId, decision }: { taskId: string; decision: "VERIFY" | "REQUEST_CHANGES" }) => api.decideVerificationTask(taskId, decision),
@@ -25,6 +26,7 @@ export default function CoordinatorHome() {
   if (approvals.error || exceptions.error || batches.error || verification.error) return <ErrorState error={approvals.error ?? exceptions.error ?? batches.error ?? verification.error} />;
   if (!approvals.data || !exceptions.data || !batches.data || !verification.data) return <LoadingState label="Loading coordination tasks..." />;
   const openExceptions = exceptions.data.items.filter((item) => item.status !== "RESOLVED");
+  const overduePayments = (orders.data?.items ?? []).filter((item) => item.payment?.status === "OVERDUE").length;
 
   return (
     <>
@@ -33,7 +35,9 @@ export default function CoordinatorHome() {
         <Metric label="Decisions waiting" value={approvals.data.items.length} detail="Assigned to you" icon={ClipboardCheck} />
         <Metric label="Verification queue" value={verification.data.items.length} detail="Crop updates to check" icon={Sprout} tone="amber" />
         <Metric label="Open exceptions" value={openExceptions.length} detail="Recovery needed" icon={AlertTriangle} tone="red" />
+        <Metric label="Overdue payments" value={overduePayments} detail="Past agreed terms" icon={Wallet} tone={overduePayments ? "red" : "green"} />
       </div>
+      <p className="payment-disclaimer">Harvest tracks payment terms and status. It does not move money, hold funds, or verify a transfer.</p>
       <div className="dashboard-grid">
         <div data-tour="coordinator-approvals"><ApprovalList /></div>
         <Card data-tour="coordinator-verification">

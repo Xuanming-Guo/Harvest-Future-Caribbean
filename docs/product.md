@@ -92,7 +92,11 @@ This is a counterfactual simulation, not proof of historical or deployed impact.
 ## Not in the initial scope
 
 - Full Caribbean or inter-island deployment.
-- Payments, financing, insurance, or complex social-marketplace features.
+- Payment execution, escrow, financing, or insurance. Payment-terms tracking is
+  in scope: stakeholder feedback from farmers is that late hotel payment is
+  what limits their cash flow, so Harvest records the agreed term, what is
+  owed, and whether the buyer says it paid. It moves no money.
+- Complex social-marketplace features.
 - Guaranteed yield or exact crop recognition from satellite imagery.
 - A complete offline-sync platform.
 - Claims of customer satisfaction based only on simulation.

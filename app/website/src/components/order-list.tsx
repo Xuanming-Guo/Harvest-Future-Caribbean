@@ -6,6 +6,7 @@ import Link from "next/link";
 
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/format";
+import { PAYMENT_STATUS_LABELS } from "@/lib/payments";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, SectionTitle } from "./ui";
 
 export function OrderList({ limit }: { limit?: number }) {
@@ -22,6 +23,7 @@ export function OrderList({ limit }: { limit?: number }) {
           <Link href={`/orders/${order.orderId}`} className="order-row" key={order.orderId}>
             <div><strong>{order.cropType}</strong><small>Needed {formatDate(order.neededBy)}</small></div>
             <span>{order.requestedQuantity.value} kg</span>
+            <span className="order-payment-cell">{order.payment && <Badge tone={order.payment.status.toLowerCase().replaceAll("_", "-")}>{PAYMENT_STATUS_LABELS[order.payment.status]}</Badge>}</span>
             <Badge tone={order.atRisk ? "high" : undefined}>{order.lifecycleStatus}</Badge>
             <ArrowRight size={17} />
           </Link>

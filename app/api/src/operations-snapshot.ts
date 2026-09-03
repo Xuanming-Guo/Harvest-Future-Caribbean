@@ -5,6 +5,7 @@ import type {
 } from "@harvest/simulation";
 
 import { prisma } from "./db.js";
+import { derivePaymentStatus } from "./payments.js";
 
 interface ObservableOrder {
   id: string;
@@ -36,6 +37,25 @@ export function deriveOutcomeCause(
     default:
       return "NO_READY_SUPPLY";
   }
+}
+
+/**
+ * Orders whose payment term has expired with nothing recorded as paid.
+ *
+ * The term only starts once produce is accepted, so an undelivered order is
+ * never overdue however late it is. Uses the same derivation as the order
+ * reads, which is why a coordinator's count and a farmer's dashboard cannot
+ * disagree. Harvest tracks payment; it does not move money.
+ */
+export function countOverduePayments(
+  orders: Array<{ id: string; lifecycleStatus: string; paymentTermsDays: number; paymentAmount: number | null; paidAt: Date | null }>,
+  acceptedAtByOrder: Map<string, Date>,
+  asOf: Date,
+) {
+  return orders.filter((order) =>
+    order.paymentAmount !== null &&
+    order.lifecycleStatus !== "CANCELLED" &&
+    derivePaymentStatus(order, acceptedAtByOrder.get(order.id) ?? null, asOf) === "OVERDUE").length;
 }
 
 export interface OperationsSnapshotQuery {
@@ -116,7 +136,7 @@ export async function buildOperationsSnapshot(
     prisma.buyerDemand.count({ where: query.demandWhere }),
     prisma.order.findMany({
       where: query.orderWhere,
-      select: { id: true, lifecycleStatus: true, neededBy: true, outcomeCause: true },
+      select: { id: true, lifecycleStatus: true, neededBy: true, outcomeCause: true, paymentTermsDays: true, paymentAmount: true, paidAt: true },
       orderBy: { id: "asc" },
     }),
     prisma.deliveryMission.findMany({
@@ -133,7 +153,7 @@ export async function buildOperationsSnapshot(
 
   const orderIds = orders.map((order) => order.id);
   const relatedOrders = { orderId: { in: orderIds } };
-  const [acceptedDelivery, approvedCommitmentCount, completedMissionCount] = await Promise.all([
+  const [acceptedDelivery, approvedCommitmentCount, completedMissionCount, acceptances] = await Promise.all([
     prisma.deliveryAcceptance.aggregate({
       where: relatedOrders,
       _sum: { acceptedQuantity: true },
@@ -144,7 +164,14 @@ export async function buildOperationsSnapshot(
     prisma.deliveryMission.count({
       where: { ...relatedOrders, status: { in: ["DELIVERED", "COMPLETED"] } },
     }),
+    prisma.deliveryAcceptance.findMany({
+      where: relatedOrders,
+      select: { orderId: true, acceptedAt: true },
+    }),
   ]);
+
+  const acceptedAtByOrder = new Map(acceptances.map((row) => [row.orderId, row.acceptedAt]));
+  const paymentOverdueCount = countOverduePayments(orders, acceptedAtByOrder, query.asOf);
 
   const statusCounts = new Map<string, number>();
   for (const order of orders) {
@@ -159,6 +186,7 @@ export async function buildOperationsSnapshot(
     deliveryAcceptedKg: Number((acceptedDelivery._sum.acceptedQuantity ?? 0).toFixed(2)),
     approvedCommitmentCount,
     completedMissionCount,
+    paymentOverdueCount,
     activeMissionIds: activeMissions.map((mission) => mission.id),
     openExceptionIds: openExceptions.map((exception) => exception.id),
   };

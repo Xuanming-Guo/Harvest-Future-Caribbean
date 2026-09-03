@@ -84,6 +84,13 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .metric span { color: var(--muted); font-size: 11px; font-weight: 700; }
 .metric strong { margin: 2px 0; font: 800 22px "Manrope", sans-serif; }
 .metric small { color: var(--muted); font-size: 11px; }
+.payment-disclaimer { margin: -10px 0 22px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.payment-list { display: grid; gap: 10px; }
+.payment-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 16px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; }
+.payment-row strong, .payment-row small { display: block; }
+.payment-row small { margin-top: 3px; color: var(--muted); font-size: 11px; }
+.payment-row .payment-amount { font: 800 15px "Manrope", sans-serif; }
+.payment-card { display: grid; gap: 10px; }
 
 .button { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 9px 15px; border: 1px solid var(--forest); border-radius: 10px; color: white; background: var(--forest); font-weight: 700; cursor: pointer; }
 .button:hover { background: var(--forest-dark); }
@@ -99,6 +106,10 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .badge-high, .badge-critical, .badge-rejected, .badge-cancelled { color: #a74334; background: #fce5df; }
 .badge-approved, .badge-active, .badge-committed, .badge-fulfilled, .badge-delivered { color: #26724f; background: #e3f5e8; }
 .badge-in-delivery, .badge-in-transit, .badge-assigned { color: #286b78; background: #e1f2f5; }
+.badge-not-due { color: var(--muted); background: #eef2f0; }
+.badge-due { color: #8b620f; background: #fff1cf; }
+.badge-overdue { color: #a74334; background: #fce5df; }
+.badge-paid { color: #26724f; background: #e3f5e8; }
 
 .crop-grid, .task-list, .order-list, .mission-list, .exception-list { display: grid; gap: 10px; }
 .crop-card { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 13px; padding: 14px; border: 1px solid var(--line); border-radius: 13px; transition: .18s ease; }
@@ -113,7 +124,8 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .task-row p, .task-row small { margin: 0; color: var(--muted); font-size: 12px; }
 .approval-row { align-items: flex-start; flex-wrap: wrap; }
 .approval-row .inline-actions { width: 100%; justify-content: flex-end; }
-.order-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 16px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; }
+.order-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto auto; align-items: center; gap: 16px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; }
+.order-payment-cell { display: flex; justify-content: flex-end; }
 .order-row strong, .order-row small { display: block; }
 .order-row small { margin-top: 3px; color: var(--muted); font-size: 11px; }
 
