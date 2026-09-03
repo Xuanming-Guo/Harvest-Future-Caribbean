@@ -109,12 +109,27 @@ async function approvalContext(row: { subjectType: string; subjectId: string; re
   const amount = visibleLines.reduce((sum, line) => sum + line.quantity, 0);
   const estimatedPrice = visibleLines.reduce((sum, line) => sum + line.quantity * (listingById.get(line.listingId)?.unitPrice ?? 0), 0);
   const currency = listingById.get(visibleLines[0]?.listingId)?.currency ?? "XCD";
+  // The order total is what the buyer asked for; the allocation total is what
+  // this proposal actually covers. Naming both stops a buyer approving a
+  // partial commitment while believing the whole order is covered.
+  const proposedTotal = lines.reduce((sum, line) => sum + line.quantity, 0);
+  const coveragePercent = order.requestedQuantity > 0 ? Math.round((proposedTotal / order.requestedQuantity) * 100) : 0;
+  const partial = proposedTotal + 0.0001 < order.requestedQuantity;
+  const coverage = `covers ${proposedTotal} of ${order.requestedQuantity} kg (${coveragePercent}%)`;
   return {
     title: `${order.cropType.toLowerCase()} supply commitment`,
-    summary: `Confirm ${amount} kg for delivery by ${order.neededBy.toISOString()}.`,
+    summary: partial
+      ? `Confirm ${amount} kg for delivery by ${order.neededBy.toISOString()}. This commitment ${coverage}; the buyer sources the remainder elsewhere.`
+      : `Confirm ${amount} kg for delivery by ${order.neededBy.toISOString()}.`,
     orderId: order.id,
     cropType: order.cropType,
     quantity: quantity(amount),
+    coverage: {
+      requestedQuantity: quantity(order.requestedQuantity),
+      proposedQuantity: quantity(proposedTotal),
+      coverageFraction: Number((order.requestedQuantity > 0 ? proposedTotal / order.requestedQuantity : 0).toFixed(4)),
+      partial,
+    },
     estimatedPrice: { amount: Number(estimatedPrice.toFixed(2)), currency },
     neededBy: order.neededBy.toISOString(),
   };
@@ -541,17 +556,23 @@ export async function buildServer() {
 
   server.post("/v1/orders", async (request, reply) => idempotent(request, reply, 201, async () => {
     const actor = requireRole(request, ["BUYER", "ADMIN"]);
-    const body = assertObjectBody(request.body, ["cropType", "requestedQuantity", "neededBy", "deliveryLocation", "listingIds"], ["cropType", "requestedQuantity", "neededBy", "deliveryLocation"]);
+    const body = assertObjectBody(request.body, ["cropType", "requestedQuantity", "neededBy", "deliveryLocation", "minimumAcceptableFraction", "listingIds"], ["cropType", "requestedQuantity", "neededBy", "deliveryLocation"]);
     const listingIds = body.listingIds === undefined ? [] : body.listingIds;
     if (!Array.isArray(listingIds) || !listingIds.every((id) => typeof id === "string")) throw httpError(400, "VALIDATION_FAILED", "listingIds must be an array of UUID strings.");
+    // A buyer may accept part of an order, but not an arbitrarily small part:
+    // below half the request the delivery costs more than the produce is worth.
+    const minimumAcceptableFraction = body.minimumAcceptableFraction === undefined ? 0.8 : body.minimumAcceptableFraction;
+    if (typeof minimumAcceptableFraction !== "number" || !Number.isFinite(minimumAcceptableFraction) || minimumAcceptableFraction < 0.5 || minimumAcceptableFraction > 1) {
+      throw httpError(422, "INVALID_ACCEPTANCE_THRESHOLD", "minimumAcceptableFraction must be a number between 0.5 and 1.");
+    }
     const location = readLocation(body.deliveryLocation);
     const orderId = randomUUID();
     const traceId = randomUUID();
     const requestedQuantity = readQuantity(body.requestedQuantity, "requestedQuantity");
     const row = await prisma.$transaction(async (tx) => {
-      const order = await tx.order.create({ data: { id: orderId, buyerId: actor.id, cropType: asString(body.cropType, "cropType").toUpperCase(), requestedQuantity, acceptedQuantity: 0, neededBy: asDate(body.neededBy, "neededBy"), latitude: location.latitude, longitude: location.longitude, listingIds, lifecycleStatus: "REQUESTED", atRisk: false, activeExceptionIds: [], traceId, simulationRunId: actor.simulationRunId } });
+      const order = await tx.order.create({ data: { id: orderId, buyerId: actor.id, cropType: asString(body.cropType, "cropType").toUpperCase(), requestedQuantity, committedQuantity: 0, acceptedQuantity: 0, minimumAcceptableFraction, neededBy: asDate(body.neededBy, "neededBy"), latitude: location.latitude, longitude: location.longitude, listingIds, lifecycleStatus: "REQUESTED", atRisk: false, activeExceptionIds: [], traceId, simulationRunId: actor.simulationRunId } });
       await tx.agentTrace.create({ data: { id: traceId, subjectType: "ORDER", subjectId: orderId, workflowType: "ORDER_FULFILMENT", stage: "ORDER_REQUESTED", status: "RUNNING", summary: "Validating safe supply for a buyer order.", simulationRunId: actor.simulationRunId } });
-      await tx.traceStep.create({ data: { traceId, recordedAt: operationNow(), kind: "INPUT", agentName: "Market Balance Agent", toolName: "read-order-request", provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, summary: `Buyer requested ${requestedQuantity} kg of ${order.cropType}.`, simulationRunId: actor.simulationRunId } });
+      await tx.traceStep.create({ data: { traceId, recordedAt: operationNow(), kind: "INPUT", agentName: "Market Balance Agent", toolName: "read-order-request", provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, summary: `Buyer requested ${requestedQuantity} kg of ${order.cropType} and accepts at least ${Math.round(minimumAcceptableFraction * 100)}% of it.`, simulationRunId: actor.simulationRunId } });
       await recordEvent(tx, { eventType: "ORDER_REQUESTED", actorId: actor.id, entityId: orderId, traceId, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, simulationRunId: actor.simulationRunId, payload: { orderId, cropType: order.cropType, requestedQuantity: quantity(requestedQuantity), status: "REQUESTED" } });
       return order;
     });
@@ -891,7 +912,15 @@ export async function buildServer() {
     if (Math.abs(accepted + rejected - mission.quantity) > 0.0001) throw httpError(422, "DELIVERY_QUANTITY_MISMATCH", "Accepted and rejected quantities must equal the delivered quantity.");
     const outcome = asString(body.outcome, "outcome");
     if (!["ACCEPTED", "PARTIALLY_ACCEPTED", "REJECTED"].includes(outcome)) throw httpError(422, "INVALID_DELIVERY_OUTCOME", "The delivery outcome is not supported.");
-    const lifecycleStatus = outcome === "ACCEPTED" ? "FULFILLED" : outcome === "PARTIALLY_ACCEPTED" ? "PARTIALLY_FULFILLED" : "REJECTED";
+    // A fully accepted delivery still leaves the order short when only part of
+    // it was ever committed, so the shortfall keeps its real cause: the supply
+    // was never there, not that the buyer refused produce on arrival.
+    const shortCommitment = order.committedQuantity > 0 && order.committedQuantity + 0.0001 < order.requestedQuantity;
+    const lifecycleStatus = outcome === "REJECTED"
+      ? "REJECTED"
+      : outcome === "PARTIALLY_ACCEPTED" || shortCommitment
+        ? "PARTIALLY_FULFILLED"
+        : "FULFILLED";
     const acceptanceId = randomUUID();
     const acceptedAt = operationNow();
     if (!Array.isArray(body.lineOutcomes) || body.lineOutcomes.length === 0) throw httpError(400, "VALIDATION_FAILED", "lineOutcomes must contain each committed crop batch.");
@@ -927,8 +956,12 @@ export async function buildServer() {
           acceptedQuantity: accepted,
           atRisk: false,
           activeExceptionIds: [],
-          outcomeCause: lifecycleStatus === "FULFILLED" ? null : "DELIVERY_REJECTED",
-          outcomeNote: lifecycleStatus === "FULFILLED" ? null : `${rejected} kg of ${mission.quantity} kg rejected at delivery${typeof body.note === "string" && body.note ? `: ${body.note}` : "."}`,
+          outcomeCause: lifecycleStatus === "FULFILLED" ? null : rejected > 0.0001 ? "DELIVERY_REJECTED" : "INSUFFICIENT_SUPPLY",
+          outcomeNote: lifecycleStatus === "FULFILLED"
+            ? null
+            : rejected > 0.0001
+              ? `${rejected} kg of ${mission.quantity} kg rejected at delivery${typeof body.note === "string" && body.note ? `: ${body.note}` : "."}`
+              : `Committed ${order.committedQuantity} of ${order.requestedQuantity} kg; the buyer sourced the rest elsewhere.`,
         },
       });
       await tx.reservation.updateMany({ where: { allocationId: { in: (await tx.allocation.findMany({ where: { orderId: order.id }, select: { id: true } })).map((row) => row.id) } }, data: { status: "RELEASED" } });
@@ -947,7 +980,7 @@ export async function buildServer() {
         await tx.traceStep.create({ data: { traceId: trace.id, recordedAt: acceptedAt, kind: "STATE_CHANGE", agentName: "Traceability Agent", toolName: "record-delivery-outcome", provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, summary: `Recorded ${outcome.toLowerCase().replaceAll("_", " ")}: ${accepted} kg accepted and ${rejected} kg rejected; reservations were released and model outcomes updated.`, simulationRunId: actor.simulationRunId } });
       }
       const deliveryEvent = await recordEvent(tx, { eventType: "DELIVERY_ACCEPTED", actorId: actor.id, entityId: acceptanceId, traceId: trace?.id ?? randomUUID(), correlationId: priorEvent?.correlationId, causationId: priorEvent?.id, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, simulationRunId: actor.simulationRunId, payload: { deliveryId: acceptanceId, orderId: order.id, acceptedQuantity: quantity(accepted), rejectedQuantity: quantity(rejected), outcome, lineOutcomes: serializedLineOutcomes } });
-      await recordEvent(tx, { eventType: `ORDER_${lifecycleStatus}`, actorId: actor.id, entityId: order.id, traceId: trace?.id ?? randomUUID(), correlationId: deliveryEvent.correlationId, causationId: deliveryEvent.id, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, simulationRunId: actor.simulationRunId, payload: { orderId: order.id, status: lifecycleStatus, acceptedQuantity: quantity(accepted), releasedReservationQuantity: quantity(Math.max(0, order.requestedQuantity - accepted)) } });
+      await recordEvent(tx, { eventType: `ORDER_${lifecycleStatus}`, actorId: actor.id, entityId: order.id, traceId: trace?.id ?? randomUUID(), correlationId: deliveryEvent.correlationId, causationId: deliveryEvent.id, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, simulationRunId: actor.simulationRunId, payload: { orderId: order.id, status: lifecycleStatus, acceptedQuantity: quantity(accepted), releasedReservationQuantity: quantity(Number(Math.max(0, mission.quantity - accepted).toFixed(4))) } });
       return created;
     });
     return deliveryAcceptanceDto(acceptance);

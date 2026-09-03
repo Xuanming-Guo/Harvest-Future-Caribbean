@@ -307,15 +307,25 @@ scope, not only the role name.
 
 - Callers: buyer; coordinator with authorised buyer scope.
 - Request: `cropType`, `requestedQuantity`, `neededBy`, `deliveryLocation`;
-  optional candidate `listingIds`.
-- Response: order ID, buyer ID, requested/accepted quantities, lifecycle status,
-  risk overlay, timestamps, and `outcomeCause`/`outcomeNote` once matching has
-  run.
+  optional `minimumAcceptableFraction` and candidate `listingIds`.
+- Response: order ID, buyer ID, requested/committed/accepted quantities, the
+  buyer's `minimumAcceptableFraction`, lifecycle status, risk overlay,
+  timestamps, and `outcomeCause`/`outcomeNote` once matching has run.
+- `minimumAcceptableFraction` is the smallest share of `requestedQuantity` the
+  buyer will accept as a commitment. It is a number from 0.5 to 1 and defaults
+  to `0.8`. That default is **stakeholder-calibrated**, from hotel buyer
+  feedback that a hotel routinely takes part of an order and sources the
+  remainder elsewhere rather than lose the delivery; the simulation's buyer
+  personas independently sit at 0.8 to 0.9. A value outside 0.5 to 1 fails with
+  `INVALID_ACCEPTANCE_THRESHOLD`.
+- `committedQuantity` is what approval actually reserved. It is `0` until an
+  allocation is approved and below `requestedQuantity` on a safe partial
+  commitment.
 - Product state/event: store `REQUESTED`, start matching, and emit
-  `ORDER_REQUESTED`. Creation does not reserve stock. An order that cannot be
-  fully covered stays `REQUESTED` with `outcomeCause` `NO_READY_SUPPLY` or
-  `INSUFFICIENT_SUPPLY` and is re-matched automatically when a later listing
-  of the same crop is published.
+  `ORDER_REQUESTED`. Creation does not reserve stock. An order whose safe cover
+  falls below `minimumAcceptableFraction` stays `REQUESTED` with `outcomeCause`
+  `NO_READY_SUPPLY` or `INSUFFICIENT_SUPPLY` and is re-matched automatically
+  when a later listing of the same crop is published.
 - Simulation effect: mark buyer demand pending and schedule matching/actor
   reactions.
 - Consumers: buyer marketplace and order timeline.
@@ -336,8 +346,10 @@ scope, not only the role name.
 - Callers: participating buyer/farm/transporter when relevant; authorised
   coordinator/operations/admin.
 - Request: order UUID.
-- Response: quantities, deadline, lifecycle status, `atRisk`, active exception
-  IDs, timestamps, safe allocation, approval totals and the caller's approval,
+- Response: requested/committed/accepted quantities, the buyer's
+  `minimumAcceptableFraction`, deadline, lifecycle status, `atRisk`, active
+  exception IDs, timestamps, safe allocation, approval totals and the caller's
+  approval,
   trace ID, related delivery mission, immutable delivery acceptance when
   recorded, and `outcomeCause`/`outcomeNote` (the latest recorded reason the
   order is not fulfilled: `NO_READY_SUPPLY`, `INSUFFICIENT_SUPPLY`,
@@ -358,8 +370,11 @@ scope, not only the role name.
 - Response: pending or decided approvals with request time and role-safe
   context. Farmers see only their committed line quantity; buyers see their
   order total; each sees the estimated price for those visible lines;
-  coordinators see the concrete recovery summary. Decision
-  identity, time, and reason appear only after a final human decision.
+  coordinators see the concrete recovery summary. An allocation context also
+  carries `coverage` (requested and proposed quantities, `coverageFraction`,
+  and a `partial` flag) and states "covers X of Y kg (Z%)" in its summary, so
+  nobody approves a partial commitment believing the whole order is covered.
+  Decision identity, time, and reason appear only after a final human decision.
 - Product state/event and simulation effect: none.
 - Consumers: focused farmer, buyer, and coordinator decision cards.
 
@@ -373,10 +388,14 @@ scope, not only the role name.
   targeted approval for its buyer and one for every participating farmer. No
   reservation, commitment, or mission exists until all remain valid and every
   required actor approves. The final approval atomically creates reservations
-  and the mission and emits `APPROVAL_DECIDED` and `ALLOCATION_APPROVED`. If
-  aggregate ATP or listing supply changed, invalidate the proposal with
-  `ALLOCATION_INVALIDATED`, return the order to `REQUESTED`, and create no
-  partial reservation. Any rejection marks the
+  and the mission and emits `APPROVAL_DECIDED` and `ALLOCATION_APPROVED`. The
+  order's `committedQuantity` and the mission quantity are the sum of the
+  approved allocation lines, which is below `requestedQuantity` on a safe
+  partial commitment. If aggregate ATP or listing supply changed, invalidate
+  the proposal with `ALLOCATION_INVALIDATED`, return the order to `REQUESTED`,
+  and create no partial reservation. That invalidation rule is unchanged: a
+  proposal that fails revalidation still reserves nothing at all. Any rejection
+  marks the
   allocation/order rejected and cancels the other pending approvals without
   committing inventory. Recovery approval applies its validated operational
   changes and emits `RECOVERY_APPROVED`.
@@ -519,7 +538,12 @@ scope, not only the role name.
 - Product state/event: record immutable actual outcome and emit
   `DELIVERY_ACCEPTED`; then atomically derive one of `ORDER_FULFILLED`,
   `ORDER_PARTIALLY_FULFILLED`, or `ORDER_REJECTED` and release unused
-  reservations.
+  reservations. Accepted and rejected quantities are measured against the
+  mission quantity, which is the committed quantity. A fully accepted delivery
+  against a partial commitment derives `ORDER_PARTIALLY_FULFILLED` with
+  `outcomeCause` `INSUFFICIENT_SUPPLY`, because the shortfall came from supply
+  and not from produce being refused on arrival. `releasedReservationQuantity`
+  is what was reserved and not accepted.
 - Simulation effect: record actual farmer/transporter economics and model
   evaluation data. Each crop line updates its latest prediction's accepted
   actual quantity and absolute error. Fulfilment satisfies demand and ends remaining order tasks;
@@ -559,7 +583,12 @@ scope, not only the role name.
   unfulfilled or partially fulfilled order: the recorded `outcomeCause` when
   present, otherwise the state the order ran out of time in
   (`AWAITING_APPROVAL` → `APPROVAL_TIMEOUT`, `COMMITTED`/`IN_DELIVERY` →
-  `MISSION_LATE`, `REQUESTED` → `NO_READY_SUPPLY`).
+  `MISSION_LATE`, `REQUESTED` → `NO_READY_SUPPLY`). In a run-scoped snapshot,
+  an incomplete order whose `neededBy` falls after the scenario horizon is
+  counted as unfulfilled with cause `HORIZON_TRUNCATED` once the horizon has
+  passed. Before then it stays pending, because it could still be delivered
+  early. The horizon is the scenario's own start instant plus its duration, so
+  it is available while a run is still executing.
 - Connected runs capture the control-room copy through a synthetic,
   run-scoped operations observer. That observer makes no participant decisions
   and is not shown on the map; it exists only so the saved projection has the
@@ -800,6 +829,12 @@ REQUESTED
 `AT_RISK` is not a lifecycle status. It is an active-exception overlay while an
 order remains in its underlying state. Resolving all active exceptions clears
 the overlay without pretending that the order moved backward.
+
+Matching proposes an allocation once safe cover reaches the order's
+`minimumAcceptableFraction`, so a commitment may be for less than the requested
+quantity. Everything downstream then measures against `committedQuantity`: the
+mission carries it, delivery acceptance sums to it, and a fully accepted
+partial commitment ends `PARTIALLY_FULFILLED` rather than `FULFILLED`.
 
 The end-to-end fulfilment sequence is:
 

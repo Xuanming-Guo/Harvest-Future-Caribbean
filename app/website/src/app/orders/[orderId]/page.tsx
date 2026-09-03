@@ -47,6 +47,11 @@ export default function OrderDetailPage() {
   if (!order.data) return <LoadingState label="Loading order..." />;
   const lifecycle = lifecycleFor(order.data.lifecycleStatus);
   const currentIndex = lifecycle.indexOf(order.data.lifecycleStatus);
+  const requested = order.data.requestedQuantity.value;
+  const committed = order.data.committedQuantity.value;
+  // Only worth saying once something is actually committed and it is short.
+  const partialCommitment = committed > 0 && committed + 0.0001 < requested;
+  const committedSummary = `Committed ${committed} of ${requested} kg (${Math.round((committed / requested) * 100)}%)`;
 
   return (
     <>
@@ -54,6 +59,9 @@ export default function OrderDetailPage() {
       <PageHeader eyebrow="Order" title={`${order.data.requestedQuantity.value} kg ${titleCase(order.data.cropType)}`} description={`Needed by ${formatDate(order.data.neededBy)}`} actions={<Badge tone={order.data.atRisk ? "high" : undefined}>{order.data.lifecycleStatus}</Badge>} />
       <Card>
         <SectionTitle title="Order progress" detail={order.data.atRisk ? "Needs attention" : "On track"} />
+        {partialCommitment && (
+          <div className="notice"><strong>{committedSummary}</strong><span>You accepted at least {Math.round(order.data.minimumAcceptableFraction * 100)}% of this order, so Harvest committed the supply it could confirm. Source the remaining {Number((requested - committed).toFixed(2))} kg elsewhere.</span></div>
+        )}
         <div className="lifecycle">
           {lifecycle.map((status, index) => <div className={index <= currentIndex ? "complete" : ""} key={status}><span>{index < currentIndex ? <CheckCircle2 size={16} /> : index + 1}</span><small>{titleCase(status)}</small></div>)}
         </div>
@@ -65,6 +73,7 @@ export default function OrderDetailPage() {
             <div className="allocation-list">
               <div className="split"><span>Allocation status</span><Badge>{order.data.allocation.status}</Badge></div>
               <div className="split"><span>Approvals</span><strong>{order.data.approvalSummary.approved} of {order.data.approvalSummary.required} approved</strong></div>
+              {partialCommitment && <div className="split"><span>Coverage</span><strong>{committedSummary}</strong></div>}
               {order.data.allocation.lines.map((line) => <div className="allocation-row" key={line.cropBatchId}><PackageCheck size={19} /><span><strong>{line.quantity.value} kg</strong><small>Local crop batch</small></span></div>)}
             </div>
           )}

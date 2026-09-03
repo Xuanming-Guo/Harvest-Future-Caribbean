@@ -47,6 +47,29 @@ describe("Product API order outcome summary", () => {
     expect(explained).toBe(outcomes.unfulfilled + outcomes.partiallyFulfilled);
   });
 
+  it("blames the run window, not operations, for a deadline after the horizon", () => {
+    const horizonEndsAt = new Date("2026-09-22T06:00:00.000Z");
+    const afterHorizon = { lifecycleStatus: "COMMITTED", neededBy: new Date("2026-09-25T06:00:00.000Z"), outcomeCause: null };
+
+    // Mid-run the order is still live and could yet be delivered early.
+    const midRun = summarizeOrderOutcomes([afterHorizon], new Date("2026-09-20T06:00:00.000Z"), horizonEndsAt);
+    expect(midRun).toMatchObject({ pending: 1, unfulfilled: 0 });
+
+    const atHorizon = summarizeOrderOutcomes([afterHorizon], horizonEndsAt, horizonEndsAt);
+    expect(atHorizon).toMatchObject({ pending: 0, unfulfilled: 1 });
+    expect(atHorizon.causes).toEqual({ HORIZON_TRUNCATED: 1 });
+
+    // An order whose deadline fell inside the window keeps its real cause.
+    const inWindow = summarizeOrderOutcomes([
+      { lifecycleStatus: "REQUESTED", neededBy: new Date("2026-09-21T06:00:00.000Z"), outcomeCause: "INSUFFICIENT_SUPPLY" },
+      afterHorizon,
+    ], horizonEndsAt, horizonEndsAt);
+    expect(inWindow.causes).toEqual({ HORIZON_TRUNCATED: 1, INSUFFICIENT_SUPPLY: 1 });
+
+    // Without a horizon the classification is unchanged.
+    expect(summarizeOrderOutcomes([afterHorizon], horizonEndsAt)).toMatchObject({ pending: 1, unfulfilled: 0 });
+  });
+
   it("moves an incomplete order from pending to unfulfilled at its deadline", () => {
     const before = summarizeOrderOutcomes([
       { lifecycleStatus: "REQUESTED", neededBy: asOf },
