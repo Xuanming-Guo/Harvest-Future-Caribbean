@@ -54,6 +54,8 @@ export function OnboardingGuide({ actor, restartSignal }: { actor: SessionActor;
   const [stepIndex, setStepIndex] = useState(0);
   const [targetBox, setTargetBox] = useState<TargetBox | null>(null);
   const primaryButton = useRef<HTMLButtonElement>(null);
+  const tooltip = useRef<HTMLElement>(null);
+  const [tooltipHeight, setTooltipHeight] = useState(0);
   const step = tutorial.steps[stepIndex];
 
   useEffect(() => {
@@ -135,13 +137,25 @@ export function OnboardingGuide({ actor, restartSignal }: { actor: SessionActor;
     if (!targetBox) return {};
     const width = Math.min(390, targetBox.viewportWidth - 32);
     const left = Math.max(16, Math.min(targetBox.left, targetBox.viewportWidth - width - 16));
-    const fitsBelow = targetBox.bottom + 260 < targetBox.viewportHeight;
+    const height = tooltipHeight || 244;
+    const fitsBelow = targetBox.bottom + height + 34 < targetBox.viewportHeight;
+    // The tooltip is fixed to the viewport, so a target low on a long page can
+    // push its own Next button off the bottom edge. Clamp it into the viewport
+    // rather than trust the preferred side.
+    const preferred = fitsBelow ? targetBox.bottom + 18 : targetBox.top - height - 18;
     return {
       width,
       left,
-      top: fitsBelow ? targetBox.bottom + 18 : Math.max(16, targetBox.top - 244),
+      top: Math.max(16, Math.min(preferred, targetBox.viewportHeight - height - 16)),
     };
-  }, [targetBox]);
+  }, [targetBox, tooltipHeight]);
+
+  // Measured after each step renders, because step text changes the height.
+  useEffect(() => {
+    if (stage !== "tour" || !tooltip.current) return;
+    const measured = Math.ceil(tooltip.current.getBoundingClientRect().height);
+    setTooltipHeight((current) => (Math.abs(current - measured) > 1 ? measured : current));
+  }, [stage, stepIndex, targetBox]);
 
   function skip() {
     writeOnboardingStatus(actor, "skipped");
@@ -234,7 +248,7 @@ export function OnboardingGuide({ actor, restartSignal }: { actor: SessionActor;
           }}
         />
       )}
-      <section className={`tour-tooltip ${targetBox ? "" : "tour-tooltip-centred"}`} style={tooltipStyle}>
+      <section ref={tooltip} className={`tour-tooltip ${targetBox ? "" : "tour-tooltip-centred"}`} style={tooltipStyle}>
         <div className="tour-progress-row">
           <span>Step {stepIndex + 1} of {tutorial.steps.length}</span>
           <button className="icon-button" aria-label="Exit tutorial" onClick={skip}><X size={19} /></button>
