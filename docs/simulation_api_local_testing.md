@@ -123,7 +123,10 @@ $run | Select-Object runId, status, policy, decisionMode,
   decisionAdapter, frameCount, decisionCount, metrics
 ```
 
-Expected stable engine values for seed `42`:
+Expected engine values for seed `42`. These were recorded before the #53
+engine changes (#62, #69) and are re-recorded from a real run once the #53
+stack (#62, #64, #69, #73, #76) has merged; until then the connected-run test
+checks determinism and outcome arithmetic rather than these exact counts:
 
 ```text
 status            COMPLETED
