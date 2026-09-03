@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CalendarDays, RefreshCw, Save, Sparkles, Store } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { DecisionExplanation, decisionReasonLabel } from "@/components/decision-reason";
 import { DeviceUpdateList, OfflineHint, useOnlineStatus, useOutbox } from "@/components/offline";
@@ -75,6 +75,19 @@ export default function CropDetailPage() {
   });
   const canEdit = actor?.role === "FARMER";
   const queued = useOutbox().filter((item) => item.cropBatchId === cropBatchId);
+  const jumped = useRef(false);
+
+  // The workspace links straight to the offer form, but that section does not
+  // exist until the crop has loaded, so the browser's own hash scroll fires too
+  // early and lands at the top of the page.
+  useEffect(() => {
+    if (jumped.current || !batch.data || !canEdit || window.location.hash !== "#offer-produce") return;
+    jumped.current = true;
+    document.getElementById("offer-produce")?.scrollIntoView({
+      block: "start",
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+    });
+  }, [batch.data, canEdit]);
 
   // An unsent update belongs to the farmer, not to this page view: restore it on
   // arrival and keep it written down until it is queued or sent.
@@ -304,7 +317,7 @@ export default function CropDetailPage() {
               <Card><SectionTitle title="What buyers expect" detail={batch.data.cropType} /><p>No published buyer standard is available for this crop yet.</p></Card>
             )}
           </div>
-          <div className="section-gap" data-tour="crop-listing"><Card>
+          <div className="section-gap" id="offer-produce" data-tour="crop-listing"><Card>
             <SectionTitle title="Offer produce to buyers" detail={`Up to ${batch.data.availableToPromise.value} kg safe to list`} />
             <form className="form-grid four-fields" onSubmit={(event: FormEvent) => { event.preventDefault(); listing.mutate(); }}>
               <div className="field"><label>Quantity (kg)</label><input type="number" min="0.1" max={batch.data.availableToPromise.value} step="0.1" value={listingQuantity} onChange={(event) => setListingQuantity(Number(event.target.value))} /></div>

@@ -1,24 +1,51 @@
 /**
- * The three coordination defects issue #53 identified, stated as behaviour.
+ * The engine defects issue #53 identified, stated as behaviour.
  *
  * None of these assert that Harvest beats the baseline. They assert the
  * mechanisms the fulfilment work added: a mission leaves once the produce is
  * reported ready rather than sitting until the delivery deadline, an order that
- * nobody could fill is matched again when new supply is reported, and every
- * demand that ended short is accounted for by exactly one cause. Whether those
+ * nobody could fill is matched again when new supply is reported, every demand
+ * that ended short is accounted for by exactly one cause, and no order is
+ * raised that the run's horizon will not let it settle. Whether those
  * mechanisms win is what `simulation/benchmarks/` records, and it is recorded
  * rather than asserted.
  */
 
 import { describe, expect, it } from 'vitest';
 
-import { UNMET_CAUSES, runScenario, type RunResult } from '../src/engine.js';
+import { SUBSTITUTION_GRACE_MS, UNMET_CAUSES, runScenario, type RunResult } from '../src/engine.js';
 import { MAX_READY_HOLD_MS } from '../src/policy/harvest.js';
 import { saintLuciaDemoV1 } from '../src/scenario/saint-lucia-demo-v1.js';
-import { HOUR_MS } from '../src/core/time.js';
+import type { ControlRoomDemand } from '../src/replay.js';
+import { DAY_MS, HOUR_MS, parseInstant } from '../src/core/time.js';
 
 const SCENARIO = saintLuciaDemoV1.scenarioId;
 const SEEDS = [42, 8675309, 7, 19, 31];
+
+/** The ten seeds `benchmarks/README.md` reports, so the tests cover what is published. */
+const BENCHMARK_SEEDS = [42, 8675309, 7, 19, 23, 31, 101, 202, 303, 404];
+
+/**
+ * The horizon, derived the way the engine derives it.
+ *
+ * Taken from the scenario rather than from a finished run's `endedAt`, which
+ * would make the assertion agree with whatever the run happened to do.
+ */
+const HORIZON_ENDS_AT = parseInstant(saintLuciaDemoV1.startsAtIso) + saintLuciaDemoV1.durationDays * DAY_MS;
+
+/**
+ * Every demand a run ever held, in the order the run first published it.
+ *
+ * Demands are never removed from the observed world, so the last frame would
+ * do; walking every frame is what makes the list independent of that.
+ */
+function raisedDemands(result: RunResult): ControlRoomDemand[] {
+  const byId = new Map<string, ControlRoomDemand>();
+  for (const frame of result.timeline?.frames ?? []) {
+    for (const demand of frame.demands) byId.set(demand.demandId, demand);
+  }
+  return [...byId.values()];
+}
 
 /**
  * How long each mission was planned to wait between being created and leaving.
@@ -136,5 +163,54 @@ describe('unmet demand causes', () => {
 
     expect(observed.size).toBeGreaterThan(1);
     for (const cause of observed) expect(UNMET_CAUSES).toContain(cause);
+  });
+});
+
+describe('demand the run cannot settle', () => {
+  it('never raises an order whose deadline falls past the horizon', () => {
+    let raised = 0;
+
+    for (const seed of BENCHMARK_SEEDS) {
+      for (const policy of ['BASELINE', 'HARVEST'] as const) {
+        const result = runScenario({ scenarioId: SCENARIO, policy, seed, captureFrames: true });
+        const demands = raisedDemands(result);
+        expect(demands.length).toBeGreaterThan(0);
+        raised += demands.length;
+
+        for (const demand of demands) {
+          // The buyer waits the substitution grace past its own deadline, and
+          // that is when the demand settles. An order whose grace closes after
+          // the horizon can never reach its settlement event.
+          expect(demand.neededBy + SUBSTITUTION_GRACE_MS).toBeLessThanOrEqual(HORIZON_ENDS_AT);
+        }
+      }
+    }
+
+    // A guard that suppressed demand generation wholesale would satisfy the
+    // bound above while measuring nothing.
+    expect(raised).toBeGreaterThan(100);
+  });
+
+  it('leaves no demand classified HORIZON_TRUNCATED across the benchmark seeds', () => {
+    for (const seed of BENCHMARK_SEEDS) {
+      for (const policy of ['BASELINE', 'HARVEST'] as const) {
+        const { metrics } = runScenario({ scenarioId: SCENARIO, policy, seed });
+        expect(metrics.causeCounts.HORIZON_TRUNCATED).toBe(0);
+      }
+    }
+  });
+
+  it('raises the same demand twice for the same seed', () => {
+    // The guard returns early from a handler that also draws the buyer's next
+    // order offset. Drawing that offset after the guard instead of before it
+    // would leave the run reproducible against itself but shift every later
+    // order, so a digest check alone is not enough: compare the orders.
+    for (const policy of ['BASELINE', 'HARVEST'] as const) {
+      const first = runScenario({ scenarioId: SCENARIO, policy, seed: 8675309, captureFrames: true });
+      const second = runScenario({ scenarioId: SCENARIO, policy, seed: 8675309, captureFrames: true });
+
+      expect(second.digest).toBe(first.digest);
+      expect(raisedDemands(second)).toEqual(raisedDemands(first));
+    }
   });
 });
