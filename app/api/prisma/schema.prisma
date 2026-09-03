@@ -151,6 +151,25 @@ model FarmPermission {
   @@map("farm_permissions")
 }
 
+model CropStandard {
+  id               String   @id @db.Uuid
+  cropType         String   @map("crop_type")
+  publisherActorId String   @map("publisher_actor_id") @db.Uuid
+  version          Int
+  status           String
+  reviewedAt       DateTime @map("reviewed_at") @db.Timestamptz(3)
+  geography        String
+  source           Json
+  checklist        Json
+  images           Json
+  guidance         Json
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([publisherActorId, cropType, version])
+  @@index([cropType, status, createdAt])
+  @@map("crop_standards")
+}
+
 model CropBatch {
   id                    String     @id @db.Uuid
   farmId                String     @map("farm_id") @db.Uuid
@@ -316,6 +335,7 @@ model Order {
   lifecycleStatus    String   @map("lifecycle_status")
   atRisk             Boolean  @default(false) @map("at_risk")
   activeExceptionIds Json     @map("active_exception_ids")
+  cropStandardId     String?  @map("crop_standard_id") @db.Uuid
   outcomeCause       String?  @map("outcome_cause")
   outcomeNote        String?  @map("outcome_note")
   traceId            String?  @map("trace_id") @db.Uuid

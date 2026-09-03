@@ -37,6 +37,12 @@ export default function OrderDetailPage() {
   const [nextAction, setNextAction] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const order = useQuery({ queryKey: ["order", orderId], queryFn: () => api.order(orderId), refetchInterval: 5_000 });
+  const standards = useQuery({
+    queryKey: ["crop-standards", order.data?.cropType],
+    queryFn: () => api.cropStandards(order.data!.cropType),
+    enabled: Boolean(order.data?.cropStandardId),
+    refetchInterval: 15_000,
+  });
   const mission = order.data?.deliveryMission;
   const allocationLines = order.data?.allocation?.lines ?? [];
   const resolvedLines = allocationLines.map((line) => ({ cropBatchId: line.cropBatchId, quantity: line.quantity.value, ...(lineValues[line.cropBatchId] ?? { accepted: line.quantity.value, rejected: 0 }) }));
@@ -70,6 +76,7 @@ export default function OrderDetailPage() {
   if (!order.data) return <LoadingState label="Loading order..." />;
   const lifecycle = lifecycleFor(order.data.lifecycleStatus);
   const currentIndex = lifecycle.indexOf(order.data.lifecycleStatus);
+  const appliedStandard = standards.data?.items.find((standard) => standard.standardId === order.data.cropStandardId);
   const requested = order.data.requestedQuantity.value;
   const committed = order.data.committedQuantity.value;
   // Only worth saying once something is actually committed and it is short.
@@ -93,6 +100,7 @@ export default function OrderDetailPage() {
       <div className="grid two-column section-gap">
         <Card>
           <SectionTitle title="Supply commitment" detail="Confirmed only after everyone approves" />
+          {order.data.cropStandardId && <p className="crop-standard-applied">Standard applied: <strong>{appliedStandard ? `${appliedStandard.publisherName} v${appliedStandard.version}` : "Loading standard..."}</strong></p>}
           {!order.data.allocation ? <p>Harvest is still finding safe supply for this order.</p> : (
             <div className="allocation-list">
               <div className="split"><span>Allocation status</span><Badge>{order.data.allocation.status}</Badge></div>

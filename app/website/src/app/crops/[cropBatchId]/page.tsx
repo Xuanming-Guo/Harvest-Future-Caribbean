@@ -9,6 +9,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { DecisionExplanation, decisionReasonLabel } from "@/components/decision-reason";
 import { DeviceUpdateList, OfflineHint, useOnlineStatus, useOutbox } from "@/components/offline";
 import { useSession } from "@/components/providers";
+import { CropStandardCard } from "@/components/crop-standard-card";
 import { Badge, Card, ErrorState, LoadingState, PageHeader, SectionTitle } from "@/components/ui";
 import { ApiProblem, api } from "@/lib/api";
 import { compactId, dateInputOffset, formatDate, formatPercent, titleCase } from "@/lib/format";
@@ -44,6 +45,12 @@ export default function CropDetailPage() {
   const [message, setMessage] = useState<string | null>(null);
 
   const batch = useQuery({ queryKey: ["crop-batch", cropBatchId], queryFn: () => api.cropBatch(cropBatchId), refetchInterval: 15_000 });
+  const standards = useQuery({
+    queryKey: ["crop-standards", batch.data?.cropType],
+    queryFn: () => api.cropStandards(batch.data!.cropType),
+    enabled: Boolean(batch.data?.cropType),
+    refetchInterval: 15_000,
+  });
   // Composed client-side from existing read endpoints. No new endpoint, and no
   // private farm coordinates are exposed here.
   const journey = useQuery({
@@ -220,6 +227,7 @@ export default function CropDetailPage() {
 
   if (batch.error) return <ErrorState error={batch.error} />;
   if (!batch.data) return <LoadingState label="Loading crop details..." />;
+  const standard = standards.data?.items.find((item) => item.status === "PUBLISHED");
 
   return (
     <>
@@ -303,17 +311,24 @@ export default function CropDetailPage() {
         </Card></div>
       )}
       {canEdit && (
-        <div className="section-gap" id="offer-produce" data-tour="crop-listing"><Card>
-          <SectionTitle title="Offer produce to buyers" detail={`Up to ${batch.data.availableToPromise.value} kg safe to list`} />
-          <form className="form-grid four-fields" onSubmit={(event: FormEvent) => { event.preventDefault(); listing.mutate(); }}>
-            <div className="field"><label>Quantity (kg)</label><input type="number" min="0.1" max={batch.data.availableToPromise.value} step="0.1" value={listingQuantity} onChange={(event) => setListingQuantity(Number(event.target.value))} /></div>
-            <div className="field"><label>Price per kg (EC$)</label><input type="number" min="0" step="0.25" value={price} onChange={(event) => setPrice(Number(event.target.value))} /></div>
-            <div className="field"><label>Available from</label><input type="date" value={availableFrom} onChange={(event) => setAvailableFrom(event.target.value)} /></div>
-            <div className="field"><label>Available until</label><input type="date" value={availableUntil} onChange={(event) => setAvailableUntil(event.target.value)} /></div>
-            {!online && <div className="field-full"><OfflineHint>No connection. This offer is kept on your device, and Harvest checks the safe quantity again before publishing it.</OfflineHint></div>}
-            <button className="button field-full" disabled={listing.isPending || listingQuantity > batch.data.availableToPromise.value}><Store size={16} />{listing.isPending ? "Publishing..." : "List in marketplace"}</button>
-          </form>
-        </Card></div>
+        <>
+          <div className="section-gap">
+            {standards.error ? <ErrorState error={standards.error} /> : !standards.data ? <LoadingState label="Loading buyer expectations..." /> : standard ? <CropStandardCard standard={standard} /> : (
+              <Card><SectionTitle title="What buyers expect" detail={batch.data.cropType} /><p>No published buyer standard is available for this crop yet.</p></Card>
+            )}
+          </div>
+          <div className="section-gap" id="offer-produce" data-tour="crop-listing"><Card>
+            <SectionTitle title="Offer produce to buyers" detail={`Up to ${batch.data.availableToPromise.value} kg safe to list`} />
+            <form className="form-grid four-fields" onSubmit={(event: FormEvent) => { event.preventDefault(); listing.mutate(); }}>
+              <div className="field"><label>Quantity (kg)</label><input type="number" min="0.1" max={batch.data.availableToPromise.value} step="0.1" value={listingQuantity} onChange={(event) => setListingQuantity(Number(event.target.value))} /></div>
+              <div className="field"><label>Price per kg (EC$)</label><input type="number" min="0" step="0.25" value={price} onChange={(event) => setPrice(Number(event.target.value))} /></div>
+              <div className="field"><label>Available from</label><input type="date" value={availableFrom} onChange={(event) => setAvailableFrom(event.target.value)} /></div>
+              <div className="field"><label>Available until</label><input type="date" value={availableUntil} onChange={(event) => setAvailableUntil(event.target.value)} /></div>
+              {!online && <div className="field-full"><OfflineHint>No connection. This offer is kept on your device, and Harvest checks the safe quantity again before publishing it.</OfflineHint></div>}
+              <button className="button field-full" disabled={listing.isPending || listingQuantity > batch.data.availableToPromise.value}><Store size={16} />{listing.isPending ? "Publishing..." : "List in marketplace"}</button>
+            </form>
+          </Card></div>
+        </>
       )}
       <div className="section-gap"><Card>
         <SectionTitle title="Journey" detail="Traceability evidence, not food-safety certification." />
