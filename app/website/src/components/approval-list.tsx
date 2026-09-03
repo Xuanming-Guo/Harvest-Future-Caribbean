@@ -10,7 +10,8 @@ import { DecisionReasonFields } from "./decision-reason";
 import { OfflineHint, useOnlineStatus } from "./offline";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, SectionTitle } from "./ui";
 
-export function ApprovalList({ compact = false }: { compact?: boolean }) {
+/** `embedded` drops the card shell when the caller already provides one. */
+export function ApprovalList({ compact = false, embedded = false }: { compact?: boolean; embedded?: boolean }) {
   const queryClient = useQueryClient();
   const online = useOnlineStatus();
   const [decliningId, setDecliningId] = useState<string | null>(null);
@@ -43,9 +44,8 @@ export function ApprovalList({ compact = false }: { compact?: boolean }) {
   // The Product API refuses a decline without a reason and a next action.
   const declineBlocked = !reasonCode || !nextAction.trim();
 
-  return (
-    <Card>
-      <SectionTitle title="Needs your decision" detail={`${approvals.data.items.length} pending`} />
+  const body = (
+    <>
       <div className="task-list">
         {approvals.data.items.map((approval) => (
           <article className="task-row approval-row" key={approval.approvalId}>
@@ -85,6 +85,14 @@ export function ApprovalList({ compact = false }: { compact?: boolean }) {
       </div>
       {!online && <OfflineHint>A commitment decision is never queued on a device. Reconnect to approve or decline.</OfflineHint>}
       {decision.error && <p className="form-error">{decision.error.message}</p>}
+    </>
+  );
+
+  if (embedded) return body;
+  return (
+    <Card>
+      <SectionTitle title="Needs your decision" detail={`${approvals.data.items.length} pending`} />
+      {body}
     </Card>
   );
 }
