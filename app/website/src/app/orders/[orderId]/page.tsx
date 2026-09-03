@@ -7,6 +7,7 @@ import { useParams } from "next/navigation";
 import { FormEvent, useState } from "react";
 
 import { ApprovalList } from "@/components/approval-list";
+import { DeliveryJourney } from "@/components/delivery-world";
 import { useSession } from "@/components/providers";
 import { Badge, Card, ErrorState, LoadingState, PageHeader, SectionTitle } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -30,6 +31,12 @@ export default function OrderDetailPage() {
   const [message, setMessage] = useState<string | null>(null);
   const order = useQuery({ queryKey: ["order", orderId], queryFn: () => api.order(orderId), refetchInterval: 5_000 });
   const mission = order.data?.deliveryMission;
+  const missionUpdates = useQuery({
+    queryKey: ["mission-updates", mission?.missionId],
+    queryFn: () => api.missionUpdates(mission!.missionId),
+    enabled: actor?.role === "BUYER" && Boolean(mission),
+    refetchInterval: 5_000,
+  });
   const allocationLines = order.data?.allocation?.lines ?? [];
   const resolvedLines = allocationLines.map((line) => ({ cropBatchId: line.cropBatchId, quantity: line.quantity.value, ...(lineValues[line.cropBatchId] ?? { accepted: line.quantity.value, rejected: 0 }) }));
   const accepted = resolvedLines.reduce((sum, line) => sum + line.accepted, 0);
@@ -77,6 +84,12 @@ export default function OrderDetailPage() {
           {order.data.deliveryAcceptance && <div className="notice section-gap"><strong>{titleCase(order.data.deliveryAcceptance.outcome)}</strong><span>{order.data.deliveryAcceptance.acceptedQuantity.value} kg accepted · {order.data.deliveryAcceptance.rejectedQuantity.value} kg rejected</span><small>Recorded {formatDate(order.data.deliveryAcceptance.acceptedAt)}</small></div>}
         </Card>
       </div>
+      {actor?.role === "BUYER" && mission && (
+        <div className="delivery-readonly-section">
+          <DeliveryJourney mission={mission} updates={missionUpdates.data?.items} compact />
+          {missionUpdates.error && <p className="form-error">Live delivery updates are unavailable. The order-linked route is still shown.</p>}
+        </div>
+      )}
       {actor?.role !== "COORDINATOR" && <div className="section-gap"><ApprovalList /></div>}
       {actor?.role === "BUYER" && mission?.status === "DELIVERED" && !order.data.deliveryAcceptance && (
         <Card className="section-gap">

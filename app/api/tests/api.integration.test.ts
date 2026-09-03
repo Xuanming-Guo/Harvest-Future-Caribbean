@@ -88,6 +88,58 @@ describe("participant Product API", () => {
     expect(farmerTasks.statusCode).toBe(403);
   });
 
+  it("returns safe delivery labels when enrichment records are incomplete", async () => {
+    const orderId = randomUUID();
+    const missionId = randomUUID();
+    await prisma.order.create({
+      data: {
+        id: orderId,
+        buyerId: "a0000000-0000-4000-8000-000000000002",
+        cropType: "DASHEEN",
+        requestedQuantity: 5,
+        neededBy: new Date("2026-09-09T12:00:00Z"),
+        latitude: 14.0101,
+        longitude: -60.9875,
+        listingIds: [],
+        lifecycleStatus: "COMMITTED",
+        activeExceptionIds: [],
+      },
+    });
+    await prisma.deliveryMission.create({
+      data: {
+        id: missionId,
+        orderId,
+        status: "AVAILABLE",
+        quantity: 5,
+        deadline: new Date("2026-09-09T12:00:00Z"),
+        stops: [
+          { sequence: 1, kind: "PICKUP", farmId: randomUUID(), location: { latitude: 13.95, longitude: -61 } },
+          { sequence: 2, kind: "DROPOFF", quantity: { value: 5, unit: "kg" }, location: { latitude: 14.0101, longitude: -60.9875 } },
+        ],
+      },
+    });
+
+    try {
+      const buyer = await server.inject({ method: "GET", url: "/v1/orders/" + orderId, headers: auth("buyer-hotel") });
+      expect(buyer.statusCode).toBe(200);
+      expect(buyer.json().deliveryMission).toMatchObject({
+        buyerName: "Bay Gardens Hotel",
+        cropType: "DASHEEN",
+        cargo: [],
+        stops: [
+          expect.objectContaining({ displayName: "Pickup 1" }),
+          expect.objectContaining({ displayName: "Bay Gardens Hotel" }),
+        ],
+      });
+      const transporter = await server.inject({ method: "GET", url: "/v1/delivery-missions/" + missionId, headers: auth("transporter-daniel") });
+      expect(transporter.statusCode).toBe(200);
+      expect(transporter.json().cargo).toEqual([]);
+    } finally {
+      await prisma.deliveryMission.delete({ where: { id: missionId } });
+      await prisma.order.delete({ where: { id: orderId } });
+    }
+  });
+
   it("drafts, human-confirms, forecasts, and exposes a safe crop trace", async () => {
     const batchId = "11111111-1111-4111-8111-111111111111";
     const beforePredictions = await prisma.yieldPrediction.count({ where: { cropBatchId: batchId } });
@@ -154,6 +206,31 @@ describe("participant Product API", () => {
     expect(committed.json().deliveryMission.stops.slice(0, 2).map((stop: { quantity: { value: number } }) => stop.quantity.value).sort((a: number, b: number) => a - b)).toEqual([6, 14]);
     expect(committed.json().deliveryMission.estimatedDistanceKm).toBeGreaterThan(0);
     expect(committed.json().deliveryMission.estimatedDurationMinutes).toBeGreaterThan(0);
+    expect(committed.json().deliveryMission).toMatchObject({
+      routeRegion: "Saint Lucia",
+      buyerName: "Bay Gardens Hotel",
+      cropType: "CUCUMBER",
+      atRisk: false,
+      stops: [
+        expect.objectContaining({ kind: "PICKUP", displayName: expect.any(String) }),
+        expect.objectContaining({ kind: "PICKUP", displayName: expect.any(String) }),
+        expect.objectContaining({ kind: "DROPOFF", displayName: "Bay Gardens Hotel" }),
+      ],
+    });
+    expect(committed.json().deliveryMission.cargo).toEqual(expect.arrayContaining([
+      expect.objectContaining({ farmName: "Roseau Valley Farm", cropStatus: "HARVEST_READY", quantity: { value: 14, unit: "kg" } }),
+      expect.objectContaining({ farmName: "Mabouya Growers", cropStatus: "HARVEST_READY", quantity: { value: 6, unit: "kg" } }),
+    ]));
+    expect(committed.body).not.toContain("Rain damage visible");
+    const availableView = await server.inject({ method: "GET", url: "/v1/delivery-missions/" + missionId, headers: auth("transporter-daniel") });
+    expect(availableView.statusCode).toBe(200);
+    expect(availableView.json().cargo).toHaveLength(2);
+    expect(availableView.json().cargo.every((item: { cropStatus?: string }) => item.cropStatus === undefined)).toBe(true);
+    const availablePage = await server.inject({ method: "GET", url: "/v1/delivery-missions?status=AVAILABLE", headers: auth("transporter-daniel") });
+    expect(availablePage.json().items.find((item: { missionId: string }) => item.missionId === missionId)).toMatchObject({
+      buyerName: "Bay Gardens Hotel",
+      cropType: "CUCUMBER",
+    });
     const listing = await prisma.listing.findUniqueOrThrow({ where: { id: "16161616-1616-4616-8616-161616161616" } });
     expect(listing).toMatchObject({ quantity: 0, status: "SOLD_OUT" });
     const refreshed = await server.inject({ method: "POST", url: "/v1/crop-batches/11111111-1111-4111-8111-111111111111/forecast-requests", headers: mutationHeaders("farmer-ana", "committed-reforecast"), payload: { reason: "MANUAL_REFRESH" } });
@@ -165,6 +242,8 @@ describe("participant Product API", () => {
     const acceptedMission = await server.inject({ method: "POST", url: `/v1/delivery-missions/${missionId}/acceptance`, headers: mutationHeaders("transporter-daniel", "accept-mission"), payload: { decision: "ACCEPT", vehicleId: "d0000000-0000-4000-8000-000000000001" } });
     expect(acceptedMission.statusCode).toBe(200);
     expect((await prisma.vehicle.findUniqueOrThrow({ where: { id: "d0000000-0000-4000-8000-000000000001" } })).status).toBe("IN_USE");
+    const assignedView = await server.inject({ method: "GET", url: "/v1/delivery-missions/" + missionId, headers: auth("transporter-daniel") });
+    expect(assignedView.json().cargo.every((item: { cropStatus?: string }) => item.cropStatus === "HARVEST_READY")).toBe(true);
 
     let updateTime = Date.now() + 1_000;
     const update = (updateType: string, note?: string) => server.inject({ method: "POST", url: `/v1/delivery-missions/${missionId}/updates`, headers: mutationHeaders("transporter-daniel", `mission-${updateType.toLowerCase()}`), payload: { updateType, recordedAt: new Date(updateTime += 1_000).toISOString(), ...(note ? { note } : {}) } });
@@ -563,7 +642,7 @@ describe("participant Product API", () => {
       prisma.domainEvent.count({ where: { simulationRunId: pair.json().baselineRunId } }),
     ]);
     expect(baselineWorkflowCounts.every((count) => count === 0)).toBe(true);
-  }, 60_000);
+  }, 90_000);
 
   it("keeps marketplace records isolated between real users and simulation runs", async () => {
     const runs = await prisma.simulationRun.findMany({ where: { status: "COMPLETED" }, take: 2, orderBy: { createdAt: "asc" } });

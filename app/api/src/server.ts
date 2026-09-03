@@ -11,6 +11,7 @@ import { registerAuthentication, requireRole, signDevelopmentToken, type AuthAct
 import { operationNow, registerOperationClock } from "./clock.js";
 import { config } from "./config.js";
 import { prisma } from "./db.js";
+import { deliveryMissionView, deliveryMissionViews } from "./delivery-view.js";
 import { recordEvent } from "./events.js";
 import { assertObjectBody, httpError, idempotent, readLocation, readQuantity, sendProblem } from "./http.js";
 import { registerSimulationRoutes } from "./simulation-routes.js";
@@ -562,7 +563,7 @@ export async function buildServer() {
       ...orderDto(row),
       ...(allocation ? { allocation: { allocationId: allocation.id, status: allocation.status, lines: summarizedLines } } : {}),
       approvalSummary: summarizeApprovals(approvals, actor.id),
-      ...(mission ? { deliveryMission: missionDto(mission) } : {}),
+      ...(mission ? { deliveryMission: await deliveryMissionView(mission, actor) } : {}),
       ...(acceptance ? { deliveryAcceptance: deliveryAcceptanceDto(acceptance) } : {}),
     };
   });
@@ -605,7 +606,7 @@ export async function buildServer() {
     const orderIds = await visibleOrderIds(actor);
     const where = actor.role === "TRANSPORTER" ? { OR: [{ status: "AVAILABLE" }, { transporterId: actor.id }] } : actor.role === "ADMIN" || actor.role === "OPERATIONS" ? {} : { orderId: { in: orderIds } };
     const rows = await prisma.deliveryMission.findMany({ where: { ...actorRunScope(actor), ...where, ...(typeof query.status === "string" ? { status: query.status } : {}) }, orderBy: { deadline: "asc" }, take: queryLimit(query.limit) });
-    return { items: rows.map(missionDto), pageInfo };
+    return { items: await deliveryMissionViews(rows, actor), pageInfo };
   });
 
   server.get("/v1/delivery-missions/:missionId", async (request) => {
@@ -614,7 +615,7 @@ export async function buildServer() {
     const row = await prisma.deliveryMission.findUnique({ where: { id: missionId } });
     if (!row) throw httpError(404, "MISSION_NOT_FOUND", "Delivery mission was not found.");
     if (!(await canSeeMission(actor, row))) throw httpError(404, "MISSION_NOT_FOUND", "Delivery mission was not found.");
-    return missionDto(row);
+    return deliveryMissionView(row, actor);
   });
 
   server.get("/v1/delivery-missions/:missionId/updates", async (request) => {

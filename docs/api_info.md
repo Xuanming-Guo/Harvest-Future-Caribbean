@@ -329,7 +329,9 @@ scope, not only the role name.
 - Request: order UUID.
 - Response: quantities, deadline, lifecycle status, `atRisk`, active exception
   IDs, timestamps, safe allocation, approval totals and the caller's approval,
-  trace ID, related delivery mission, and immutable delivery acceptance when recorded.
+  trace ID, related enriched delivery mission, and immutable delivery acceptance
+  when recorded. The mission view includes role-safe route labels and only the
+  crop batches allocated to this order.
   Private farm coordinates are not exposed here.
 - Product state/event: none.
 - Simulation effect: none.
@@ -381,9 +383,10 @@ scope, not only the role name.
 - Callers: transporter (available/owned jobs) and actors participating in the
   related order; coordinators remain limited to relevant orders.
 - Request: optional status, cursor, limit.
-- Response: visible mission page with route stops, quantity, deadline,
-  assignment/status, pickup batch quantities, estimated distance/duration/
-  arrival, and `pageInfo`.
+- Response: visible mission page with route stops, safe farm/buyer labels,
+  order crop and risk, allocated cargo, quantity, deadline, assignment/status,
+  estimated distance/duration/arrival, and `pageInfo`. Crop status is withheld
+  from an available job until that transporter accepts it.
 - Product state/event: none.
 - Simulation effect: none until a simulated transporter takes its scheduled
   browse/accept action.
@@ -396,7 +399,9 @@ scope, not only the role name.
   related order.
 - Request: mission UUID.
 - Response: mission/order IDs, status, assignment, vehicle, quantity, deadline,
-  and ordered stops.
+  ordered labelled stops, order crop/risk, buyer name, and allocated cargo.
+  Buyers see crop status only for batches committed to their own order;
+  transporters see it only after assignment.
 - Product state/event: none.
 - Simulation effect: none.
 - Consumers: transporter job detail and participant delivery tracking.

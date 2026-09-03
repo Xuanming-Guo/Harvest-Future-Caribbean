@@ -1,11 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeft, Check, MapPin, PackageCheck, Truck } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Check, MapPin, PackageCheck } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { type FormEvent, useState } from "react";
 
+import { DeliveryJourney, VehiclePicker } from "@/components/delivery-world";
 import { useSession } from "@/components/providers";
 import { Badge, Card, ErrorState, LoadingState, PageHeader, SectionTitle } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -23,69 +24,114 @@ export default function MissionDetailPage() {
   const vehicles = useQuery({ queryKey: ["vehicles"], queryFn: api.vehicles, enabled: actor?.role === "TRANSPORTER", refetchInterval: 5_000 });
   const accept = useMutation({
     mutationFn: () => {
-      if (!vehicleId) throw new Error("Select an available vehicle first.");
+      if (!vehicleId) throw new Error("Choose an available vehicle first.");
       return api.acceptMission(missionId, vehicleId);
     },
-    onSuccess: () => { setMessage("Delivery job accepted."); void queryClient.invalidateQueries(); },
+    onSuccess: () => {
+      setMessage("Delivery route claimed. Crop readiness is now available at each pickup farm.");
+      void queryClient.invalidateQueries();
+    },
   });
   const update = useMutation({
     mutationFn: (updateType: "PICKED_UP" | "ARRIVED" | "DELIVERED") => api.updateMission(missionId, updateType),
-    onSuccess: () => { setMessage("Delivery progress updated."); void queryClient.invalidateQueries(); },
+    onSuccess: () => {
+      setMessage("Delivery progress updated.");
+      void queryClient.invalidateQueries();
+    },
   });
   const delay = useMutation({
     mutationFn: async () => {
       await api.updateMission(missionId, "DELAYED", delayNote);
       return api.createException({ exceptionType: "DELAY", severity: "HIGH", affectedEntityIds: [missionId], description: delayNote, provenance: "OBSERVED" });
     },
-    onSuccess: () => { setMessage("Delay reported to the coordinator."); setDelayNote(""); void queryClient.invalidateQueries(); },
+    onSuccess: () => {
+      setMessage("Delay reported to the coordinator and hotel.");
+      setDelayNote("");
+      void queryClient.invalidateQueries();
+    },
   });
 
   if (mission.error) return <ErrorState error={mission.error} />;
-  if (!mission.data) return <LoadingState label="Loading delivery details..." />;
+  if (!mission.data) return <LoadingState label="Drawing the delivery route..." />;
+
   const isTransporter = actor?.role === "TRANSPORTER";
   const back = isTransporter ? "/transporter" : actor?.role === "BUYER" ? "/buyer" : "/orders";
   const currentStop = mission.data.currentStopSequence > 0 ? mission.data.stops[mission.data.currentStopSequence - 1] : undefined;
   const currentPickupConfirmed = currentStop?.kind === "PICKUP" && updates.data?.items.some((item) => item.updateType === "PICKED_UP" && item.stopSequence === currentStop.sequence);
-  const mayArrive = ["ASSIGNED", "PICKUP_IN_PROGRESS", "IN_TRANSIT"].includes(mission.data.status) && mission.data.currentStopSequence < mission.data.stops.length && (currentStop?.kind !== "PICKUP" || currentPickupConfirmed);
+  const mayArrive = ["ASSIGNED", "PICKUP_IN_PROGRESS", "IN_TRANSIT"].includes(mission.data.status) &&
+    mission.data.currentStopSequence < mission.data.stops.length &&
+    (currentStop?.kind !== "PICKUP" || currentPickupConfirmed);
   const mayConfirmPickup = mission.data.status === "PICKUP_IN_PROGRESS" && currentStop?.kind === "PICKUP" && !currentPickupConfirmed;
-  const mayDeliver = mission.data.status === "IN_TRANSIT" && mission.data.currentStopSequence === mission.data.stops.length && currentStop?.kind === "DROPOFF";
+  const mayDeliver = mission.data.status === "IN_TRANSIT" &&
+    mission.data.currentStopSequence === mission.data.stops.length &&
+    currentStop?.kind === "DROPOFF";
+  const mutationError = accept.error ?? update.error ?? delay.error;
+
+  const controls = isTransporter ? (
+    <>
+      {mission.data.status === "AVAILABLE" && (
+        <>
+          <VehiclePicker vehicles={vehicles.data?.items ?? []} value={vehicleId} onChange={setVehicleId} />
+          <div className="mission-action-row">
+            <button className="button" disabled={accept.isPending || !vehicleId} onClick={() => accept.mutate()}><Check size={17} />Accept delivery</button>
+          </div>
+        </>
+      )}
+      {(mayArrive || mayConfirmPickup || mayDeliver) && (
+        <div className="mission-action-row">
+          {mayArrive && <button className="button" disabled={update.isPending} onClick={() => update.mutate("ARRIVED")}><MapPin size={17} />Arrived at next stop</button>}
+          {mayConfirmPickup && <button className="button" disabled={update.isPending} onClick={() => update.mutate("PICKED_UP")}><PackageCheck size={17} />Confirm pickup</button>}
+          {mayDeliver && <button className="button button-secondary" disabled={update.isPending} onClick={() => update.mutate("DELIVERED")}><Check size={17} />Mark delivered</button>}
+        </div>
+      )}
+      {mission.data.status === "DELIVERED" && <p className="form-success">Every stop is complete. The hotel can now record the delivery outcome.</p>}
+      {mission.data.status === "CANCELLED" && <p className="form-error">This route was cancelled. No further updates can be recorded.</p>}
+    </>
+  ) : undefined;
 
   return (
     <>
       <Link className="back-link" href={back}><ArrowLeft size={16} />Back</Link>
-      <PageHeader eyebrow="Delivery" title={`${mission.data.quantity.value} kg local delivery`} description={`Due ${formatDate(mission.data.deadline)}`} actions={<Badge>{mission.data.status}</Badge>} />
-      <div className="grid two-column">
+      <PageHeader
+        eyebrow="Delivery journey"
+        title={mission.data.quantity.value + " kg " + titleCase(mission.data.cropType) + " to " + mission.data.buyerName}
+        description={"Due " + formatDate(mission.data.deadline) + " · " + mission.data.routeRegion}
+        actions={<Badge tone={mission.data.atRisk ? "high" : undefined}>{mission.data.atRisk ? "At risk" : mission.data.status}</Badge>}
+      />
+      <div className="mission-detail-grid">
+        <DeliveryJourney
+          mission={mission.data}
+          updates={updates.data?.items}
+          controls={controls}
+          vehicleLabel={vehicles.data?.items.find((vehicle) => vehicle.vehicleId === (mission.data.vehicleId ?? vehicleId))?.label}
+        />
         <Card>
-          <SectionTitle title="Route" detail={`${mission.data.stops.length} stops`} />
-          <div className="stops-list">
-            {mission.data.stops.map((stop) => <div key={stop.sequence}><span className="stop-number">{stop.sequence}</span><MapPin size={19} /><span><strong>{titleCase(stop.kind)}</strong><small>{stop.location.latitude.toFixed(4)}, {stop.location.longitude.toFixed(4)}</small></span></div>)}
-          </div>
-        </Card>
-        <Card>
-          <SectionTitle title="Job details" detail={titleCase(mission.data.status)} />
-          <div className="info-list"><div><PackageCheck /><span><strong>{mission.data.quantity.value} kg</strong><small>Produce quantity</small></span></div><div><Truck /><span><strong>{mission.data.vehicleId ? "Vehicle assigned" : "No vehicle yet"}</strong><small>Transport status</small></span></div></div>
-          {isTransporter && <div className="mission-actions">
-            {mission.data.status === "AVAILABLE" && <><div className="field"><label htmlFor="mission-vehicle">Vehicle</label><select id="mission-vehicle" value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}><option value="">Select a vehicle</option>{vehicles.data?.items.map((vehicle) => <option value={vehicle.vehicleId} disabled={vehicle.status !== "AVAILABLE"} key={vehicle.vehicleId}>{vehicle.label} · {vehicle.status}</option>)}</select></div><button className="button" disabled={accept.isPending || !vehicleId} onClick={() => accept.mutate()}><Check size={17} />Accept job</button></>}
-            {mayArrive && <button className="button" disabled={update.isPending} onClick={() => update.mutate("ARRIVED")}><MapPin size={17} />Arrived at next stop</button>}
-            {mayConfirmPickup && <button className="button" disabled={update.isPending} onClick={() => update.mutate("PICKED_UP")}><PackageCheck size={17} />Confirm pickup</button>}
-            {mayDeliver && <button className="button button-secondary" disabled={update.isPending} onClick={() => update.mutate("DELIVERED")}><Check size={17} />Mark delivered</button>}
-          </div>}
+          <SectionTitle title="Delivery timeline" detail={(updates.data?.items.length ?? 0) + " updates"} />
+          {!updates.data?.items.length ? (
+            <p>No progress updates have been recorded yet.</p>
+          ) : (
+            <div className="task-list">
+              {updates.data.items.map((item) => (
+                <article className="task-row" key={item.updateId}>
+                  <div><Badge>{item.updateType}</Badge><h3>{titleCase(item.updateType)}</h3><p>{item.note ?? (item.stopSequence ? "Route stop " + item.stopSequence : "Mission progress recorded")}</p><small>{formatDate(item.recordedAt)}</small></div>
+                </article>
+              ))}
+            </div>
+          )}
         </Card>
       </div>
-      <Card className="section-gap">
-        <SectionTitle title="Delivery timeline" detail={`${updates.data?.items.length ?? 0} updates`} />
-        {!updates.data?.items.length ? <p>No progress updates have been recorded yet.</p> : <div className="task-list">{updates.data.items.map((item) => <article className="task-row" key={item.updateId}><div><Badge>{item.updateType}</Badge><h3>{titleCase(item.updateType)}</h3><p>{item.note ?? (item.stopSequence ? `Route stop ${item.stopSequence}` : "Mission progress recorded")}</p><small>{formatDate(item.recordedAt)}</small></div></article>)}</div>}
-      </Card>
-      {isTransporter && mission.data.status !== "AVAILABLE" && mission.data.status !== "DELIVERED" && (
+      {updates.error && <p className="form-error">The delivery timeline could not be loaded. Mission details are still available.</p>}
+      {vehicles.error && <p className="form-error">Vehicle options could not be loaded. Try again before accepting this route.</p>}
+      {isTransporter && !["AVAILABLE", "DELIVERED", "CANCELLED"].includes(mission.data.status) && (
         <Card className="section-gap">
-          <SectionTitle title="Report a delay or problem" detail="The coordinator will be notified" />
+          <SectionTitle title="Report a delay or problem" detail="The coordinator and hotel will be notified" />
           <form className="form-inline" onSubmit={(event: FormEvent) => { event.preventDefault(); delay.mutate(); }}>
             <div className="field"><label htmlFor="delay">What happened?</label><input id="delay" required minLength={3} value={delayNote} onChange={(event) => setDelayNote(event.target.value)} placeholder="For example: road closure near Castries" /></div>
             <button className="button button-danger" disabled={delay.isPending}><AlertTriangle size={17} />Report problem</button>
           </form>
         </Card>
       )}
-      {(message || accept.error || update.error || delay.error) && <p className={(accept.error || update.error || delay.error) ? "form-error" : "form-success"}>{message ?? accept.error?.message ?? update.error?.message ?? delay.error?.message}</p>}
+      {(message || mutationError) && <p className={mutationError ? "form-error" : "form-success"}>{message ?? mutationError?.message}</p>}
     </>
   );
 }
