@@ -72,12 +72,29 @@ function overviewHeightMeters(scene: ControlRoomScene): number {
 }
 
 /**
+ * OpenStreetMap's standard tile layer: ODbL data, no account, no key.
+ *
+ * This is the default imagery (#58). It is a cartographic rendering rather
+ * than photography, so the island reads as a map rather than a place at the
+ * altitudes this demo flies to; that trade was made deliberately so the globe
+ * runs on openly licensed tiles that match the licensed reference places.
+ *
+ * The public tile server's usage policy allows light demo traffic only. A
+ * production deployment must point this at a dedicated tile host.
+ */
+const OSM_TILE_URL = "https://tile.openstreetmap.org/";
+
+/**
+ * OpenStreetMap publishes levels 0–19; requests beyond that return nothing.
+ */
+const OSM_MAXIMUM_LEVEL = 19;
+
+/**
  * Esri's World Imagery: global satellite photography, no account, no key.
  *
- * This is the difference between the globe reading as a real place and reading
- * as a road atlas. OpenStreetMap tiles are a *cartographic* rendering — roads,
- * labels, flat green landcover — so at the altitudes this demo flies to, the
- * island looked drawn rather than photographed.
+ * Kept as the last-resort fallback because it looks better than a road atlas
+ * when the demo is flying low, but its terms of use are stricter than OSM's,
+ * so it is no longer the layer a fresh load reaches for first.
  */
 const ESRI_WORLD_IMAGERY =
   "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer";
@@ -100,12 +117,12 @@ const ESRI_TILE_TEMPLATE = `${ESRI_WORLD_IMAGERY}/tile/{z}/{y}/{x}`;
 const ESRI_MAXIMUM_LEVEL = 19;
 
 /**
- * Builds the base imagery layer, best available first.
+ * Builds the base imagery layer, most openly licensed first.
  *
- * Ordered ion (if a token exists) → Esri satellite → OpenStreetMap. Each step
+ * Ordered ion (if a token exists) → OpenStreetMap → Esri satellite. Each step
  * is wrapped because imagery is fetched over the network at construction time,
  * and a demo that shows a blank blue sphere when a third-party tile service is
- * having a bad morning is worse than one that quietly falls back to a map.
+ * having a bad morning is worse than one that quietly falls back.
  */
 async function createBaseLayer(
   Cesium: CesiumModule,
@@ -120,29 +137,34 @@ async function createBaseLayer(
   }
 
   try {
-    // Addressed as a plain tile template rather than through
-    // `ArcGisMapServerImageryProvider.fromUrl`.
-    //
-    // That provider derives its tiling scheme and level range from the
-    // service's own metadata, and here it got them wrong: it requested
-    // `tile/23/0/0` — the maximum level at the corner of the world — and
-    // stretched that one dark ocean tile across the entire globe. The result
-    // looked exactly like a globe that had failed to load any imagery at all,
-    // when in fact every request was returning HTTP 200. Pinning the tiling
-    // scheme and the level range makes the behaviour deterministic and
-    // independent of whatever the service reports about itself.
-    const provider = new Cesium.UrlTemplateImageryProvider({
-      url: ESRI_TILE_TEMPLATE,
-      tilingScheme: new Cesium.WebMercatorTilingScheme(),
-      maximumLevel: ESRI_MAXIMUM_LEVEL,
-      credit: new Cesium.Credit("Imagery: Esri World Imagery", false),
+    const provider = new Cesium.OpenStreetMapImageryProvider({
+      url: OSM_TILE_URL,
+      maximumLevel: OSM_MAXIMUM_LEVEL,
+      credit: new Cesium.Credit("© OpenStreetMap contributors", false),
     });
     return new Cesium.ImageryLayer(provider);
   } catch {
-    return new Cesium.ImageryLayer(
-      new Cesium.OpenStreetMapImageryProvider({ url: "https://tile.openstreetmap.org/" }),
-    );
+    // Fall through to Esri below.
   }
+
+  // Addressed as a plain tile template rather than through
+  // `ArcGisMapServerImageryProvider.fromUrl`.
+  //
+  // That provider derives its tiling scheme and level range from the
+  // service's own metadata, and here it got them wrong: it requested
+  // `tile/23/0/0` — the maximum level at the corner of the world — and
+  // stretched that one dark ocean tile across the entire globe. The result
+  // looked exactly like a globe that had failed to load any imagery at all,
+  // when in fact every request was returning HTTP 200. Pinning the tiling
+  // scheme and the level range makes the behaviour deterministic and
+  // independent of whatever the service reports about itself.
+  const provider = new Cesium.UrlTemplateImageryProvider({
+    url: ESRI_TILE_TEMPLATE,
+    tilingScheme: new Cesium.WebMercatorTilingScheme(),
+    maximumLevel: ESRI_MAXIMUM_LEVEL,
+    credit: new Cesium.Credit("Imagery: Esri World Imagery", false),
+  });
+  return new Cesium.ImageryLayer(provider);
 }
 
 /**
