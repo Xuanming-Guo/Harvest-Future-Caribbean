@@ -10,6 +10,32 @@ interface ObservableOrder {
   id: string;
   lifecycleStatus: string;
   neededBy: Date;
+  outcomeCause: string | null;
+}
+
+/**
+ * Every non-fulfilled order gets exactly one cause. The recorded cause wins;
+ * when an order simply ran out of time in a state that never recorded one,
+ * the state itself is the explanation.
+ */
+export function deriveOutcomeCause(
+  order: Pick<ObservableOrder, "lifecycleStatus" | "outcomeCause">,
+): string {
+  if (order.outcomeCause) return order.outcomeCause;
+  switch (order.lifecycleStatus) {
+    case "PARTIALLY_FULFILLED":
+    case "REJECTED":
+      return "DELIVERY_REJECTED";
+    case "CANCELLED":
+      return "CANCELLED";
+    case "AWAITING_APPROVAL":
+      return "APPROVAL_TIMEOUT";
+    case "COMMITTED":
+    case "IN_DELIVERY":
+      return "MISSION_LATE";
+    default:
+      return "NO_READY_SUPPLY";
+  }
 }
 
 export interface OperationsSnapshotQuery {
@@ -27,9 +53,10 @@ export interface OperationsSnapshotQuery {
  * then it remains pending rather than being reported as a failure early.
  */
 export function summarizeOrderOutcomes(
-  orders: Array<Pick<ObservableOrder, "lifecycleStatus" | "neededBy">>,
+  orders: Array<Pick<ObservableOrder, "lifecycleStatus" | "neededBy"> & Partial<Pick<ObservableOrder, "outcomeCause">>>,
   asOf: Date,
 ): SimulationOrderOutcomes {
+  const causes = new Map<string, number>();
   const outcomes: SimulationOrderOutcomes = {
     total: orders.length,
     fulfilled: 0,
@@ -37,23 +64,30 @@ export function summarizeOrderOutcomes(
     unfulfilled: 0,
     pending: 0,
   };
+  const countCause = (order: (typeof orders)[number]) => {
+    const cause = deriveOutcomeCause({ lifecycleStatus: order.lifecycleStatus, outcomeCause: order.outcomeCause ?? null });
+    causes.set(cause, (causes.get(cause) ?? 0) + 1);
+  };
 
   for (const order of orders) {
     if (order.lifecycleStatus === "FULFILLED") {
       outcomes.fulfilled += 1;
     } else if (order.lifecycleStatus === "PARTIALLY_FULFILLED") {
       outcomes.partiallyFulfilled += 1;
+      countCause(order);
     } else if (
       order.lifecycleStatus === "REJECTED" ||
       order.lifecycleStatus === "CANCELLED" ||
       order.neededBy.getTime() <= asOf.getTime()
     ) {
       outcomes.unfulfilled += 1;
+      countCause(order);
     } else {
       outcomes.pending += 1;
     }
   }
 
+  outcomes.causes = Object.fromEntries([...causes.entries()].sort(([left], [right]) => left.localeCompare(right)));
   return outcomes;
 }
 
@@ -66,7 +100,7 @@ export async function buildOperationsSnapshot(
     prisma.buyerDemand.count({ where: query.demandWhere }),
     prisma.order.findMany({
       where: query.orderWhere,
-      select: { id: true, lifecycleStatus: true, neededBy: true },
+      select: { id: true, lifecycleStatus: true, neededBy: true, outcomeCause: true },
       orderBy: { id: "asc" },
     }),
     prisma.deliveryMission.findMany({

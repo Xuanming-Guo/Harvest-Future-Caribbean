@@ -28,6 +28,7 @@
         "VERIFICATION_DECIDED",
         "FORECAST_PRODUCED",
         "LISTING_PUBLISHED",
+        "LISTING_EXPIRED",
         "BUYER_DEMAND_CREATED",
         "ORDER_REQUESTED",
         "ALLOCATION_PROPOSED",
@@ -83,6 +84,7 @@
         { "$ref": "#/$defs/VerificationPayload" },
         { "$ref": "#/$defs/ForecastProducedPayload" },
         { "$ref": "#/$defs/ListingPublishedPayload" },
+        { "$ref": "#/$defs/ListingExpiredPayload" },
         { "$ref": "#/$defs/BuyerDemandCreatedPayload" },
         { "$ref": "#/$defs/OrderRequestedPayload" },
         { "$ref": "#/$defs/AllocationPayload" },
@@ -121,6 +123,10 @@
     {
       "if": { "properties": { "eventType": { "const": "LISTING_PUBLISHED" } } },
       "then": { "properties": { "payload": { "$ref": "#/$defs/ListingPublishedPayload" } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "LISTING_EXPIRED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/ListingExpiredPayload" } } }
     },
     {
       "if": { "properties": { "eventType": { "const": "BUYER_DEMAND_CREATED" } } },
@@ -276,6 +282,16 @@
         "cropBatchId": { "$ref": "../common.schema.json#/$defs/Uuid" },
         "quantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
         "availableFrom": { "type": "string", "format": "date" }
+      }
+    },
+    "ListingExpiredPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["listingId", "cropBatchId", "availableUntil"],
+      "properties": {
+        "listingId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "cropBatchId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "availableUntil": { "type": "string", "format": "date" }
       }
     },
     "BuyerDemandCreatedPayload": {
@@ -641,6 +657,21 @@
       "schemaVersion": "1.0",
       "provenance": "SYNTHETIC",
       "payload": {"listingId": "13000000-0000-4000-8000-000000000001", "cropBatchId": "10000000-0000-4000-8000-000000000001", "quantity": {"value": 200, "unit": "kg"}, "availableFrom": "2026-08-10"}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000103",
+      "eventType": "LISTING_EXPIRED",
+      "occurredAt": "2026-08-18T00:05:00Z",
+      "simulationTime": "2026-09-12T00:05:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000003",
+      "entityId": "13000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000001",
+      "causationId": "e0000000-0000-4000-8000-000000000003",
+      "schemaVersion": "1.0",
+      "provenance": "INFERRED",
+      "payload": {"listingId": "13000000-0000-4000-8000-000000000001", "cropBatchId": "10000000-0000-4000-8000-000000000001", "availableUntil": "2026-08-17"}
     },
     {
       "eventId": "e0000000-0000-4000-8000-000000000004",

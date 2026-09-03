@@ -871,7 +871,11 @@ async function processObservationFrame(
       tools.query<CropBatchDto>(farmer, `/v1/crop-batches/${cropBatchId}`),
       tools.query<Page<ListingDto>>(farmer, "/v1/listings?limit=100"),
     ]);
-    if (!listings.items.some((item) => item.cropBatchId === cropBatchId && item.status === "ACTIVE") && productBatch.availableToPromise.value > 0) {
+    // Only observably ready produce is offered. ATP is already zero for a
+    // growing batch, but the stage check keeps the participant's intent
+    // honest even if a forecast path ever leaks supply early.
+    const readyToList = productBatch.status === "HARVEST_READY" || productBatch.status === "HARVESTED";
+    if (readyToList && !listings.items.some((item) => item.cropBatchId === cropBatchId && item.status === "ACTIVE") && productBatch.availableToPromise.value > 0) {
       recordResult(await tools.publishListing(farmer, frame.at, {
         cropBatchId,
         quantity: kilograms(productBatch.availableToPromise.value),

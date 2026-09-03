@@ -29,6 +29,7 @@ schema-validated envelope for every event type below.
 | `VERIFICATION_DECIDED` | A coordinator verifies an observation or requests changes | task, crop batch, observation, final status, optional note | Complete the verification action; never alter hidden crop truth |
 | `FORECAST_PRODUCED` | A model response is validated and ATP is calculated | prediction, crop batch, q10 yield, ATP | Record the prediction for later predicted-versus-actual comparison |
 | `LISTING_PUBLISHED` | Safely orderable supply is published | listing, batch, quantity, availability date | Make the listing discoverable during later buyer actions |
+| `LISTING_EXPIRED` | An active listing's `availableUntil` date has passed | listing, batch, availability end date | Stop offering the listing; no inventory or reservation changes |
 | `BUYER_DEMAND_CREATED` | Buyer demand is stored | demand, crop, quantity, deadline | Mark demand pending and schedule eligible actor reactions |
 | `ORDER_REQUESTED` | An order is created | order, crop, requested quantity, `REQUESTED` | Mark the buyer's order pending and schedule matching |
 | `ALLOCATION_PROPOSED` | A non-binding multi-farm allocation is saved | allocation, order, batch quantities | Schedule the relevant approval actions |

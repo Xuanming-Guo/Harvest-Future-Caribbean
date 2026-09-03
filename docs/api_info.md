@@ -276,12 +276,17 @@ scope, not only the role name.
 - Request: `cropBatchId`, `quantity`, `unitPrice`, `availableFrom`,
   `availableUntil`.
 - Response: listing ID plus owner/crop/status/created time and submitted fields.
-- Product state/event: verify quantity is within current ATP, store active
-  listing, and emit `LISTING_PUBLISHED`.
+- Product state/event: verify the batch is reported `HARVEST_READY` or
+  `HARVESTED` and the quantity is within current ATP, store the active
+  listing, emit `LISTING_PUBLISHED`, then re-run matching once for every
+  `REQUESTED` order of that crop whose deadline is still ahead (oldest
+  deadline first). Before any matching pass, listings whose `availableUntil`
+  has passed move to `EXPIRED` with `LISTING_EXPIRED`.
 - Simulation effect: make supply discoverable to eligible buyer actors at later
   scheduled actions; do not change biological yield.
 - Consumers: farmer inventory/listing view, marketplace, operations supply.
-- Rules/failures: return `422` when quantity exceeds ATP or dates/prices are
+- Rules/failures: return `422` `CROP_NOT_READY` for a growing batch, `422`
+  `ATP_EXCEEDED` when quantity exceeds ATP, `422` when dates/prices are
   invalid; `409` when a concurrent reservation makes supply unsafe.
 
 #### `POST /v1/buyer-demands`
@@ -304,9 +309,13 @@ scope, not only the role name.
 - Request: `cropType`, `requestedQuantity`, `neededBy`, `deliveryLocation`;
   optional candidate `listingIds`.
 - Response: order ID, buyer ID, requested/accepted quantities, lifecycle status,
-  risk overlay, timestamps.
+  risk overlay, timestamps, and `outcomeCause`/`outcomeNote` once matching has
+  run.
 - Product state/event: store `REQUESTED`, start matching, and emit
-  `ORDER_REQUESTED`. Creation does not reserve stock.
+  `ORDER_REQUESTED`. Creation does not reserve stock. An order that cannot be
+  fully covered stays `REQUESTED` with `outcomeCause` `NO_READY_SUPPLY` or
+  `INSUFFICIENT_SUPPLY` and is re-matched automatically when a later listing
+  of the same crop is published.
 - Simulation effect: mark buyer demand pending and schedule matching/actor
   reactions.
 - Consumers: buyer marketplace and order timeline.
@@ -329,7 +338,10 @@ scope, not only the role name.
 - Request: order UUID.
 - Response: quantities, deadline, lifecycle status, `atRisk`, active exception
   IDs, timestamps, safe allocation, approval totals and the caller's approval,
-  trace ID, related delivery mission, and immutable delivery acceptance when recorded.
+  trace ID, related delivery mission, immutable delivery acceptance when
+  recorded, and `outcomeCause`/`outcomeNote` (the latest recorded reason the
+  order is not fulfilled: `NO_READY_SUPPLY`, `INSUFFICIENT_SUPPLY`,
+  `SUPPLY_CHANGED`, `APPROVAL_REJECTED`, `DELIVERY_REJECTED`, `CANCELLED`).
   Private farm coordinates are not exposed here.
 - Product state/event: none.
 - Simulation effect: none.
@@ -543,7 +555,11 @@ scope, not only the role name.
 - Outcome rules: `FULFILLED` and `PARTIALLY_FULFILLED` retain those outcomes;
   rejected/cancelled orders and incomplete orders at or past `neededBy` are
   unfulfilled; other incomplete orders are pending. Every visible order is in
-  exactly one category.
+  exactly one category. `orderOutcomes.causes` counts one cause per
+  unfulfilled or partially fulfilled order: the recorded `outcomeCause` when
+  present, otherwise the state the order ran out of time in
+  (`AWAITING_APPROVAL` → `APPROVAL_TIMEOUT`, `COMMITTED`/`IN_DELIVERY` →
+  `MISSION_LATE`, `REQUESTED` → `NO_READY_SUPPLY`).
 - Connected runs capture the control-room copy through a synthetic,
   run-scoped operations observer. That observer makes no participant decisions
   and is not shown on the map; it exists only so the saved projection has the
@@ -855,7 +871,11 @@ evidence must remain absent rather than being fabricated. The model returns:
 - `MODEL_PREDICTED` provenance and generation time.
 
 The Product API validates `q10 <= q50 <= q90`, units, dates, confidence ranges,
-IDs, and provenance. It then calculates—not the model—safe orderable supply:
+IDs, and provenance. It then calculates—not the model—safe orderable supply.
+Available-to-promise is `0` while the crop batch is `PLANNED` or `GROWING`;
+the forecast stays visible as evidence, but only a batch whose latest
+observation reports `HARVEST_READY` or `HARVESTED` can be promised or listed,
+and a later observation that leaves readiness withdraws its active listings:
 
 ```text
 availableToPromise = max(

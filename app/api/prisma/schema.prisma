@@ -300,6 +300,8 @@ model Order {
   lifecycleStatus    String   @map("lifecycle_status")
   atRisk             Boolean  @default(false) @map("at_risk")
   activeExceptionIds Json     @map("active_exception_ids")
+  outcomeCause       String?  @map("outcome_cause")
+  outcomeNote        String?  @map("outcome_note")
   traceId            String?  @map("trace_id") @db.Uuid
   simulationRunId    String?  @map("simulation_run_id") @db.Uuid
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)

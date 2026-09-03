@@ -101,6 +101,8 @@ export function orderDto(row: Order) {
     atRisk: row.atRisk,
     activeExceptionIds: row.activeExceptionIds as string[],
     ...(row.traceId ? { traceId: row.traceId } : {}),
+    ...(row.outcomeCause ? { outcomeCause: row.outcomeCause } : {}),
+    ...(row.outcomeNote ? { outcomeNote: row.outcomeNote } : {}),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

@@ -93,6 +93,12 @@ export interface SimulationOrderOutcomes {
   partiallyFulfilled: number;
   unfulfilled: number;
   pending: number;
+  /**
+   * Why each unfulfilled or partially fulfilled order missed, keyed by the
+   * Product API's `OrderOutcomeCause` vocabulary. Optional so saved frames
+   * from before this field existed still replay.
+   */
+  causes?: Record<string, number>;
 }
 
 /** A delivery mission, with the timings needed to animate it. */
