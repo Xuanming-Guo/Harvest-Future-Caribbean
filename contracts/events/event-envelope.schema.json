@@ -325,6 +325,12 @@
       "properties": {
         "allocationId": { "$ref": "../common.schema.json#/$defs/Uuid" },
         "orderId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "coverageFraction": {
+          "description": "Share of the order's requested quantity these lines cover. Below 1 on a safe partial commitment the buyer accepted in advance. Optional so events recorded before this field existed still validate.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
         "lines": {
           "type": "array",
           "minItems": 1,
@@ -724,7 +730,7 @@
       "causationId": "e0000000-0000-4000-8000-000000000005",
       "schemaVersion": "1.0",
       "provenance": "INFERRED",
-      "payload": {"allocationId": "16000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "lines": [{"cropBatchId": "10000000-0000-4000-8000-000000000001", "quantity": {"value": 120, "unit": "kg"}}]}
+      "payload": {"allocationId": "16000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "coverageFraction": 1, "lines": [{"cropBatchId": "10000000-0000-4000-8000-000000000001", "quantity": {"value": 120, "unit": "kg"}}]}
     },
     {
       "eventId": "e0000000-0000-4000-8000-000000000007",
@@ -739,7 +745,7 @@
       "causationId": "e0000000-0000-4000-8000-000000000006",
       "schemaVersion": "1.0",
       "provenance": "OBSERVED",
-      "payload": {"allocationId": "16000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "lines": [{"cropBatchId": "10000000-0000-4000-8000-000000000001", "quantity": {"value": 120, "unit": "kg"}}]}
+      "payload": {"allocationId": "16000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "coverageFraction": 1, "lines": [{"cropBatchId": "10000000-0000-4000-8000-000000000001", "quantity": {"value": 120, "unit": "kg"}}]}
     },
     {
       "eventId": "e0000000-0000-4000-8000-000000000008",

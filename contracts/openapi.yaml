@@ -377,6 +377,7 @@ paths:
               requestedQuantity: {value: 120, unit: kg}
               neededBy: '2026-08-12T14:00:00Z'
               deliveryLocation: {latitude: 13.9094, longitude: -60.9789}
+              minimumAcceptableFraction: 0.8
               listingIds: [16161616-1616-4616-8616-161616161616]
       responses:
         '201':
@@ -389,7 +390,9 @@ paths:
                 buyerId: 19191919-1919-4919-8919-191919191919
                 cropType: TOMATO
                 requestedQuantity: {value: 120, unit: kg}
+                committedQuantity: {value: 0, unit: kg}
                 acceptedQuantity: {value: 0, unit: kg}
+                minimumAcceptableFraction: 0.8
                 neededBy: '2026-08-12T14:00:00Z'
                 lifecycleStatus: REQUESTED
                 atRisk: false
@@ -414,7 +417,9 @@ paths:
                 buyerId: 19191919-1919-4919-8919-191919191919
                 cropType: TOMATO
                 requestedQuantity: {value: 120, unit: kg}
+                committedQuantity: {value: 120, unit: kg}
                 acceptedQuantity: {value: 120, unit: kg}
+                minimumAcceptableFraction: 0.8
                 neededBy: '2026-08-12T14:00:00Z'
                 lifecycleStatus: FULFILLED
                 atRisk: false
@@ -800,7 +805,7 @@ paths:
                 activeListings: 4
                 openDemands: 2
                 ordersByStatus: {REQUESTED: 1, COMMITTED: 2, IN_DELIVERY: 1, FULFILLED: 8}
-                orderOutcomes: {total: 12, fulfilled: 8, partiallyFulfilled: 0, unfulfilled: 1, pending: 3}
+                orderOutcomes: {total: 12, fulfilled: 8, partiallyFulfilled: 0, unfulfilled: 1, pending: 3, causes: {INSUFFICIENT_SUPPLY: 1}}
                 deliveryAcceptedKg: 840
                 approvedCommitmentCount: 9
                 completedMissionCount: 8
@@ -1424,6 +1429,18 @@ components:
         requestedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
         neededBy: {type: string, format: date-time}
         deliveryLocation: {$ref: './common.schema.json#/$defs/GeoPoint'}
+        minimumAcceptableFraction:
+          description: >-
+            The smallest share of `requestedQuantity` this buyer will accept as
+            a commitment. Matching may propose a partial allocation at or above
+            this share instead of leaving the order waiting for complete cover.
+            Optional; the Product API applies 0.8 when it is omitted. That
+            default is stakeholder-calibrated from hotel buyer feedback that
+            hotels routinely take part of an order and source the remainder
+            elsewhere.
+          type: number
+          minimum: 0.5
+          maximum: 1
         listingIds:
           type: array
           uniqueItems: true
@@ -1431,13 +1448,24 @@ components:
     Order:
       type: object
       additionalProperties: false
-      required: [orderId, buyerId, cropType, requestedQuantity, acceptedQuantity, neededBy, lifecycleStatus, atRisk, createdAt, updatedAt]
+      required: [orderId, buyerId, cropType, requestedQuantity, committedQuantity, acceptedQuantity, minimumAcceptableFraction, neededBy, lifecycleStatus, atRisk, createdAt, updatedAt]
       properties:
         orderId: {type: string, format: uuid}
         buyerId: {type: string, format: uuid}
         cropType: {type: string}
         requestedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        committedQuantity:
+          description: >-
+            Quantity actually reserved at approval. Zero until an allocation is
+            approved, and below `requestedQuantity` on a safe partial
+            commitment.
+          $ref: './common.schema.json#/$defs/Quantity'
         acceptedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        minimumAcceptableFraction:
+          description: Buyer's accepted share of `requestedQuantity` for this order.
+          type: number
+          minimum: 0.5
+          maximum: 1
         neededBy: {type: string, format: date-time}
         lifecycleStatus: {$ref: '#/components/schemas/OrderStatus'}
         atRisk: {type: boolean}
@@ -1458,7 +1486,7 @@ components:
         The latest recorded reason an order is not (yet) fulfilled. Written at
         each matching, approval, and delivery decision so an unfulfilled order
         always carries one explainable cause; absent on fulfilled orders.
-      enum: [NO_READY_SUPPLY, INSUFFICIENT_SUPPLY, SUPPLY_CHANGED, APPROVAL_REJECTED, APPROVAL_TIMEOUT, MISSION_LATE, DELIVERY_REJECTED, CANCELLED]
+      enum: [NO_READY_SUPPLY, INSUFFICIENT_SUPPLY, SUPPLY_CHANGED, APPROVAL_REJECTED, APPROVAL_TIMEOUT, MISSION_LATE, DELIVERY_REJECTED, CANCELLED, HORIZON_TRUNCATED]
     OrderPage:
       type: object
       additionalProperties: false
@@ -1525,9 +1553,24 @@ components:
         orderId: {type: string, format: uuid}
         cropType: {type: string}
         quantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        coverage: {$ref: '#/components/schemas/AllocationCoverage'}
+        estimatedPrice: {$ref: './common.schema.json#/$defs/Money'}
         neededBy: {type: string, format: date-time}
         exceptionId: {type: string, format: uuid}
         recoveryAction: {enum: [REALLOCATE, REROUTE, RESCHEDULE, SUBSTITUTE, CANCEL]}
+    AllocationCoverage:
+      description: >-
+        How much of the buyer's requested quantity this proposal commits.
+        A partial proposal is only offered at or above the order's
+        `minimumAcceptableFraction`.
+      type: object
+      additionalProperties: false
+      required: [requestedQuantity, proposedQuantity, coverageFraction, partial]
+      properties:
+        requestedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        proposedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        coverageFraction: {type: number, minimum: 0, maximum: 1}
+        partial: {type: boolean}
     AllocationSummary:
       type: object
       additionalProperties: false
@@ -1815,6 +1858,12 @@ components:
         partiallyFulfilled: {type: integer, minimum: 0}
         unfulfilled: {type: integer, minimum: 0}
         pending: {type: integer, minimum: 0}
+        causes:
+          description: >-
+            One cause per unfulfilled or partially fulfilled order, so the
+            counts here sum to those two totals.
+          type: object
+          additionalProperties: {type: integer, minimum: 0}
     TraceStep:
       type: object
       additionalProperties: false

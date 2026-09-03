@@ -32,7 +32,7 @@ schema-validated envelope for every event type below.
 | `LISTING_EXPIRED` | An active listing's `availableUntil` date has passed | listing, batch, availability end date | Stop offering the listing; no inventory or reservation changes |
 | `BUYER_DEMAND_CREATED` | Buyer demand is stored | demand, crop, quantity, deadline | Mark demand pending and schedule eligible actor reactions |
 | `ORDER_REQUESTED` | An order is created | order, crop, requested quantity, `REQUESTED` | Mark the buyer's order pending and schedule matching |
-| `ALLOCATION_PROPOSED` | A non-binding multi-farm allocation is saved | allocation, order, batch quantities | Schedule the relevant approval actions |
+| `ALLOCATION_PROPOSED` | A non-binding multi-farm allocation is saved | allocation, order, batch quantities, coverage fraction of the requested quantity | Schedule the relevant approval actions |
 | `APPROVAL_DECIDED` | A person approves or rejects an allocation or recovery | approval, subject, decision, and for `REJECT` the required `reasonCode` and `nextAction` | Complete only that actor's approval task; never infer other approvals |
 | `ALLOCATION_INVALIDATED` | Final validation detects changed safe supply | allocation, order, `SUPPLY_CHANGED`, `STALE` | Cancel the proposal without creating partial reservations and leave demand open |
 | `ALLOCATION_APPROVED` | Final approval creates reservations and commitment | allocation, order, batch quantities | Schedule harvest/pickup obligations and reduce planned uncommitted supply only |

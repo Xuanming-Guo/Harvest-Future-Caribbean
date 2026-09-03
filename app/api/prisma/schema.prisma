@@ -294,7 +294,10 @@ model Order {
   buyerId            String   @map("buyer_id") @db.Uuid
   cropType           String   @map("crop_type")
   requestedQuantity  Float    @map("requested_quantity")
+  committedQuantity  Float    @default(0) @map("committed_quantity")
   acceptedQuantity   Float    @default(0) @map("accepted_quantity")
+  /// Smallest share of requestedQuantity this buyer accepts as a commitment.
+  minimumAcceptableFraction Float @default(0.8) @map("minimum_acceptable_fraction")
   neededBy           DateTime @map("needed_by") @db.Timestamptz(3)
   latitude           Float
   longitude          Float
