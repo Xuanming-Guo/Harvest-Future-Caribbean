@@ -415,6 +415,7 @@ paths:
               neededBy: '2026-08-12T14:00:00Z'
               deliveryLocation: {latitude: 13.9094, longitude: -60.9789}
               minimumAcceptableFraction: 0.8
+              paymentTermsDays: 14
               listingIds: [16161616-1616-4616-8616-161616161616]
       responses:
         '201':
@@ -430,6 +431,7 @@ paths:
                 committedQuantity: {value: 0, unit: kg}
                 acceptedQuantity: {value: 0, unit: kg}
                 minimumAcceptableFraction: 0.8
+                paymentTermsDays: 14
                 neededBy: '2026-08-12T14:00:00Z'
                 lifecycleStatus: REQUESTED
                 atRisk: false
@@ -457,12 +459,54 @@ paths:
                 committedQuantity: {value: 120, unit: kg}
                 acceptedQuantity: {value: 120, unit: kg}
                 minimumAcceptableFraction: 0.8
+                paymentTermsDays: 14
                 neededBy: '2026-08-12T14:00:00Z'
                 lifecycleStatus: FULFILLED
                 atRisk: false
                 approvalSummary: {required: 3, approved: 3, pending: 0, rejected: 0}
+                payment:
+                  status: OVERDUE
+                  amount: {amount: 780, currency: XCD}
+                  dueAt: '2026-08-26T13:45:00Z'
+                  daysOutstanding: 31
                 createdAt: '2026-08-01T10:15:00Z'
                 updatedAt: '2026-08-12T13:45:00Z'
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/orders/{orderId}/payment-confirmations:
+    post:
+      tags: [Orders]
+      operationId: confirmOrderPayment
+      summary: Record that the buyer paid this order outside Harvest
+      description: >-
+        Harvest tracks payment terms and status. It never moves money, holds
+        funds, or verifies a transfer. This operation records the buyer's own
+        statement that the order was settled, so the farmer can see it stop
+        counting against what is owed.
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PaymentConfirmationCreate'}
+            example:
+              reference: Bank transfer 2026-08-24
+      responses:
+        '201':
+          description: Settlement evidence stored and `PAYMENT_CONFIRMED` emitted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentConfirmation'}
+              example:
+                orderId: 20202020-2020-4020-8020-202020202020
+                payment:
+                  status: PAID
+                  amount: {amount: 780, currency: XCD}
+                  dueAt: '2026-08-26T13:45:00Z'
+                  paidAt: '2026-08-24T09:30:00Z'
+                  reference: Bank transfer 2026-08-24
+                  daysOutstanding: 11
         default: {$ref: '#/components/responses/Problem'}
   /v1/approvals:
     get:
@@ -846,6 +890,7 @@ paths:
                 deliveryAcceptedKg: 840
                 approvedCommitmentCount: 9
                 completedMissionCount: 8
+                paymentOverdueCount: 2
                 activeMissionIds: [23232323-2323-4323-8323-232323232323]
                 openExceptionIds: []
         default: {$ref: '#/components/responses/Problem'}
@@ -1573,6 +1618,17 @@ components:
           type: number
           minimum: 0.5
           maximum: 1
+        paymentTermsDays:
+          description: >-
+            Days after the delivery is accepted that the buyer has to pay.
+            Optional; the Product API applies 14 when it is omitted. That
+            default is stakeholder-calibrated from farmer feedback that hotels
+            currently take one, two, or more months to pay, which is what
+            limits farm cash flow. Harvest records the term and the resulting
+            status only; it never moves money.
+          type: integer
+          minimum: 0
+          maximum: 90
         listingIds:
           type: array
           uniqueItems: true
@@ -1580,7 +1636,7 @@ components:
     Order:
       type: object
       additionalProperties: false
-      required: [orderId, buyerId, cropType, requestedQuantity, committedQuantity, acceptedQuantity, minimumAcceptableFraction, neededBy, lifecycleStatus, atRisk, createdAt, updatedAt]
+      required: [orderId, buyerId, cropType, requestedQuantity, committedQuantity, acceptedQuantity, minimumAcceptableFraction, paymentTermsDays, neededBy, lifecycleStatus, atRisk, createdAt, updatedAt]
       properties:
         orderId: {type: string, format: uuid}
         buyerId: {type: string, format: uuid}
@@ -1598,6 +1654,16 @@ components:
           type: number
           minimum: 0.5
           maximum: 1
+        paymentTermsDays:
+          description: Agreed days from delivery acceptance to payment for this order.
+          type: integer
+          minimum: 0
+          maximum: 90
+        payment:
+          description: >-
+            Present once the order is committed and priced. Absent before then,
+            because nothing is owed until supply is reserved.
+          $ref: '#/components/schemas/OrderPayment'
         neededBy: {type: string, format: date-time}
         lifecycleStatus: {$ref: '#/components/schemas/OrderStatus'}
         atRisk: {type: boolean}
@@ -1620,6 +1686,51 @@ components:
         each matching, approval, and delivery decision so an unfulfilled order
         always carries one explainable cause; absent on fulfilled orders.
       enum: [NO_READY_SUPPLY, INSUFFICIENT_SUPPLY, SUPPLY_CHANGED, APPROVAL_REJECTED, APPROVAL_TIMEOUT, MISSION_LATE, DELIVERY_REJECTED, CANCELLED, HORIZON_TRUNCATED]
+    PaymentStatus:
+      description: >-
+        Derived at read time from the delivery acceptance time plus the order's
+        `paymentTermsDays`, except `PAID`, which is recorded by the buyer or a
+        coordinator. `NOT_DUE` covers an order that has not been delivered yet
+        as well as one still inside its term; `DUE` is the day the term expires;
+        `OVERDUE` is any later day. Harvest observes these states, it does not
+        move, hold, or verify money.
+      enum: [NOT_DUE, DUE, OVERDUE, PAID]
+    OrderPayment:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: {$ref: '#/components/schemas/PaymentStatus'}
+        amount:
+          description: >-
+            Committed line quantity multiplied by that line's listing price,
+            recomputed on the accepted quantities once delivery is recorded.
+          $ref: './common.schema.json#/$defs/Money'
+        dueAt:
+          description: Delivery acceptance time plus `paymentTermsDays`; absent until the delivery outcome is recorded.
+          type: string
+          format: date-time
+        paidAt: {type: string, format: date-time}
+        reference: {type: string, maxLength: 120}
+        daysOutstanding:
+          description: Whole days from delivery acceptance to payment, or to now while unpaid.
+          type: integer
+          minimum: 0
+    PaymentConfirmationCreate:
+      type: object
+      additionalProperties: false
+      properties:
+        reference:
+          description: The buyer's own reference for the transfer it made outside Harvest.
+          type: string
+          maxLength: 120
+    PaymentConfirmation:
+      type: object
+      additionalProperties: false
+      required: [orderId, payment]
+      properties:
+        orderId: {type: string, format: uuid}
+        payment: {$ref: '#/components/schemas/OrderPayment'}
     OrderPage:
       type: object
       additionalProperties: false
@@ -1979,6 +2090,13 @@ components:
         deliveryAcceptedKg: {type: number, minimum: 0}
         approvedCommitmentCount: {type: integer, minimum: 0}
         completedMissionCount: {type: integer, minimum: 0}
+        paymentOverdueCount:
+          description: >-
+            Visible delivered orders whose payment term has expired and that
+            carry no recorded payment. Additive, so a saved projection from
+            before payment tracking existed still validates without it.
+          type: integer
+          minimum: 0
         activeMissionIds: {type: array, items: {type: string, format: uuid}}
         openExceptionIds: {type: array, items: {type: string, format: uuid}}
     OrderOutcomeSummary:
@@ -2287,6 +2405,13 @@ components:
         deliveryAcceptedKg: {type: number, minimum: 0}
         approvedCommitmentCount: {type: integer, minimum: 0}
         completedMissionCount: {type: integer, minimum: 0}
+        paymentOverdueCount:
+          description: >-
+            Visible delivered orders whose payment term has expired and that
+            carry no recorded payment. Additive, so a saved projection from
+            before payment tracking existed still validates without it.
+          type: integer
+          minimum: 0
         activeMissionIds: {type: array, items: {type: string, format: uuid}}
         openExceptionIds: {type: array, items: {type: string, format: uuid}}
     ReferencePlace:

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, PackageCheck, Truck } from "lucide-react";
+import { ArrowLeft, BadgeCheck, CheckCircle2, PackageCheck, Truck } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useState } from "react";
@@ -13,6 +13,7 @@ import { useSession } from "@/components/providers";
 import { Badge, Card, ErrorState, LoadingState, PageHeader, SectionTitle } from "@/components/ui";
 import { api, type DecisionReasonCode } from "@/lib/api";
 import { formatDate, titleCase } from "@/lib/format";
+import { formatMoney, PAYMENT_STATUS_LABELS } from "@/lib/payments";
 
 const standardLifecycle = ["REQUESTED", "ALLOCATION_PROPOSED", "AWAITING_APPROVAL", "COMMITTED", "IN_DELIVERY", "FULFILLED"];
 
@@ -31,6 +32,7 @@ export default function OrderDetailPage() {
   const [lineValues, setLineValues] = useState<Record<string, { accepted: number; rejected: number }>>({});
   const [lineReasons, setLineReasons] = useState<Record<string, DecisionReasonCode | null>>({});
   const [note, setNote] = useState("");
+  const [reference, setReference] = useState("");
   const [reasonCode, setReasonCode] = useState<DecisionReasonCode | null>(null);
   const [nextAction, setNextAction] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -65,6 +67,10 @@ export default function OrderDetailPage() {
     },
     onSuccess: () => { setMessage("Delivery acceptance recorded. The farmer can now see what was wrong and what to do next."); void queryClient.invalidateQueries(); },
   });
+  const confirmPayment = useMutation({
+    mutationFn: () => api.confirmPayment(orderId, reference || undefined),
+    onSuccess: () => { setMessage("Payment recorded. Harvest tracks the payment; it does not move money."); void queryClient.invalidateQueries(); },
+  });
 
   if (order.error) return <ErrorState error={order.error} />;
   if (!order.data) return <LoadingState label="Loading order..." />;
@@ -76,6 +82,7 @@ export default function OrderDetailPage() {
   // Only worth saying once something is actually committed and it is short.
   const partialCommitment = committed > 0 && committed + 0.0001 < requested;
   const committedSummary = `Committed ${committed} of ${requested} kg (${Math.round((committed / requested) * 100)}%)`;
+  const payment = order.data.payment;
 
   return (
     <>
@@ -119,6 +126,28 @@ export default function OrderDetailPage() {
           )}
         </Card>
       </div>
+      {payment && (
+        <Card className="section-gap">
+          <SectionTitle title="Payment" detail={`${order.data.paymentTermsDays}-day terms`} />
+          <p className="payment-disclaimer">Harvest tracks payment; it does not move money. The amount is what the accepted produce is worth at the price the farmer published.</p>
+          <div className="payment-card">
+            <div className="split"><span>Status</span><Badge tone={payment.status.toLowerCase().replaceAll("_", "-")}>{PAYMENT_STATUS_LABELS[payment.status]}</Badge></div>
+            <div className="split"><span>Amount</span><strong>{payment.amount ? formatMoney(payment.amount.amount, payment.amount.currency) : "-"}</strong></div>
+            <div className="split"><span>Agreed terms</span><strong>{order.data.paymentTermsDays} days after delivery</strong></div>
+            <div className="split"><span>Due</span><strong>{payment.dueAt ? formatDate(payment.dueAt, false) : "After the delivery is accepted"}</strong></div>
+            {payment.daysOutstanding !== undefined && <div className="split"><span>Days since delivery</span><strong>{payment.daysOutstanding}</strong></div>}
+            {payment.paidAt && <div className="split"><span>Recorded paid</span><strong>{formatDate(payment.paidAt)}</strong></div>}
+            {payment.reference && <div className="split"><span>Reference</span><strong>{payment.reference}</strong></div>}
+          </div>
+          {actor?.role === "BUYER" && payment.status !== "PAID" && payment.dueAt && (
+            <form className="form-grid section-gap" onSubmit={(event: FormEvent) => { event.preventDefault(); confirmPayment.mutate(); }}>
+              <div className="field field-full"><label>Your payment reference (optional)</label><input value={reference} maxLength={120} onChange={(event) => setReference(event.target.value)} /></div>
+              <button className="button field-full" disabled={confirmPayment.isPending}><BadgeCheck size={17} />Confirm payment</button>
+            </form>
+          )}
+          {confirmPayment.error && <p className="form-error">{confirmPayment.error.message}</p>}
+        </Card>
+      )}
       {actor?.role !== "COORDINATOR" && <div className="section-gap"><ApprovalList /></div>}
       {actor?.role === "BUYER" && mission?.status === "DELIVERED" && !order.data.deliveryAcceptance && (
         <Card className="section-gap">

@@ -86,6 +86,11 @@ export interface SimulationOperationsSnapshot {
   deliveryAcceptedKg: number;
   approvedCommitmentCount: number;
   completedMissionCount: number;
+  /**
+   * Delivered orders whose payment term has expired with no recorded payment.
+   * Optional so saved frames from before payment tracking still replay.
+   */
+  paymentOverdueCount?: number;
   activeMissionIds: string[];
   openExceptionIds: string[];
 }

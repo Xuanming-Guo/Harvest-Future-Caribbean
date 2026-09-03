@@ -14,6 +14,7 @@ import {
   Sprout,
   Store,
   Truck,
+  Wallet,
   Wheat,
   type LucideIcon,
 } from "lucide-react";
@@ -28,6 +29,7 @@ import { useSession } from "@/components/providers";
 import { Badge, Card, Disclosure, EmptyState, ErrorState, LoadingState, MoreDetail, PageHeader, SectionTitle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { compactId, formatDate, formatKg, plural, titleCase } from "@/lib/format";
+import { PAYMENT_STATUS_LABELS, formatMoney, summarizeMoneyOwed } from "@/lib/payments";
 import {
   WORKSPACE_SECTIONS,
   selectRecommendedAction,
@@ -85,6 +87,7 @@ export default function FarmerHome() {
   const finishedOrders = allOrders.filter((order) => FINISHED_ORDER_STATUSES.includes(order.lifecycleStatus));
   const safeToSell = cropBatches.reduce((sum, batch) => sum + batch.availableToPromise.value, 0);
   const acceptedKg = finishedOrders.reduce((sum, order) => sum + order.acceptedQuantity.value, 0);
+  const owed = summarizeMoneyOwed(allOrders);
   const needsAction = cropBatches.filter((batch) => batch.latestDecision);
   const requestedKg = finishedOrders.reduce((sum, order) => sum + order.requestedQuantity.value, 0);
 
@@ -122,6 +125,20 @@ export default function FarmerHome() {
           ]}
         />
       </div>
+
+      <Card className="section-gap owed-card">
+        <SectionTitle
+          title="Money owed to you"
+          detail={owed.count === 0
+            ? "Nothing outstanding"
+            : `${plural(owed.count, "delivered order")} · longest wait ${plural(owed.oldestDaysOutstanding, "day")}${owed.overdueCount ? ` · ${owed.overdueCount} overdue` : ""}`}
+        />
+        <div className="owed-summary">
+          <span className="owed-mark" aria-hidden="true"><Wallet size={22} /></span>
+          <b className={owed.overdueCount ? "owed-amount owed-amount-late" : "owed-amount"}>{formatMoney(owed.amount, owed.currency)}</b>
+          <p>Harvest tracks payment; it does not move money. This is what buyers have agreed to pay you for produce they already accepted.</p>
+        </div>
+      </Card>
 
       {needsAction.length > 0 && (
         <Card className="section-gap decision-card">
@@ -341,7 +358,10 @@ export default function FarmerHome() {
                         <b>{formatKg(order.acceptedQuantity.value)}</b>
                         <span>{shortfall > 0 ? `accepted · ${formatKg(shortfall)} short` : "accepted"}</span>
                       </div>
-                      <Badge tone={order.lifecycleStatus === "FULFILLED" ? "fulfilled" : undefined}>{order.lifecycleStatus}</Badge>
+                      <div className="history-badges">
+                        {order.payment && <Badge tone={order.payment.status.toLowerCase().replaceAll("_", "-")}>{PAYMENT_STATUS_LABELS[order.payment.status]}</Badge>}
+                        <Badge tone={order.lifecycleStatus === "FULFILLED" ? "fulfilled" : undefined}>{order.lifecycleStatus}</Badge>
+                      </div>
                     </div>
                   );
                 })}

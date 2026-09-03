@@ -124,7 +124,7 @@ $run | Select-Object runId, status, policy, decisionMode,
 ```
 
 Expected engine values for seed `42`, re-recorded from a real run after the
-horizon clamp. These move whenever the engine or the Product API changes, so
+horizon clamp and payment tracking. These move whenever the engine or the Product API changes, so
 the connected-run test checks determinism, outcome arithmetic, and the cause
 vocabulary rather than pinning these counts; this document is where the counts
 themselves are kept:
@@ -134,7 +134,7 @@ status            COMPLETED
 policy            HARVEST
 decisionMode      DETERMINISTIC
 decisionAdapter   deterministic
-frameCount        117
+frameCount        119
 eventsProcessed    76
 totalDemandedKg   2183
 totalAcceptedKg   1000.63
@@ -144,10 +144,10 @@ totalAcceptedKg   1000.63
 domain-event counts. For the deterministic seed-`42` run, expect:
 
 ```text
-attempted             123
-succeeded             123
+attempted             125
+succeeded             125
 rejected                0
-domainEventsCreated   199
+domainEventsCreated   201
 activeListings          5
 openDemands              8
 totalOrders              8
@@ -166,7 +166,27 @@ unfulfilled                4
 pending                    0
 approved commitments       5
 completed missions         5
+overdue payments           0
 ```
+
+`paymentOverdueCount` is `0` in that closing snapshot, but it is not `0`
+throughout the run. Synthetic buyers order on 7-day terms and pay on their
+tenth simulated day, so every settled order is paid three days late and shows
+as overdue in between. Across the saved timeline:
+
+```text
+frames with an overdue payment    19 of 119
+highest overdue count in a frame   2
+delivered orders                   5
+paid inside the run window         2
+```
+
+The two paid orders were accepted 12.7 and 11.6 days before the run ended, far
+enough ahead for their tenth day to arrive. The remaining three were accepted
+6.7 days or less before the end, so they are still inside their term when the
+window closes; that, and not prompt payment, is why the final count is `0`.
+Scrub the control room back into the middle of the run to see the overdue
+count rise and fall. Harvest tracks these payments; it moves no money.
 
 `orderOutcomes.causes` explains every unfulfilled or partially fulfilled
 order. For seed `42`:
@@ -187,24 +207,26 @@ failure.
 
 ### Where the seed-42 numbers came from
 
-Every figure above is read from a real run, never edited by hand. The four
+Every figure above is read from a real run, never edited by hand. The five
 columns show what each change to the fulfilment path moved:
 
-| Value | Before the #53 fixes | After readiness/expiry/re-match | After safe partial commitment | After the horizon clamp |
-|---|---|---|---|---|
-| `frameCount` | 130 | 119 | 127 | 117 |
-| `eventsProcessed` | 82 | 76 | 80 | 76 |
-| `productActions.attempted` | 154 | 140 | 151 | 123 |
-| `productActions.domainEventsCreated` | 242 | 222 | 238 | 199 |
-| `activeListings` | 7 | 3 | 3 | 5 |
-| total orders | 11 | 11 | 11 | 8 |
-| fulfilled | 2 | 3 | 4 | 3 |
-| partially fulfilled | 0 | 2 | 2 | 1 |
-| unfulfilled | 8 | 5 | 5 | 4 |
-| pending | 1 | 1 | 0 | 0 |
-| approved commitments | 8 | 5 | 7 | 5 |
-| completed missions | 8 | 5 | 7 | 5 |
-| `deliveryAcceptedKg` | 359 | 1387.75 | 1545.13 | 1000.63 |
+| Value | Before the #53 fixes | After readiness/expiry/re-match | After safe partial commitment | After the horizon clamp | After payment tracking |
+|---|---|---|---|---|---|
+| `frameCount` | 130 | 119 | 127 | 117 | 119 |
+| `eventsProcessed` | 82 | 76 | 80 | 76 | 76 |
+| `productActions.attempted` | 154 | 140 | 151 | 123 | 125 |
+| `productActions.domainEventsCreated` | 242 | 222 | 238 | 199 | 201 |
+| `activeListings` | 7 | 3 | 3 | 5 | 5 |
+| total orders | 11 | 11 | 11 | 8 | 8 |
+| fulfilled | 2 | 3 | 4 | 3 | 3 |
+| partially fulfilled | 0 | 2 | 2 | 1 | 1 |
+| unfulfilled | 8 | 5 | 5 | 4 | 4 |
+| pending | 1 | 1 | 0 | 0 | 0 |
+| approved commitments | 8 | 5 | 7 | 5 | 5 |
+| completed missions | 8 | 5 | 7 | 5 | 5 |
+| `deliveryAcceptedKg` | 359 | 1387.75 | 1545.13 | 1000.63 | 1000.63 |
+| overdue payments at run end | n/a | n/a | n/a | n/a | 0 |
+| frames showing an overdue payment | n/a | n/a | n/a | n/a | 19 |
 
 The first column is the pre-#53 baseline this document recorded before the
 readiness fixes, when unready crop was still listable, so eight commitments
@@ -213,8 +235,8 @@ readiness, expiry, and re-match fixes. The third adds safe partial commitment:
 two more orders reach a commitment they would previously have waited out, and
 the horizon-truncated order carries a cause instead of sitting in `pending`.
 
-The last column is the horizon clamp, and it is the only one of the four that
-changes the world rather than how the world is handled. Three of the eleven
+The fourth column is the horizon clamp, and it is the only one of the five
+that changes the world rather than how the world is handled. Three of the eleven
 orders are no longer raised at all, because their deadline fell outside the
 run window, so every downstream count drops with them: fewer orders means less
 demand, fewer commitments, fewer missions, and less delivered weight. Read the
@@ -222,6 +244,13 @@ column as a smaller order book, not as a regression. The rate is what survives
 the comparison, and it holds: 4 of 11 fully met before, 3 of 8 after, with one
 partial on each side. `activeListings` rises because supply that would have
 been committed to a withheld order stays on the marketplace instead.
+
+The last column adds payment tracking on top of that smaller order book: two
+synthetic buyers record paying a delivered order, which is two more product
+actions, two more domain events, and two more agent-cycle checkpoint frames.
+No physical outcome moves, because recording a payment mutates no world state,
+and giving the synthetic buyers 7-day terms changes none of these totals
+either: it changes only which payment status those same orders report.
 
 `deliveryAcceptedKg` is the sum of the five immutable delivery acceptances,
 not the engine's `totalAcceptedKg`. The control room uses this Product API
@@ -275,7 +304,7 @@ $agentFrames = @($timeline.frames | Where-Object {
 Expected:
 
 ```text
-Frames             130
+Frames             119
 Farms              5
 Buyers             3
 Transporters       2

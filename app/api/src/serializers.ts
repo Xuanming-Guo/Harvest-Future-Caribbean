@@ -17,8 +17,51 @@ import type {
   YieldPrediction,
 } from "@prisma/client";
 
+import { derivePaymentStatus, PAYMENT_DAY_MS, type PaymentStatus } from "./payments.js";
+
 export const quantity = (value: number) => ({ value, unit: "kg" as const });
 export const dateOnly = (value: Date) => value.toISOString().slice(0, 10);
+
+const DAY_MS = PAYMENT_DAY_MS;
+
+export interface OrderPaymentDto {
+  status: PaymentStatus;
+  amount?: { amount: number; currency: string };
+  dueAt?: string;
+  paidAt?: string;
+  reference?: string;
+  daysOutstanding?: number;
+}
+
+/**
+ * Payment status is derived on every read rather than stored, so no scheduled
+ * job can leave a farmer looking at a stale "not due" while the term has in
+ * fact expired. Only `paidAt` is recorded, and only because a buyer stating it
+ * paid is an observation Harvest cannot infer. Harvest tracks payment; it does
+ * not move money.
+ */
+export function orderPaymentDto(
+  order: Pick<Order, "lifecycleStatus" | "paymentTermsDays" | "paymentAmount" | "paymentCurrency" | "paidAt" | "paymentReference">,
+  acceptedAt: Date | null,
+  now: Date,
+): OrderPaymentDto | undefined {
+  // Nothing is owed until a commitment prices the order, and a cancelled
+  // commitment releases the obligation with it.
+  if (order.paymentAmount === null || order.lifecycleStatus === "CANCELLED") return undefined;
+  const dueAt = acceptedAt ? new Date(acceptedAt.getTime() + order.paymentTermsDays * DAY_MS) : null;
+  const settledAt = order.paidAt ?? now;
+  const status = derivePaymentStatus(order, acceptedAt, now);
+  return {
+    status,
+    amount: { amount: order.paymentAmount, currency: order.paymentCurrency ?? "XCD" },
+    ...(dueAt ? { dueAt: dueAt.toISOString() } : {}),
+    ...(order.paidAt ? { paidAt: order.paidAt.toISOString() } : {}),
+    ...(order.paymentReference ? { reference: order.paymentReference } : {}),
+    ...(acceptedAt
+      ? { daysOutstanding: Math.max(0, Math.floor((settledAt.getTime() - acceptedAt.getTime()) / DAY_MS)) }
+      : {}),
+  };
+}
 
 /** Latest actionable rejection shown to the farmer who owns the batch. */
 export interface BatchDecision {
@@ -127,7 +170,7 @@ export function demandDto(row: BuyerDemand) {
   };
 }
 
-export function orderDto(row: Order) {
+export function orderDto(row: Order, payment?: OrderPaymentDto) {
   return {
     orderId: row.id,
     buyerId: row.buyerId,
@@ -136,6 +179,8 @@ export function orderDto(row: Order) {
     committedQuantity: quantity(row.committedQuantity),
     acceptedQuantity: quantity(row.acceptedQuantity),
     minimumAcceptableFraction: row.minimumAcceptableFraction,
+    paymentTermsDays: row.paymentTermsDays,
+    ...(payment ? { payment } : {}),
     neededBy: row.neededBy.toISOString(),
     lifecycleStatus: row.lifecycleStatus,
     atRisk: row.atRisk,

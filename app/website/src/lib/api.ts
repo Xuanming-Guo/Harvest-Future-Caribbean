@@ -226,6 +226,13 @@ export const api = {
   async order(orderId: string) {
     return unwrap(await client.GET("/v1/orders/{orderId}", { params: { path: { orderId } } }));
   },
+  /** Harvest records that the buyer paid outside Harvest. It never moves money. */
+  async confirmPayment(orderId: string, reference?: string) {
+    return unwrap(await client.POST("/v1/orders/{orderId}/payment-confirmations", {
+      params: { path: { orderId }, header: { "Idempotency-Key": newIdempotencyKey("payment") } },
+      body: reference ? { reference } : {},
+    }));
+  },
   async agentTrace(traceId: string) {
     return unwrap(await client.GET("/v1/agent-traces/{traceId}", { params: { path: { traceId } } }));
   },

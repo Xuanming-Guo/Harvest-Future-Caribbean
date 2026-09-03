@@ -30,7 +30,9 @@ the executable scope and acceptance criteria.
 
 ## P2 — only after the core demo is reliable
 
-- Payments and settlement.
+- Payment execution and settlement. Tracking payment terms, what is owed, and
+  overdue status is already in scope after stakeholder feedback; moving money
+  is not.
 - Complete inter-island shipping and trade integration.
 - Crop recognition from imagery.
 - Region-wide coverage.

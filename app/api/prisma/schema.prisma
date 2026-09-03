@@ -317,6 +317,17 @@ model Order {
   acceptedQuantity   Float    @default(0) @map("accepted_quantity")
   /// Smallest share of requestedQuantity this buyer accepts as a commitment.
   minimumAcceptableFraction Float @default(0.8) @map("minimum_acceptable_fraction")
+  /// Days after delivery acceptance the buyer has to pay. Harvest tracks the
+  /// term and the resulting status; it never moves money.
+  paymentTermsDays   Int      @default(14) @map("payment_terms_days")
+  /// Value of the committed lines at their listing price, recomputed on the
+  /// accepted quantities once the delivery outcome is recorded.
+  paymentAmount      Float?   @map("payment_amount")
+  paymentCurrency    String?  @map("payment_currency")
+  /// Set only when a buyer or coordinator records that payment was made
+  /// outside Harvest. Payment status is otherwise derived at read time.
+  paidAt             DateTime? @map("paid_at") @db.Timestamptz(3)
+  paymentReference   String?  @map("payment_reference")
   neededBy           DateTime @map("needed_by") @db.Timestamptz(3)
   latitude           Float
   longitude          Float

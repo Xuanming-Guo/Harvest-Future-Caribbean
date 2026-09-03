@@ -81,7 +81,9 @@ export default function MetricsPanel({ frame, policy }: MetricsPanelProps): Reac
                 <Metric label="Pending" value={snapshot.orderOutcomes.pending} />
                 <Metric label="Approved commitments" value={snapshot.approvedCommitmentCount} />
                 <Metric label="Completed delivery missions" value={snapshot.completedMissionCount} />
+                <Metric label="Overdue payments" value={snapshot.paymentOverdueCount ?? 0} />
               </div>
+              <p className="metrics-source">Harvest tracks payment terms and status; it does not move money.</p>
               <MissedOrderCauses causes={snapshot.orderOutcomes.causes} />
             </>
           ) : (

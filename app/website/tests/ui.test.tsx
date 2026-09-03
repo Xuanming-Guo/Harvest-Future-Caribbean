@@ -9,6 +9,7 @@ import { CropStandardCard } from "@/components/crop-standard-card";
 import { consumeDevelopmentPersona, currentActor, developmentPersonaFromHash, roleHome } from "@/lib/api";
 import { compactId, formatPercent, titleCase } from "@/lib/format";
 import { clearOnboardingStatus, readOnboardingStatus, roleTutorials, writeOnboardingStatus } from "@/lib/onboarding";
+import { formatMoney, isAwaitingPayment, summarizeMoneyOwed, type PayableOrder } from "@/lib/payments";
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -207,6 +208,39 @@ describe("workspace disclosure", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Stops")).toBeVisible();
     expect(screen.getByRole("button", { name: /Hide detail/ })).toBeInTheDocument();
+  });
+});
+
+describe("money owed to a farmer (#74)", () => {
+  // Harvest tracks payment; it does not move money. These are recorded
+  // obligations from accepted deliveries, not a balance Harvest holds.
+  const orders: PayableOrder[] = [
+    { orderId: "delivered-overdue", payment: { status: "OVERDUE", amount: { amount: 148.5, currency: "XCD" }, dueAt: "2026-09-18T09:00:00Z", daysOutstanding: 31 } },
+    { orderId: "delivered-within-terms", payment: { status: "NOT_DUE", amount: { amount: 51.25, currency: "XCD" }, dueAt: "2026-10-30T09:00:00Z", daysOutstanding: 4 } },
+    { orderId: "delivered-paid", payment: { status: "PAID", amount: { amount: 900, currency: "XCD" }, dueAt: "2026-09-18T09:00:00Z", paidAt: "2026-09-17T09:00:00Z", daysOutstanding: 13 } },
+    { orderId: "committed-not-delivered", payment: { status: "NOT_DUE", amount: { amount: 400, currency: "XCD" } } },
+    { orderId: "never-committed" },
+  ];
+
+  it("counts only produce a buyer accepted and has not recorded paying", () => {
+    expect(summarizeMoneyOwed(orders)).toEqual({
+      amount: 199.75,
+      currency: "XCD",
+      count: 2,
+      oldestDaysOutstanding: 31,
+      overdueCount: 1,
+    });
+  });
+
+  it("reports nothing outstanding rather than failing when no order is payable", () => {
+    expect(summarizeMoneyOwed([])).toEqual({ amount: 0, currency: "XCD", count: 0, oldestDaysOutstanding: 0, overdueCount: 0 });
+    expect(isAwaitingPayment(undefined)).toBe(false);
+    expect(isAwaitingPayment({ status: "NOT_DUE", amount: { amount: 400, currency: "XCD" } })).toBe(false);
+  });
+
+  it("shows a currency amount a farmer can read at a glance", () => {
+    expect(formatMoney(199.75, "XCD")).toBe("XCD 199.75");
+    expect(formatMoney(1200, "XCD")).toBe("XCD 1,200.00");
   });
 });
 
