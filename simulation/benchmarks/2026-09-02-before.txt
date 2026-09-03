@@ -1,0 +1,48 @@
+
+> harvest@0.1.0 sim
+> npm run run:scenario --workspace @harvest/simulation -- --paired --seeds 42,8675309,7,19,23,31,101,202,303,404
+
+
+> @harvest/simulation@0.1.0 run:scenario
+> tsx src/run.ts --paired --seeds 42,8675309,7,19,23,31,101,202,303,404
+
+
+Scenario: saint-lucia-demo-v1
+SYNTHETIC. Licensed public place references provide geographic context; every actor, yield, price, demand, road speed and spoilage figure is invented. A nearby reference does not imply participation.
+
+BASELINE  seed=42         fulfilled=  9.1%  localSupply= 14.2%  waste=   2371kg  substituted=   2535kg  demands= 1/11  events=   91  digest=2c8ab9ce92974eea
+HARVEST   seed=42         fulfilled=  0.0%  localSupply= 14.0%  waste=   2404kg  substituted=   2542kg  demands= 0/11  events=  111  digest=d82ab53c0de5170a
+BASELINE  seed=8675309    fulfilled=  0.0%  localSupply= 17.1%  waste=   2296kg  substituted=   2536kg  demands= 0/12  events=   92  digest=477f58b47b4055a5
+HARVEST   seed=8675309    fulfilled=  8.3%  localSupply=  9.6%  waste=   2459kg  substituted=   2650kg  demands= 1/12  events=  119  digest=c1c54c4e4e593873
+BASELINE  seed=7          fulfilled= 10.0%  localSupply= 12.9%  waste=   3535kg  substituted=   2186kg  demands= 1/10  events=   85  digest=45d31d2f889da9b5
+HARVEST   seed=7          fulfilled= 40.0%  localSupply= 46.8%  waste=   3085kg  substituted=   1288kg  demands= 4/10  events=  120  digest=ec84f41f9213437f
+BASELINE  seed=19         fulfilled= 15.4%  localSupply= 10.4%  waste=   2743kg  substituted=   2916kg  demands= 2/13  events=   91  digest=550485b712a03063
+HARVEST   seed=19         fulfilled=  7.7%  localSupply= 12.3%  waste=   2774kg  substituted=   2856kg  demands= 1/13  events=  127  digest=9feece8ebf010b29
+BASELINE  seed=23         fulfilled= 20.0%  localSupply= 28.6%  waste=   1622kg  substituted=   1973kg  demands= 2/10  events=   88  digest=4a30c13c9d24eb6e
+HARVEST   seed=23         fulfilled= 10.0%  localSupply=  9.1%  waste=   1840kg  substituted=   2504kg  demands= 1/10  events=  107  digest=d026c6772bb2a4b1
+BASELINE  seed=31         fulfilled= 15.4%  localSupply= 22.5%  waste=   2484kg  substituted=   2358kg  demands= 2/13  events=   92  digest=c21ae8e7f48f770d
+HARVEST   seed=31         fulfilled=  7.7%  localSupply= 14.6%  waste=   2711kg  substituted=   2598kg  demands= 1/13  events=  117  digest=f79b022176012636
+BASELINE  seed=101        fulfilled=  8.3%  localSupply= 18.7%  waste=   1594kg  substituted=   2507kg  demands= 1/12  events=   94  digest=bb66b91c9efcf0e3
+HARVEST   seed=101        fulfilled=  8.3%  localSupply= 12.8%  waste=   1847kg  substituted=   2690kg  demands= 1/12  events=  132  digest=e10e5e73acfd6fb2
+BASELINE  seed=202        fulfilled=  0.0%  localSupply=  0.0%  waste=   3270kg  substituted=   2898kg  demands= 0/10  events=   80  digest=b91f04992b3dd762
+HARVEST   seed=202        fulfilled= 10.0%  localSupply= 21.2%  waste=   2968kg  substituted=   2280kg  demands= 1/10  events=  122  digest=7d281df507feeea3
+BASELINE  seed=303        fulfilled=  8.3%  localSupply=  6.0%  waste=   1380kg  substituted=   2919kg  demands= 1/12  events=   86  digest=129ecc86e2a05c35
+HARVEST   seed=303        fulfilled=  0.0%  localSupply=  5.5%  waste=   1443kg  substituted=   2935kg  demands= 0/12  events=  108  digest=f81bc70dab7daa59
+BASELINE  seed=404        fulfilled=  0.0%  localSupply=  1.3%  waste=   2063kg  substituted=   2627kg  demands= 0/11  events=   91  digest=75ab042579dd8b16
+HARVEST   seed=404        fulfilled= 18.2%  localSupply= 12.3%  waste=   1952kg  substituted=   2333kg  demands= 2/11  events=  118  digest=d82143a5dac72690
+
+Paired comparison (same world, policy is the only difference):
+  seed=42  fulfilment -9.1pp  waste +33kg  substituted +7kg
+  seed=8675309  fulfilment +8.3pp  waste +163kg  substituted +114kg
+  seed=7  fulfilment +30.0pp  waste -451kg  substituted -898kg
+  seed=19  fulfilment -7.7pp  waste +30kg  substituted -60kg
+  seed=23  fulfilment -10.0pp  waste +218kg  substituted +531kg
+  seed=31  fulfilment -7.7pp  waste +227kg  substituted +240kg
+  seed=101  fulfilment +0.0pp  waste +253kg  substituted +183kg
+  seed=202  fulfilment +10.0pp  waste -302kg  substituted -618kg
+  seed=303  fulfilment -8.3pp  waste +63kg  substituted +16kg
+  seed=404  fulfilment +18.2pp  waste -111kg  substituted -294kg
+
+SYNTHETIC SIMULATED COUNTERFACTUAL. Produced by a seeded simulation, not measured from a deployed system. Not evidence of real-world impact.
+Completed 20 run(s) in 27 ms.
+

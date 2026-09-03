@@ -7,6 +7,7 @@ import { useState } from "react";
 import { api, type DecisionReasonCode } from "@/lib/api";
 import { formatDate, titleCase } from "@/lib/format";
 import { DecisionReasonFields } from "./decision-reason";
+import { OfflineHint, useOnlineStatus } from "./offline";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, SectionTitle } from "./ui";
 
 export function ApprovalList({ compact = false }: { compact?: boolean }) {
@@ -14,6 +15,7 @@ export function ApprovalList({ compact = false }: { compact?: boolean }) {
   const [decliningId, setDecliningId] = useState<string | null>(null);
   const [reasonCode, setReasonCode] = useState<DecisionReasonCode | null>(null);
   const [nextAction, setNextAction] = useState("");
+  const online = useOnlineStatus();
   const approvals = useQuery({ queryKey: ["approvals", "PENDING"], queryFn: () => api.approvals("PENDING"), refetchInterval: 5_000 });
   const decision = useMutation({
     mutationFn: ({ id, value }: { id: string; value: "APPROVE" | "REJECT" }) =>
@@ -54,8 +56,8 @@ export function ApprovalList({ compact = false }: { compact?: boolean }) {
               {!compact && <small>Requested {formatDate(approval.requestedAt)}</small>}
             </div>
             <div className="inline-actions">
-              <button className="button button-danger" disabled={decision.isPending} onClick={() => (decliningId === approval.approvalId ? closeDecline() : setDecliningId(approval.approvalId))}><X size={16} />Decline</button>
-              <button className="button" disabled={decision.isPending} onClick={() => decision.mutate({ id: approval.approvalId, value: "APPROVE" })}><Check size={16} />Approve</button>
+              <button className="button button-danger" disabled={decision.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) { if (decliningId === approval.approvalId) closeDecline(); else setDecliningId(approval.approvalId); } }}><X size={16} />Decline</button>
+              <button className="button" disabled={decision.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) decision.mutate({ id: approval.approvalId, value: "APPROVE" }); }}><Check size={16} />Approve</button>
             </div>
             {decliningId === approval.approvalId && (
               <div className="decline-panel form-grid">
@@ -73,7 +75,7 @@ export function ApprovalList({ compact = false }: { compact?: boolean }) {
                 />
                 <div className="field-full inline-actions decline-actions">
                   <button className="button button-quiet" disabled={decision.isPending} onClick={closeDecline} type="button">Cancel</button>
-                  <button className="button button-danger" disabled={decision.isPending || declineBlocked} onClick={() => decision.mutate({ id: approval.approvalId, value: "REJECT" })} type="button"><X size={16} />Confirm decline</button>
+                  <button className="button button-danger" disabled={decision.isPending || declineBlocked || !online} aria-disabled={!online || undefined} onClick={() => { if (online) decision.mutate({ id: approval.approvalId, value: "REJECT" }); }} type="button"><X size={16} />Confirm decline</button>
                 </div>
                 {declineBlocked && <p className="form-error field-full">Choose a reason and say what should happen next before declining.</p>}
               </div>
@@ -81,6 +83,7 @@ export function ApprovalList({ compact = false }: { compact?: boolean }) {
           </article>
         ))}
       </div>
+      {!online && <OfflineHint>A commitment decision is never queued on a device. Reconnect to approve or decline.</OfflineHint>}
       {decision.error && <p className="form-error">{decision.error.message}</p>}
     </Card>
   );

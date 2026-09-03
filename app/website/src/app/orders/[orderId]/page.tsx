@@ -8,6 +8,7 @@ import { FormEvent, useState } from "react";
 
 import { ApprovalList } from "@/components/approval-list";
 import { DecisionReasonFields, ReasonChooser, decisionReasonLabel } from "@/components/decision-reason";
+import { OfflineHint, useOnlineStatus } from "@/components/offline";
 import { useSession } from "@/components/providers";
 import { Badge, Card, ErrorState, LoadingState, PageHeader, SectionTitle } from "@/components/ui";
 import { api, type DecisionReasonCode } from "@/lib/api";
@@ -25,6 +26,7 @@ function lifecycleFor(status: string) {
 export default function OrderDetailPage() {
   const { orderId } = useParams<{ orderId: string }>();
   const { actor } = useSession();
+  const online = useOnlineStatus();
   const queryClient = useQueryClient();
   const [lineValues, setLineValues] = useState<Record<string, { accepted: number; rejected: number }>>({});
   const [lineReasons, setLineReasons] = useState<Record<string, DecisionReasonCode | null>>({});
@@ -104,7 +106,7 @@ export default function OrderDetailPage() {
       {actor?.role === "BUYER" && mission?.status === "DELIVERED" && !order.data.deliveryAcceptance && (
         <Card className="section-gap">
           <SectionTitle title="Accept this delivery" detail="Record what arrived" />
-          <form className="form-grid" onSubmit={(event: FormEvent) => { event.preventDefault(); acceptance.mutate(); }}>
+          <form className="form-grid" onSubmit={(event: FormEvent) => { event.preventDefault(); if (online) acceptance.mutate(); }}>
             {resolvedLines.map((line) => (
               <div className="field-full" key={line.cropBatchId}>
                 <div className="order-summary">
@@ -127,6 +129,7 @@ export default function OrderDetailPage() {
             {rejected > 0 && (
               <DecisionReasonFields
                 idPrefix="delivery"
+                disabled={!online || acceptance.isPending}
                 nextAction={nextAction}
                 onNextAction={setNextAction}
                 onReasonCode={setReasonCode}
@@ -135,8 +138,9 @@ export default function OrderDetailPage() {
               />
             )}
             <div className="field field-full"><label htmlFor="acceptance-note">Note (optional)</label><textarea id="acceptance-note" rows={2} value={note} onChange={(event) => setNote(event.target.value)} /></div>
+            {!online && <div className="field-full"><OfflineHint>Accepting a delivery settles what was received, so it is never queued. Reconnect to confirm.</OfflineHint></div>}
             {reasonMissing && <p className="form-error field-full">Choose a reason and say what the farmer should do next before recording a rejection.</p>}
-            <button className="button field-full" disabled={acceptance.isPending || reasonMissing || Math.abs(accepted + rejected - mission.quantity.value) > 0.0001 || resolvedLines.some((line) => Math.abs(line.accepted + line.rejected - line.quantity) > 0.0001)}><CheckCircle2 size={17} />Confirm delivery</button>
+            <button className="button field-full" aria-disabled={!online || undefined} disabled={acceptance.isPending || !online || reasonMissing || Math.abs(accepted + rejected - mission.quantity.value) > 0.0001 || resolvedLines.some((line) => Math.abs(line.accepted + line.rejected - line.quantity) > 0.0001)}><CheckCircle2 size={17} />Confirm delivery</button>
           </form>
           {(message || acceptance.error) && <p className={acceptance.error ? "form-error" : "form-success"}>{message ?? acceptance.error?.message}</p>}
         </Card>

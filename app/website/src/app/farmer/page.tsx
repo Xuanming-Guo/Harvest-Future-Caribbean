@@ -6,6 +6,7 @@ import Link from "next/link";
 
 import { ApprovalList } from "@/components/approval-list";
 import { DecisionExplanation, decisionReasonLabel } from "@/components/decision-reason";
+import { DeviceUpdateList, useOutbox } from "@/components/offline";
 import { OrderList } from "@/components/order-list";
 import { useSession } from "@/components/providers";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, Metric, PageHeader, SectionTitle } from "@/components/ui";
@@ -17,6 +18,7 @@ export default function FarmerHome() {
   const batches = useQuery({ queryKey: ["crop-batches"], queryFn: api.cropBatches, refetchInterval: 15_000 });
   const opportunities = useQuery({ queryKey: ["market-opportunities"], queryFn: () => api.marketOpportunities(), refetchInterval: 15_000 });
   const missions = useQuery({ queryKey: ["missions"], queryFn: () => api.missions(), refetchInterval: 5_000 });
+  const deviceUpdates = useOutbox();
 
   const needsAction = (batches.data?.items ?? []).filter((batch) => batch.latestDecision);
 
@@ -63,6 +65,12 @@ export default function FarmerHome() {
             </Card>
             <ApprovalList compact />
           </div>
+          {deviceUpdates.length > 0 && (
+            <Card className="section-gap">
+              <SectionTitle title="Updates on this device" detail="Sent automatically when you reconnect" />
+              <DeviceUpdateList />
+            </Card>
+          )}
           <div className="section-gap"><OrderList limit={4} /></div>
           <div className="dashboard-grid section-gap">
             <Card>

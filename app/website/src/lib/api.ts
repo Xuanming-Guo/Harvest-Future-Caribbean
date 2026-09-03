@@ -178,9 +178,9 @@ export const api = {
       body,
     }));
   },
-  async submitObservation(body: ApiSchema<"CropObservationCreate">) {
+  async submitObservation(body: ApiSchema<"CropObservationCreate">, idempotencyKey = newIdempotencyKey("observation")) {
     return unwrap(await client.POST("/v1/crop-observations", {
-      params: { header: { "Idempotency-Key": newIdempotencyKey("observation") } },
+      params: { header: { "Idempotency-Key": idempotencyKey } },
       body,
     }));
   },
@@ -202,9 +202,9 @@ export const api = {
   async marketOpportunities(cropType?: string) {
     return unwrap(await client.GET("/v1/market-opportunities", { params: { query: { cropType } } }));
   },
-  async createListing(body: ApiSchema<"ListingCreate">) {
+  async createListing(body: ApiSchema<"ListingCreate">, idempotencyKey = newIdempotencyKey("listing")) {
     return unwrap(await client.POST("/v1/listings", {
-      params: { header: { "Idempotency-Key": newIdempotencyKey("listing") } },
+      params: { header: { "Idempotency-Key": idempotencyKey } },
       body,
     }));
   },
