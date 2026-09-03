@@ -23,6 +23,14 @@ export const formatPercent = (value: number) =>
 export const titleCase = (value: string) =>
   value.toLowerCase().replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 
+/**
+ * Plain words for the method behind a forecast. `provenance` reads
+ * MODEL_PREDICTED for both methods, so a participant needs this label to tell
+ * a rule-based estimate from a learned-model prediction.
+ */
+export const estimationMethodLabel = (mode: "LEARNED_MODEL" | "DETERMINISTIC_FALLBACK") =>
+  mode === "LEARNED_MODEL" ? "learned model" : "deterministic fallback";
+
 /** A crop name as it reads inside a sentence, whatever case the API sent. */
 export const cropName = (value: string) => value.toLowerCase().replaceAll("_", " ");
 

@@ -326,6 +326,9 @@ export function predictionDto(row: YieldPrediction) {
     requestId: row.requestId,
     cropBatchId: row.cropBatchId,
     modelVersion: row.modelVersion,
+    // provenance stays MODEL_PREDICTED for both methods, so this is the field
+    // that keeps a fixture estimate from reading as learned-model output.
+    estimationMode: row.estimationMode,
     q10MarketableYield: quantity(row.q10),
     q50MarketableYield: quantity(row.q50),
     q90MarketableYield: quantity(row.q90),

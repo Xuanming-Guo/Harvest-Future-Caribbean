@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { InjectedDisruption, ReplayTimeline, SimulationAgentAction } from "@harvest/simulation";
 
+import EstimationModeControl from "@/components/EstimationModeControl";
 import InjectionPanel from "@/components/InjectionPanel";
 import IslandScopeControls from "@/components/IslandScopeControls";
 import EventFeed from "@/components/panels/EventFeed";
@@ -15,6 +16,7 @@ import MetricsPanel from "@/components/panels/MetricsPanel";
 import PlaybackControls from "@/components/transport/PlaybackControls";
 import { usePlayback } from "@/lib/playback";
 import {
+  DEFAULT_ESTIMATION_MODE,
   DEFAULT_SEED,
   DEFAULT_SCENARIO,
   PARTICIPANT_WEBSITE_URL,
@@ -28,6 +30,7 @@ import {
   loadTimeline,
   loadWorldFrame,
   type DecisionMode,
+  type EstimationMode,
   type PolicyName,
   type RunOutcomeComparison,
   type SavedRun,
@@ -45,6 +48,7 @@ export default function ControlRoomPage() {
   const [policy, setPolicy] = useState<PolicyName>("HARVEST");
   const [seedInput, setSeedInput] = useState(String(DEFAULT_SEED));
   const [decisionMode, setDecisionMode] = useState<DecisionMode>("DETERMINISTIC");
+  const [estimationMode, setEstimationMode] = useState<EstimationMode>(DEFAULT_ESTIMATION_MODE);
   const [scopeMode, setScopeMode] = useState<"SELECTED" | "ALL">("ALL");
   const [islandIds, setIslandIds] = useState<string[]>(["saint-lucia"]);
   const [injections, setInjections] = useState<InjectedDisruption[]>([]);
@@ -73,6 +77,7 @@ export default function ControlRoomPage() {
       setPolicy(run.policy);
       setSeedInput(String(run.seed));
       setDecisionMode(run.decisionMode);
+      setEstimationMode(run.estimationMode);
       setInjections(run.disruptions as InjectedDisruption[]);
       const firstMapped = loaded.scene.participants.find((item) => item.productActorId);
       setParticipantId(firstMapped?.productActorId ?? "");
@@ -138,14 +143,14 @@ export default function ControlRoomPage() {
     setLoading(true);
     setError(null);
     try {
-      const created = await createSavedRun({ scenarioId, policy, seed, decisionMode, disruptions: injections, scope: scopeMode === "ALL" ? { mode: "ALL" } : { mode: "SELECTED", islandIds } });
+      const created = await createSavedRun({ scenarioId, policy, seed, decisionMode, estimationMode, disruptions: injections, scope: scopeMode === "ALL" ? { mode: "ALL" } : { mode: "SELECTED", islandIds } });
       const run = await refreshRuns(created.runId) ?? created;
       await loadRun(run);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
       setLoading(false);
     }
-  }, [decisionMode, injections, islandIds, loadRun, policy, refreshRuns, scenarioId, scopeMode, seedInput]);
+  }, [decisionMode, estimationMode, injections, islandIds, loadRun, policy, refreshRuns, scenarioId, scopeMode, seedInput]);
 
   const changeInjections = useCallback(async (next: InjectedDisruption[]) => {
     const additions = next.slice(injections.length);
@@ -238,6 +243,12 @@ export default function ControlRoomPage() {
           if (/^\d*$/.test(next)) setSeedInput(next);
         }} />
       </label>
+      {/*
+        * Baseline participants never call the Product API, so the control is
+        * disabled rather than hidden: the run still records a value, and
+        * hiding it would make the stored field look like a bug.
+        */}
+      <EstimationModeControl value={estimationMode} onChange={setEstimationMode} disabled={policy === "BASELINE"} />
       <label>Decision mode
         <select value={decisionMode} onChange={(event) => setDecisionMode(event.target.value as DecisionMode)}>
           <option value="DETERMINISTIC">Deterministic</option>
@@ -286,7 +297,7 @@ export default function ControlRoomPage() {
       <ReferenceAttribution sources={scene.referenceDataSources} />
       <div className="chrome">
         <div className="chrome-header">
-          <Masthead scene={scene} />
+          <Masthead scene={scene} estimationMode={currentRun?.estimationMode} estimationModeUsed={currentRun?.policy !== "BASELINE"} />
           {setup}
           {error && <p className="run-error" role="alert">{error}</p>}
         </div>

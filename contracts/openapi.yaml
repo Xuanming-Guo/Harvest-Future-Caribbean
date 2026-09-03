@@ -998,6 +998,7 @@ paths:
               policy: HARVEST
               seed: 8675309
               decisionMode: DETERMINISTIC
+              estimationMode: DETERMINISTIC_FALLBACK
               scope: {mode: SELECTED, islandIds: [saint-lucia]}
       responses:
         '201':
@@ -1469,12 +1470,18 @@ components:
     YieldPredictionEvidence:
       type: object
       additionalProperties: false
-      required: [predictionId, requestId, cropBatchId, modelVersion, q10MarketableYield, q50MarketableYield, q90MarketableYield, harvestWindow, readiness, confidence, warnings, featureSnapshot, provenance, generatedAt]
+      required: [predictionId, requestId, cropBatchId, modelVersion, estimationMode, q10MarketableYield, q50MarketableYield, q90MarketableYield, harvestWindow, readiness, confidence, warnings, featureSnapshot, provenance, generatedAt]
       properties:
         predictionId: {type: string, format: uuid}
         requestId: {type: string, format: uuid}
         cropBatchId: {type: string, format: uuid}
         modelVersion: {type: string, minLength: 1}
+        estimationMode:
+          allOf: [{$ref: '#/components/schemas/EstimationMode'}]
+          description: >-
+            Which method produced this forecast. provenance stays
+            MODEL_PREDICTED for both, so DETERMINISTIC_FALLBACK is the field
+            that keeps fixture output from reading as learned-model output.
         q10MarketableYield: {$ref: './common.schema.json#/$defs/Quantity'}
         q50MarketableYield: {$ref: './common.schema.json#/$defs/Quantity'}
         q90MarketableYield: {$ref: './common.schema.json#/$defs/Quantity'}
@@ -2225,6 +2232,12 @@ components:
         durationMs: {type: integer, minimum: 1}
         affectedEntityIds: {type: array, minItems: 1, items: {type: string, minLength: 1}}
         publicDescription: {type: string, minLength: 1, maxLength: 500}
+    EstimationMode:
+      description: >-
+        Which harvest-estimation method produced a forecast. LEARNED_MODEL is
+        the FastAPI quantile service; DETERMINISTIC_FALLBACK is the rule-based
+        fixture and is never learned-model output.
+      enum: [LEARNED_MODEL, DETERMINISTIC_FALLBACK]
     SimulationRunCreate:
       oneOf:
         - type: object
@@ -2235,6 +2248,14 @@ components:
             policy: {enum: [BASELINE, HARVEST]}
             seed: {type: integer, minimum: 0, maximum: 4294967295}
             decisionMode: {enum: [DETERMINISTIC, LLM_ASSISTED]}
+            estimationMode:
+              allOf: [{$ref: '#/components/schemas/EstimationMode'}]
+              description: >-
+                Harvest-estimation method for this run only; never a global
+                server switch. Omitting the field selects
+                DETERMINISTIC_FALLBACK. No schema-level default is declared
+                because generated TypeScript would then make the field
+                required on every request body.
             scope: {$ref: '#/components/schemas/SimulationScope'}
             disruptions: {type: array, items: {$ref: '#/components/schemas/InjectedDisruption'}}
         - type: object
@@ -2298,7 +2319,7 @@ components:
     SimulationRun:
       type: object
       additionalProperties: false
-      required: [runId, scenarioId, policy, seed, decisionMode, decisionAdapter, scope, resolvedIslandIds, disruptions, status, frameCount, decisionCount, createdAt, updatedAt]
+      required: [runId, scenarioId, policy, seed, decisionMode, decisionAdapter, estimationMode, scope, resolvedIslandIds, disruptions, status, frameCount, decisionCount, createdAt, updatedAt]
       properties:
         runId: {type: string, format: uuid}
         scenarioId: {type: string, minLength: 1}
@@ -2306,6 +2327,9 @@ components:
         seed: {type: integer, minimum: 0, maximum: 4294967295}
         decisionMode: {enum: [DETERMINISTIC, LLM_ASSISTED]}
         decisionAdapter: {type: string, minLength: 1}
+        estimationMode:
+          allOf: [{$ref: '#/components/schemas/EstimationMode'}]
+          description: Stored per run. Baseline runs record the choice but never call a forecast model.
         scope: {$ref: '#/components/schemas/SimulationScope'}
         resolvedIslandIds: {type: array, minItems: 1, items: {type: string}}
         disruptions: {type: array, items: {$ref: '#/components/schemas/InjectedDisruption'}}
@@ -2390,6 +2414,9 @@ components:
         entityId: {type: string, format: uuid}
         eventIds: {type: array, items: {type: string, format: uuid}}
         adapter: {type: string, minLength: 1}
+        estimationMode:
+          allOf: [{$ref: '#/components/schemas/EstimationMode'}]
+          description: Present on forecast-producing tools so replay states which estimation method ran.
         approval: {enum: [NONE, SYNTHETIC_PARTICIPANT]}
         correlationId: {type: string, format: uuid}
         causationId: {type: string, format: uuid}
@@ -2556,9 +2583,10 @@ components:
     SimulationTimeline:
       type: object
       additionalProperties: false
-      required: [runId, evidenceLabel, provenanceNote, scene, frames]
+      required: [runId, evidenceLabel, provenanceNote, estimationMode, scene, frames]
       properties:
         runId: {type: string, format: uuid}
+        estimationMode: {$ref: '#/components/schemas/EstimationMode'}
         evidenceLabel: {type: string}
         provenanceNote: {type: string}
         scene: {$ref: '#/components/schemas/ReplayScene'}
@@ -2566,9 +2594,10 @@ components:
     SimulationWorldFrame:
       type: object
       additionalProperties: false
-      required: [runId, frameIndex, frameCount, frame]
+      required: [runId, frameIndex, frameCount, estimationMode, frame]
       properties:
         runId: {type: string, format: uuid}
+        estimationMode: {$ref: '#/components/schemas/EstimationMode'}
         frameIndex: {type: integer, minimum: 0}
         frameCount: {type: integer, minimum: 1}
         frame: {$ref: '#/components/schemas/ReplayFrame'}

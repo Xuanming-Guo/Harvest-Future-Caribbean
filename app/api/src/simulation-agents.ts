@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { ActorRole, Provenance, type Actor, type DomainEvent } from "@prisma/client";
+import { ActorRole, EstimationMode, Provenance, type Actor, type DomainEvent } from "@prisma/client";
 import {
   SimulationEngine,
   type ControlRoomBatch,
@@ -21,6 +21,27 @@ import { signDevelopmentToken } from "./auth.js";
 import { prisma } from "./db.js";
 
 type DecisionMode = "DETERMINISTIC" | "LLM_ASSISTED";
+
+/**
+ * Raised when a run that selected the learned harvest-estimation model could
+ * not reach it, or the service rejected the request. It travels out of the
+ * connected run so the caller can mark the whole run FAILED rather than
+ * finishing it with a mixture of learned and fallback forecasts.
+ */
+export class ModelUnavailableError extends Error {
+  constructor(detail: string) {
+    super(detail);
+    this.name = "ModelUnavailableError";
+  }
+}
+
+/**
+ * The one simulated tool whose Product API call refreshes crop intelligence,
+ * and so produces a forecast as a side effect. Naming it keeps the method off
+ * every other action, where it would only imply that accepting a delivery or
+ * deciding an approval had consulted an estimation model.
+ */
+const FORECAST_PRODUCING_TOOL = "submit_crop_observation";
 type JsonObject = Record<string, unknown>;
 type QuantityDto = { value: number; unit: "kg" };
 type GeoPoint = { latitude: number; longitude: number };
@@ -395,6 +416,7 @@ class ProductTools {
     private readonly server: FastifyInstance,
     private readonly runId: string,
     private readonly decisions: SimulationDecisionProvider,
+    private readonly estimationMode: EstimationMode = EstimationMode.DETERMINISTIC_FALLBACK,
   ) {}
 
   async query<T>(participant: ProductApiPrincipal, url: string, simulationTime?: string): Promise<T> {
@@ -527,6 +549,7 @@ class ProductTools {
       toolName,
       eventIds: events.map((event) => event.id),
       adapter: decision.adapter,
+      ...(toolName === FORECAST_PRODUCING_TOOL ? { estimationMode: this.estimationMode } : {}),
       approval,
       ...(lastEvent?.traceId ? { traceId: lastEvent.traceId } : {}),
       ...(lastEvent?.entityId ? { entityId: lastEvent.entityId } : {}),
@@ -536,6 +559,10 @@ class ProductTools {
     if (response.statusCode >= 400) {
       const detail = textValue(parsed.detail) ?? response.statusMessage;
       const code = textValue(parsed.code) ?? "PRODUCT_TOOL_REJECTED";
+      // An unavailable learned model is not an ordinary rejected tool call.
+      // Recording it as one would leave a LEARNED_MODEL run "completed" with
+      // no learned forecasts in it at all.
+      if (code === "MODEL_UNAVAILABLE") throw new ModelUnavailableError(detail);
       return {
         ok: false,
         data: parsed,
@@ -1151,6 +1178,7 @@ export async function runConnectedHarvest(
   runId: string,
   input: ConnectedRunInput,
   decisionMode: DecisionMode,
+  estimationMode: EstimationMode = EstimationMode.DETERMINISTIC_FALLBACK,
 ): Promise<ConnectedRunResult> {
   const engine = new SimulationEngine({
     runId,
@@ -1166,7 +1194,7 @@ export async function runConnectedHarvest(
   const firstFrame = engine.checkpoint("RUN_STARTED");
   const { participants, batchIds, observer } = await bootstrapParticipants(runId, engine.controlRoomScene, firstFrame);
   const decisions = new SimulationDecisionProvider(decisionMode);
-  const tools = new ProductTools(server, runId, decisions);
+  const tools = new ProductTools(server, runId, decisions, estimationMode);
   const projector = new ProductEventProjector(engine, batchIds, participants);
   const coordinator = participants.find((item) => item.role === "COORDINATOR");
   if (!coordinator) throw new Error("The connected simulation requires a coordinator.");

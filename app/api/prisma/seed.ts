@@ -303,6 +303,7 @@ async function main() {
       create: {
         ...prediction,
         modelVersion: "fixture-yield-v0.1.0",
+        estimationMode: "DETERMINISTIC_FALLBACK",
         harvestStart: at("2026-09-05T00:00:00Z"),
         harvestEnd: at("2026-09-08T00:00:00Z"),
         featureSnapshot: {

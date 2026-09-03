@@ -259,6 +259,10 @@ function AgentActionView({ action, scene, onClose }: { action: SimulationAgentAc
         <Row label="Tool" value={action.toolName.replaceAll("_", " ")} />
         <Row label="Status" value={<span className={`pill ${action.status === "SUCCEEDED" ? "pill-good" : "pill-bad"}`}>{action.status.toLowerCase()}</span>} />
         <Row label="Decision adapter" value={action.adapter} />
+        {/* Only forecast-producing tools carry a method, so its absence is meaningful. */}
+        {action.estimationMode && (
+          <Row label="Harvest estimation" value={action.estimationMode === "LEARNED_MODEL" ? "learned model" : "deterministic fallback"} />
+        )}
         <Row label="Simulation time" value={formatWhen(Date.parse(action.at))} />
         <Row label="Approval" value={action.approval === "SYNTHETIC_PARTICIPANT" ? "synthetic participant decision" : "not required by this action"} />
         <Row label="Summary" value={action.summary} />
