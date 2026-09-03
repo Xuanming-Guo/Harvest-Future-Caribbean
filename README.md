@@ -6,7 +6,9 @@
 
 Harvest helps turn uncertain farmer updates into safer supply commitments,
 multi-farm fulfilment, coordinated delivery, exception recovery, traceability,
-and better future forecasts.
+and better future forecasts. Traceability here means the recorded chain of
+Harvest's own operational evidence, including the structured reason and next
+action attached to every rejection. It is not a food-safety certification.
 
 > The marketplace is the interface. The coordination layer and outcome dataset
 > are the company.

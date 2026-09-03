@@ -123,33 +123,34 @@ $run | Select-Object runId, status, policy, decisionMode,
   decisionAdapter, frameCount, decisionCount, metrics
 ```
 
-Expected engine values for seed `42`. These were recorded before the #53
-engine changes (#62, #69) and are re-recorded from a real run once the #53
-stack (#62, #64, #69, #73, #76) has merged; until then the connected-run test
-checks determinism and outcome arithmetic rather than these exact counts:
+Expected engine values for seed `42`, re-recorded from a real run after the
+horizon clamp. These move whenever the engine or the Product API changes, so
+the connected-run test checks determinism, outcome arithmetic, and the cause
+vocabulary rather than pinning these counts; this document is where the counts
+themselves are kept:
 
 ```text
 status            COMPLETED
 policy            HARVEST
 decisionMode      DETERMINISTIC
 decisionAdapter   deterministic
-frameCount        130
-eventsProcessed    82
-totalDemandedKg   2956
-totalAcceptedKg    359
+frameCount        117
+eventsProcessed    76
+totalDemandedKg   2183
+totalAcceptedKg   1000.63
 ```
 
 `metrics.productActions` must also exist with positive attempted, succeeded and
 domain-event counts. For the deterministic seed-`42` run, expect:
 
 ```text
-attempted             154
-succeeded             154
+attempted             123
+succeeded             123
 rejected                0
-domainEventsCreated   242
-activeListings          7
-openDemands             11
-totalOrders             11
+domainEventsCreated   199
+activeListings          5
+openDemands              8
+totalOrders              8
 activeMissions           0
 openExceptions           0
 ```
@@ -158,19 +159,74 @@ The final Product API outcome summary is separate from the physical engine
 metrics above. For deterministic seed `42`, expect:
 
 ```text
-total orders              11
-fulfilled                  2
-partially fulfilled        0
-unfulfilled                8
-pending                    1
-approved commitments       8
-completed missions         8
+total orders               8
+fulfilled                  3
+partially fulfilled        1
+unfulfilled                4
+pending                    0
+approved commitments       5
+completed missions         5
 ```
 
-`deliveryAcceptedKg` is the sum of the eight immutable delivery acceptances,
+`orderOutcomes.causes` explains every unfulfilled or partially fulfilled
+order. For seed `42`:
+
+```text
+DELIVERY_REJECTED          1
+INSUFFICIENT_SUPPLY        2
+NO_READY_SUPPLY            2
+```
+
+`HORIZON_TRUNCATED` no longer appears. The engine used to raise orders whose
+deadline fell after the 21-day scenario horizon, and the run window closed
+before they could be observed either way; a buyer now withholds such an order
+instead of raising one it cannot settle. The classification stays in the
+Product API as a guard, so a scenario or an injected effect that does produce
+such an order still gets it named rather than recorded as an operational
+failure.
+
+### Where the seed-42 numbers came from
+
+Every figure above is read from a real run, never edited by hand. The four
+columns show what each change to the fulfilment path moved:
+
+| Value | Before the #53 fixes | After readiness/expiry/re-match | After safe partial commitment | After the horizon clamp |
+|---|---|---|---|---|
+| `frameCount` | 130 | 119 | 127 | 117 |
+| `eventsProcessed` | 82 | 76 | 80 | 76 |
+| `productActions.attempted` | 154 | 140 | 151 | 123 |
+| `productActions.domainEventsCreated` | 242 | 222 | 238 | 199 |
+| `activeListings` | 7 | 3 | 3 | 5 |
+| total orders | 11 | 11 | 11 | 8 |
+| fulfilled | 2 | 3 | 4 | 3 |
+| partially fulfilled | 0 | 2 | 2 | 1 |
+| unfulfilled | 8 | 5 | 5 | 4 |
+| pending | 1 | 1 | 0 | 0 |
+| approved commitments | 8 | 5 | 7 | 5 |
+| completed missions | 8 | 5 | 7 | 5 |
+| `deliveryAcceptedKg` | 359 | 1387.75 | 1545.13 | 1000.63 |
+
+The first column is the pre-#53 baseline this document recorded before the
+readiness fixes, when unready crop was still listable, so eight commitments
+were approved but only 359 kg survived to delivery. The middle column is the
+readiness, expiry, and re-match fixes. The third adds safe partial commitment:
+two more orders reach a commitment they would previously have waited out, and
+the horizon-truncated order carries a cause instead of sitting in `pending`.
+
+The last column is the horizon clamp, and it is the only one of the four that
+changes the world rather than how the world is handled. Three of the eleven
+orders are no longer raised at all, because their deadline fell outside the
+run window, so every downstream count drops with them: fewer orders means less
+demand, fewer commitments, fewer missions, and less delivered weight. Read the
+column as a smaller order book, not as a regression. The rate is what survives
+the comparison, and it holds: 4 of 11 fully met before, 3 of 8 after, with one
+partial on each side. `activeListings` rises because supply that would have
+been committed to a withheld order stays on the marketplace instead.
+
+`deliveryAcceptedKg` is the sum of the five immutable delivery acceptances,
 not the engine's `totalAcceptedKg`. The control room uses this Product API
 quantity for its Harvest **Delivered** card. For seed `42`, both values are
-`359 kg` because the engine applies the Product API delivery acceptances back
+`1000.63 kg` because the engine applies the Product API delivery acceptances back
 to physical state as each mission arrives.
 
 The `runId` is a fresh UUID. All evidence is explicitly labelled synthetic and

@@ -9,6 +9,14 @@ export const formatDate = (value?: string, includeTime = true) => {
   }).format(new Date(value));
 };
 
+export const formatClock = (value: number | string) =>
+  new Intl.DateTimeFormat("en-LC", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "America/St_Lucia",
+  }).format(new Date(value));
+
 export const formatPercent = (value: number) =>
   new Intl.NumberFormat("en", { style: "percent", maximumFractionDigits: 0 }).format(value);
 
