@@ -103,6 +103,7 @@ export default function MissionDetailPage() {
           mission={mission.data}
           updates={updates.data?.items}
           controls={controls}
+          detailsInitiallyOpen={isTransporter}
           vehicleLabel={vehicles.data?.items.find((vehicle) => vehicle.vehicleId === (mission.data.vehicleId ?? vehicleId))?.label}
         />
         <Card>

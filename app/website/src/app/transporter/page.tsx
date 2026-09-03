@@ -1,12 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Clock3, PackageCheck, Truck } from "lucide-react";
+import { ArrowRight, Map as MapIcon, PackageCheck, Sparkles, Truck } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { DeliveryBoard, DeliveryJourney, VehiclePicker } from "@/components/delivery-world";
-import { Card, EmptyState, ErrorState, LoadingState, Metric, PageHeader } from "@/components/ui";
+import { Card, EmptyState, ErrorState, LoadingState } from "@/components/ui";
 import { api } from "@/lib/api";
 
 export default function TransporterHome() {
@@ -48,30 +48,24 @@ export default function TransporterHome() {
 
   return (
     <>
-      <div className="delivery-page-header" data-tour="transporter-home">
-        <PageHeader
-          eyebrow="Saint Lucia deliveries"
-          title="Choose a route. Move the harvest."
-          description="Claim local delivery work, follow each farm stop and keep the hotel updated as the produce moves."
-          actions={(
-            <div data-tour="transporter-vehicle">
-              <VehiclePicker vehicles={availableVehicles} value={vehicleId} onChange={setVehicleId} />
-            </div>
-          )}
-        />
-      </div>
-      <div className="metric-grid">
-        <Metric label="Ready to claim" value={available.length} detail="Local routes waiting" icon={PackageCheck} />
-        <Metric label="My active routes" value={mine.filter((mission) => mission.status !== "DELIVERED").length} detail="Assigned to you" icon={Truck} tone="blue" />
-        <Metric label="Delivered" value={mine.filter((mission) => mission.status === "DELIVERED").length} detail="Completed routes" icon={Clock3} tone="amber" />
+      <div className="delivery-game-hud" data-tour="transporter-home">
+        <div className="delivery-game-title">
+          <span><Sparkles size={14} />Driver world</span>
+          <h1>Choose a route. Move the harvest.</h1>
+          <p>Pick a delivery ticket, explore the island and keep each farm-to-hotel journey moving.</p>
+        </div>
+        <div className="delivery-hud-stats" aria-label="Delivery summary">
+          <span><PackageCheck size={17} /><strong>{available.length}</strong> ready</span>
+          <span><Truck size={17} /><strong>{mine.filter((mission) => mission.status !== "DELIVERED").length}</strong> active</span>
+          <span><MapIcon size={17} /><strong>{mine.filter((mission) => mission.status === "DELIVERED").length}</strong> done</span>
+        </div>
+        <div data-tour="transporter-vehicle">
+          <VehiclePicker vehicles={availableVehicles} value={vehicleId} onChange={setVehicleId} />
+        </div>
       </div>
       {vehicles.error && <p className="form-error">Vehicle options could not be loaded. Try again before claiming a route.</p>}
       <div className="delivery-workspace-grid">
-        <Card className="delivery-board-card" data-tour="transporter-available">
-          <div className="delivery-board-banner"><h2>Delivery board</h2><span>Local jobs</span></div>
-          <DeliveryBoard missions={missions.data.items} selectedMissionId={selectedMissionId} onSelect={setSelectedMissionId} />
-        </Card>
-        <div data-tour="transporter-jobs">
+        <div className="delivery-map-main" data-tour="transporter-jobs">
           {!selected ? (
             <Card><EmptyState title="Choose a delivery ticket" detail="Select a job to see its island route, cargo and timing." /></Card>
           ) : (
@@ -79,6 +73,7 @@ export default function TransporterHome() {
               key={selected.missionId}
               mission={selected}
               updates={selectedUpdates.data?.items}
+              detailsInitiallyOpen
               vehicleLabel={availableVehicles.find((vehicle) => vehicle.vehicleId === (selected.vehicleId ?? vehicleId))?.label}
               controls={selected.status === "AVAILABLE" ? (
                 <>
@@ -102,6 +97,10 @@ export default function TransporterHome() {
             />
           )}
         </div>
+        <Card className="delivery-board-card" data-tour="transporter-available">
+          <div className="delivery-board-banner"><h2>Delivery board</h2><span>Local jobs</span></div>
+          <DeliveryBoard missions={missions.data.items} selectedMissionId={selectedMissionId} onSelect={setSelectedMissionId} />
+        </Card>
       </div>
       {selectedUpdates.error && <p className="form-error">Route updates could not be loaded. The mission facts above are still available.</p>}
       {accept.error && <p className="form-error">{accept.error.message}</p>}

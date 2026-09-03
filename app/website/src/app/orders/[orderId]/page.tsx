@@ -34,7 +34,7 @@ export default function OrderDetailPage() {
   const missionUpdates = useQuery({
     queryKey: ["mission-updates", mission?.missionId],
     queryFn: () => api.missionUpdates(mission!.missionId),
-    enabled: actor?.role === "BUYER" && Boolean(mission),
+    enabled: Boolean(mission),
     refetchInterval: 5_000,
   });
   const allocationLines = order.data?.allocation?.lines ?? [];
@@ -59,6 +59,12 @@ export default function OrderDetailPage() {
     <>
       <Link className="back-link" href="/orders"><ArrowLeft size={16} />Back to orders</Link>
       <PageHeader eyebrow="Order" title={`${order.data.requestedQuantity.value} kg ${titleCase(order.data.cropType)}`} description={`Needed by ${formatDate(order.data.neededBy)}`} actions={<Badge tone={order.data.atRisk ? "high" : undefined}>{order.data.lifecycleStatus}</Badge>} />
+      {mission && (
+        <div className="delivery-readonly-section delivery-readonly-primary">
+          <DeliveryJourney mission={mission} updates={missionUpdates.data?.items} compact />
+          {missionUpdates.error && <p className="form-error">Live delivery updates are unavailable. The order-linked route is still shown.</p>}
+        </div>
+      )}
       <Card>
         <SectionTitle title="Order progress" detail={order.data.atRisk ? "Needs attention" : "On track"} />
         <div className="lifecycle">
@@ -84,12 +90,6 @@ export default function OrderDetailPage() {
           {order.data.deliveryAcceptance && <div className="notice section-gap"><strong>{titleCase(order.data.deliveryAcceptance.outcome)}</strong><span>{order.data.deliveryAcceptance.acceptedQuantity.value} kg accepted · {order.data.deliveryAcceptance.rejectedQuantity.value} kg rejected</span><small>Recorded {formatDate(order.data.deliveryAcceptance.acceptedAt)}</small></div>}
         </Card>
       </div>
-      {actor?.role === "BUYER" && mission && (
-        <div className="delivery-readonly-section">
-          <DeliveryJourney mission={mission} updates={missionUpdates.data?.items} compact />
-          {missionUpdates.error && <p className="form-error">Live delivery updates are unavailable. The order-linked route is still shown.</p>}
-        </div>
-      )}
       {actor?.role !== "COORDINATOR" && <div className="section-gap"><ApprovalList /></div>}
       {actor?.role === "BUYER" && mission?.status === "DELIVERED" && !order.data.deliveryAcceptance && (
         <Card className="section-gap">

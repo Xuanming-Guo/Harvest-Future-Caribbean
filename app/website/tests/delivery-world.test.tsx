@@ -112,10 +112,12 @@ describe("delivery world", () => {
     const { container } = render(<DeliveryJourney mission={mission} />);
 
     expect(container.querySelector(".journey-truck")).toHaveClass("is-moving");
+    expect(container.querySelector(".journey-truck")).toHaveAttribute("data-position", "mid-leg");
+    expect(container.querySelector(".journey-truck")).toHaveStyle({ "--truck-x": "28.31521739130435%" });
     fireEvent.click(screen.getByRole("button", { name: /Farm stop 1: Roseau Valley Farm/ }));
-    expect(screen.getByText("Order-linked crop progress")).toBeInTheDocument();
-    expect(screen.getByText("14 kg committed to this delivery")).toBeInTheDocument();
-    expect(screen.queryByText("6 kg committed to this delivery")).not.toBeInTheDocument();
+    expect(screen.getByText("Live farm view")).toBeInTheDocument();
+    expect(screen.getByText("14 kg committed")).toBeInTheDocument();
+    expect(screen.queryByText("6 kg committed")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Back to island/ }));
     expect(screen.getByText("Illustrated route — not live GPS")).toBeInTheDocument();
   });
@@ -132,7 +134,20 @@ describe("delivery world", () => {
     render(<DeliveryJourney mission={available} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Farm stop 1: Roseau Valley Farm" }));
-    expect(screen.queryByText("Order-linked crop progress")).not.toBeInTheDocument();
+    expect(screen.queryByText("Live farm view")).not.toBeInTheDocument();
+  });
+
+  it("supports button and keyboard map navigation", () => {
+    const { container } = render(<DeliveryJourney mission={mission} />);
+    const stage = container.querySelector(".island-stage")!;
+    const layer = container.querySelector(".world-pan-layer")!;
+
+    fireEvent.click(container.querySelector('button[aria-label="Zoom in"]')!);
+    expect(layer).toHaveAttribute("data-zoom", "1.2");
+    fireEvent.keyDown(stage, { key: "ArrowRight" });
+    expect(layer).toHaveStyle({ transform: "translate3d(-28px, 0px, 0) scale(1.2)" });
+    fireEvent.click(container.querySelector('button[aria-label="Reset map view"]')!);
+    expect(layer).toHaveAttribute("data-zoom", "1.0");
   });
 
   it("renders empty, delayed, cancelled, and delivered route states", () => {

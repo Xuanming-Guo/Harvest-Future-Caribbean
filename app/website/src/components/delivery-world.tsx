@@ -9,13 +9,18 @@ import {
   Clock3,
   Flag,
   MapPin,
+  Maximize2,
+  Minus,
+  Move,
   PackageCheck,
+  Plus,
   Route,
   Sprout,
   Truck,
 } from "lucide-react";
 import Link from "next/link";
-import { useId, useMemo, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import Image from "next/image";
+import { useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
 import { Badge, Card, EmptyState, SectionTitle } from "@/components/ui";
 import { formatDate, titleCase } from "@/lib/format";
@@ -26,16 +31,17 @@ export type Vehicle = ApiSchema<"Vehicle">;
 type DeliveryCargo = ApiSchema<"DeliveryCargo">;
 
 const pickupAnchors = [
-  { x: 235, y: 150 },
-  { x: 665, y: 150 },
-  { x: 205, y: 390 },
-  { x: 690, y: 390 },
+  { x: 235, y: 397 },
+  { x: 286, y: 180 },
+  { x: 494, y: 200 },
+  { x: 628, y: 390 },
 ];
 const dropoffAnchors = [
-  { x: 472, y: 275 },
-  { x: 520, y: 400 },
+  { x: 706, y: 304 },
+  { x: 748, y: 397 },
 ];
-const routeStart = { x: 82, y: 486 };
+const routeStart = { x: 830, y: 475 };
+const cropStages = ["PLANNED", "GROWING", "HARVEST_READY", "HARVESTED", "CLOSED"] as const;
 
 function cropLabel(cropType: string) {
   return titleCase(cropType || "Produce");
@@ -175,24 +181,57 @@ function PlantArt({ cropType, status }: { cropType: string; status: NonNullable<
 
 export function CropProgressPlot({ cargo }: { cargo: DeliveryCargo }) {
   const status = cargo.cropStatus ?? "PLANNED";
+  const currentStage = cropStages.indexOf(status);
   return (
     <article className="crop-progress-plot" data-crop={cargo.cropType.toLowerCase()} data-stage={status.toLowerCase()}>
       <PlantArt cropType={cargo.cropType} status={status} />
-      <div>
-        <Badge>{status}</Badge>
-        <h4>{cropLabel(cargo.cropType)}</h4>
-        <p>{cargo.quantity.value} kg committed to this delivery</p>
+      <div className="crop-progress-copy">
+        <div><Badge>{status}</Badge><strong>{cargo.quantity.value} kg committed</strong></div>
+        <h4>{cropLabel(cargo.cropType)} field</h4>
+        <div className="crop-stage-track" aria-label={`${cropLabel(cargo.cropType)} growth progress`}>
+          {cropStages.map((stage, index) => (
+            <span className={`${index < currentStage ? "is-complete" : ""} ${index === currentStage ? "is-current" : ""}`} key={stage}>
+              <i>{index < currentStage ? <Check size={11} /> : index + 1}</i>
+              <small>{titleCase(stage).replace("Harvest Ready", "Ready")}</small>
+            </span>
+          ))}
+        </div>
       </div>
     </article>
+  );
+}
+
+const fieldPositions = [
+  [34, 37], [41, 40], [48, 43], [55, 46], [62, 49], [69, 52],
+  [39, 48], [46, 51], [53, 54], [60, 57], [67, 60], [74, 63],
+] as const;
+
+function FarmFieldCrops({ cargo }: { cargo: DeliveryCargo }) {
+  const status = cargo.cropStatus ?? "PLANNED";
+  const count = status === "GROWING" ? 8 : status === "HARVEST_READY" ? 12 : status === "PLANNED" ? 5 : 0;
+  const symbol = cargo.cropType === "CUCUMBER" ? "🥒" : cargo.cropType === "DASHEEN" ? "🌿" : "🌱";
+
+  return (
+    <div className={`farm-field-crops is-${status.toLowerCase()}`} aria-hidden="true">
+      {fieldPositions.slice(0, count).map(([left, top], index) => (
+        <span className="field-crop-sprite" style={{ left: `${left}%`, top: `${top}%` }} key={`${left}-${top}`}>
+          <i />{status === "HARVEST_READY" && index % 2 === 0 ? <b>{symbol}</b> : <Sprout size={22} />}
+        </span>
+      ))}
+      {status === "HARVESTED" && <span className="harvest-crates">📦 📦</span>}
+      {status === "CLOSED" && <span className="closed-field-sign">Field cycle complete</span>}
+    </div>
   );
 }
 
 function FarmProgressScene({ farmName, cargo, onBack }: { farmName: string; cargo: DeliveryCargo[]; onBack: () => void }) {
   return (
     <div className="farm-progress-scene">
+      <Image className="farm-scene-art" src="/art/saint-lucia-farm.png" alt="" fill sizes="(max-width: 800px) 100vw, 70vw" priority />
+      <FarmFieldCrops cargo={cargo[0]!} />
       <div className="farm-progress-header">
         <button type="button" className="world-back-button" onClick={onBack}><ArrowLeft size={16} />Back to island</button>
-        <div><span>Order-linked crop progress</span><h3>{farmName}</h3></div>
+        <div><span>Live farm view</span><h3>{farmName}</h3><small>Order-linked crops only</small></div>
       </div>
       <div className="crop-progress-grid">
         {cargo.map((item) => <CropProgressPlot cargo={item} key={item.cropBatchId} />)}
@@ -203,30 +242,32 @@ function FarmProgressScene({ farmName, cargo, onBack }: { farmName: string; carg
 }
 
 function IslandBackdrop() {
-  const suffix = useId().replaceAll(":", "");
-  const oceanId = `harvest-ocean-${suffix}`;
-  const islandId = `harvest-island-${suffix}`;
-  const shadowId = `island-shadow-${suffix}`;
-
   return (
-    <svg className="island-art" viewBox="0 0 920 560" aria-hidden="true" focusable="false">
-      <defs>
-        <linearGradient id={oceanId} x1="0" y1="0" x2="1" y2="1"><stop stopColor="#4ec7c1" /><stop offset="1" stopColor="#207f93" /></linearGradient>
-        <linearGradient id={islandId} x1="0" y1="0" x2="1" y2="1"><stop stopColor="#9bd568" /><stop offset="1" stopColor="#3f9b55" /></linearGradient>
-        <filter id={shadowId}><feDropShadow dx="0" dy="13" stdDeviation="9" floodColor="#074c59" floodOpacity=".32" /></filter>
-      </defs>
-      <rect width="920" height="560" rx="28" fill={`url(#${oceanId})`} />
-      <g className="ocean-lines"><path d="M45 90c40-15 74-15 114 0m625 16c32-13 60-13 92 0M55 455c45-14 81-14 126 0m592-17c36-13 69-13 105 0" /></g>
-      <path className="island-shadow" filter={`url(#${shadowId})`} d="M112 330C71 237 139 119 259 77c100-35 167 13 236-7 109-31 247 19 294 118 43 90-11 201-98 266-83 62-178 25-253 43-102 25-274 8-326-167Z" />
-      <path className="island-shore" d="M112 316C71 223 139 105 259 63c100-35 167 13 236-7 109-31 247 19 294 118 43 90-11 201-98 266-83 62-178 25-253 43-102 25-274 8-326-167Z" />
-      <path className="island-land" fill={`url(#${islandId})`} d="M127 305c-35-81 26-184 139-222 91-30 160 18 231-4 94-28 222 17 263 103 37 77-12 177-89 235-74 56-164 22-235 40-91 22-263 1-309-152Z" />
-      <path className="island-highland" d="M354 133c45-42 103-42 141 2 28 33 16 75-34 89-49 14-81-12-107-91Zm180 180c43-35 96-29 123 13 22 34 4 70-39 77-49 8-72-23-84-90Z" />
-      <g className="island-trees"><circle cx="308" cy="204" r="12" /><circle cx="329" cy="219" r="10" /><circle cx="590" cy="221" r="12" /><circle cx="611" cy="207" r="9" /><circle cx="352" cy="388" r="11" /><circle cx="632" cy="360" r="12" /></g>
-      <path className="island-road-shadow" d="M79 486C175 472 148 355 211 389S344 323 472 275s151-137 193-125" />
-      <path className="island-road" d="M79 486C175 472 148 355 211 389S344 323 472 275s151-137 193-125" />
-      <g className="island-buildings" transform="translate(444 241)"><path d="M0 25h56v38H0z" /><path d="m-7 27 35-30 36 30Z" /><rect x="23" y="40" width="11" height="23" /></g>
-      <g className="island-dock" transform="translate(42 468)"><path d="M0 31h74" /><path d="M17 10v37m37-37v37" /></g>
-    </svg>
+    <Image
+      className="island-art"
+      src="/art/saint-lucia-delivery-island.png"
+      alt=""
+      fill
+      sizes="(max-width: 800px) 100vw, 75vw"
+      priority
+      draggable={false}
+    />
+  );
+}
+
+export function EmptyIslandWorld({ title = "The island is quiet", detail = "Delivery routes will appear here as soon as an order is ready to move." }: { title?: string; detail?: string }) {
+  return (
+    <Card className="delivery-journey empty-island-world">
+      <div className="journey-heading">
+        <div className="journey-title-lockup"><span>Island map</span><SectionTitle title="Saint Lucia delivery world" detail="Explore local farm-to-hotel routes" /></div>
+      </div>
+      <div className="journey-layout">
+        <div className="island-stage empty-island-stage">
+          <IslandBackdrop />
+          <div className="empty-world-message"><Sprout size={27} /><EmptyState title={title} detail={detail} /></div>
+        </div>
+      </div>
+    </Card>
   );
 }
 
@@ -235,17 +276,22 @@ export function DeliveryJourney({
   updates = [],
   controls,
   compact = false,
+  detailsInitiallyOpen = false,
   vehicleLabel,
 }: {
   mission: DeliveryMissionView;
   updates?: DeliveryUpdate[];
   controls?: ReactNode;
   compact?: boolean;
+  detailsInitiallyOpen?: boolean;
   vehicleLabel?: string;
 }) {
   const anchors = useMemo(() => routeAnchors(mission), [mission]);
   const [selectedStop, setSelectedStop] = useState(Math.max(1, mission.currentStopSequence || 1));
   const [zoomFarmId, setZoomFarmId] = useState<string | null>(null);
+  const [mapView, setMapView] = useState({ x: 0, y: 0, zoom: 1 });
+  const [detailsOpen, setDetailsOpen] = useState(detailsInitiallyOpen);
+  const drag = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
   const zoomCargo = zoomFarmId ? mission.cargo.filter((item) => item.farmId === zoomFarmId && item.cropStatus) : [];
   const zoomFarm = zoomCargo[0]?.farmName;
   const points = [routeStart, ...anchors];
@@ -254,60 +300,117 @@ export function DeliveryJourney({
   const from = mission.currentStopSequence === 0 ? routeStart : anchors[currentIndex] ?? routeStart;
   const next = anchors[Math.min(mission.currentStopSequence, anchors.length - 1)] ?? from;
   const moving = mission.status === "IN_TRANSIT" && mission.currentStopSequence < mission.stops.length;
-  const truckPoint = mission.status === "DELIVERED" ? anchors.at(-1) ?? from : from;
+  const truckPoint = moving
+    ? { x: (from.x + next.x) / 2, y: (from.y + next.y) / 2 }
+    : mission.status === "DELIVERED" ? anchors.at(-1) ?? from : from;
   const truckStyle = {
-    "--truck-from-x": `${moving ? from.x / 9.2 : truckPoint.x / 9.2}%`,
-    "--truck-from-y": `${moving ? from.y / 5.6 : truckPoint.y / 5.6}%`,
-    "--truck-to-x": `${next.x / 9.2}%`,
-    "--truck-to-y": `${next.y / 5.6}%`,
-    "--truck-mid-x": `${(from.x + next.x) / 18.4}%`,
-    "--truck-mid-y": `${(from.y + next.y) / 11.2}%`,
+    "--truck-x": `${truckPoint.x / 9.2}%`,
+    "--truck-y": `${truckPoint.y / 5.6}%`,
+  } as CSSProperties;
+  const worldStyle = {
+    transform: `translate3d(${mapView.x}px, ${mapView.y}px, 0) scale(${mapView.zoom})`,
   } as CSSProperties;
   const latestDelay = [...updates].reverse().find((update) => update.updateType === "DELAYED");
+
+  function changeZoom(delta: number) {
+    setMapView((current) => ({ ...current, zoom: Math.min(1.8, Math.max(1, Number((current.zoom + delta).toFixed(1)))) }));
+  }
+
+  function panBy(x: number, y: number) {
+    setMapView((current) => ({ ...current, x: Math.max(-220, Math.min(220, current.x + x)), y: Math.max(-140, Math.min(140, current.y + y)) }));
+  }
+
+  function onMapKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.target !== event.currentTarget) return;
+    const movement = { ArrowLeft: [28, 0], ArrowRight: [-28, 0], ArrowUp: [0, 28], ArrowDown: [0, -28] }[event.key];
+    if (!movement) return;
+    event.preventDefault();
+    panBy(movement[0]!, movement[1]!);
+  }
+
+  function onMapPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if ((event.target as HTMLElement).closest("button")) return;
+    drag.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: mapView.x, originY: mapView.y };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function onMapPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!drag.current || drag.current.pointerId !== event.pointerId) return;
+    const nextX = drag.current.originX + event.clientX - drag.current.startX;
+    const nextY = drag.current.originY + event.clientY - drag.current.startY;
+    setMapView((current) => ({ ...current, x: Math.max(-220, Math.min(220, nextX)), y: Math.max(-140, Math.min(140, nextY)) }));
+  }
+
+  function stopDragging(event: ReactPointerEvent<HTMLDivElement>) {
+    if (drag.current?.pointerId !== event.pointerId) return;
+    drag.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }
 
   return (
     <Card className={`delivery-journey ${compact ? "is-compact" : ""}`}>
       <div className="journey-heading">
-        <SectionTitle title="Saint Lucia delivery journey" detail={`${mission.stops.length} local stops`} />
+        <div className="journey-title-lockup"><span>Island route</span><SectionTitle title="Saint Lucia delivery journey" detail={`${mission.stops.length} local stops`} /></div>
         <div className="journey-labels"><Badge>{mission.status}</Badge>{mission.atRisk && <Badge tone="high">At risk</Badge>}</div>
       </div>
       <div className="journey-layout">
-        <div className="island-stage">
+        <div
+          className={`island-stage ${drag.current ? "is-dragging" : ""}`}
+          tabIndex={zoomFarm ? -1 : 0}
+          aria-label="Interactive Saint Lucia delivery map. Drag to move the island, or use the arrow keys."
+          onKeyDown={onMapKeyDown}
+          onPointerDown={onMapPointerDown}
+          onPointerMove={onMapPointerMove}
+          onPointerUp={stopDragging}
+          onPointerCancel={stopDragging}
+        >
           {zoomFarm && zoomCargo.length ? (
             <FarmProgressScene farmName={zoomFarm} cargo={zoomCargo} onBack={() => setZoomFarmId(null)} />
           ) : (
             <>
-              <IslandBackdrop />
-              <svg className="mission-route-line" viewBox="0 0 920 560" aria-hidden="true"><path d={routePath} /></svg>
-              <div className="route-start-label"><Route size={14} />Route start</div>
-              {mission.stops.map((stop, index) => {
-                const anchor = anchors[index]!;
-                const cargo = stop.farmId ? mission.cargo.filter((item) => item.farmId === stop.farmId && item.cropStatus) : [];
-                const canZoom = stop.kind === "PICKUP" && cargo.length > 0;
-                return (
-                  <button
-                    type="button"
-                    className={`route-node route-node-${stop.kind.toLowerCase()} ${selectedStop === stop.sequence ? "is-selected" : ""}`}
-                    style={{ left: `${anchor.x / 9.2}%`, top: `${anchor.y / 5.6}%` }}
-                    aria-label={`${stop.kind === "PICKUP" ? "Farm" : "Hotel"} stop ${stop.sequence}: ${stop.displayName}${canZoom ? ". Open crop progress" : ""}`}
-                    aria-pressed={selectedStop === stop.sequence}
-                    onClick={() => {
-                      setSelectedStop(stop.sequence);
-                      if (canZoom && stop.farmId) setZoomFarmId(stop.farmId);
-                    }}
-                    key={`${stop.sequence}-${stop.displayName}`}
-                  >
-                    <span className="route-node-icon">{stop.kind === "PICKUP" ? <Sprout size={18} /> : <Flag size={18} />}</span>
-                    <span><b>{stop.sequence}</b>{stop.displayName}</span>
-                  </button>
-                );
-              })}
-              <span className={`journey-truck ${moving ? "is-moving" : ""}`} style={truckStyle} aria-hidden="true"><Truck size={23} /></span>
+              <div className="world-pan-layer" style={worldStyle} data-zoom={mapView.zoom.toFixed(1)}>
+                <IslandBackdrop />
+                <svg className="mission-route-line" viewBox="0 0 920 560" preserveAspectRatio="none" aria-hidden="true"><path d={routePath} /></svg>
+                <div className="route-start-label"><Route size={14} />Route start</div>
+                {mission.stops.map((stop, index) => {
+                  const anchor = anchors[index]!;
+                  const cargo = stop.farmId ? mission.cargo.filter((item) => item.farmId === stop.farmId && item.cropStatus) : [];
+                  const canZoom = stop.kind === "PICKUP" && cargo.length > 0;
+                  return (
+                    <button
+                      type="button"
+                      className={`route-node route-node-${stop.kind.toLowerCase()} ${selectedStop === stop.sequence ? "is-selected" : ""}`}
+                      style={{ left: `${anchor.x / 9.2}%`, top: `${anchor.y / 5.6}%` }}
+                      aria-label={`${stop.kind === "PICKUP" ? "Farm" : "Hotel"} stop ${stop.sequence}: ${stop.displayName}${canZoom ? ". Open crop progress" : ""}`}
+                      aria-pressed={selectedStop === stop.sequence}
+                      onClick={() => {
+                        setSelectedStop(stop.sequence);
+                        if (canZoom && stop.farmId) setZoomFarmId(stop.farmId);
+                      }}
+                      key={`${stop.sequence}-${stop.displayName}`}
+                    >
+                      <span className="route-node-icon">{stop.kind === "PICKUP" ? <Sprout size={18} /> : <Flag size={18} />}</span>
+                      <span><b>{stop.sequence}</b>{stop.displayName}</span>
+                    </button>
+                  );
+                })}
+                <span className={`journey-truck ${moving ? "is-moving" : ""}`} style={truckStyle} data-position={moving ? "mid-leg" : "at-stop"} aria-hidden="true"><Truck size={23} /></span>
+              </div>
+              <div className="world-map-hint"><Move size={15} /><span>Drag to explore</span></div>
+              <div className="world-map-controls" aria-label="Map controls">
+                <button type="button" onClick={() => changeZoom(.2)} aria-label="Zoom in"><Plus size={18} /></button>
+                <button type="button" onClick={() => changeZoom(-.2)} aria-label="Zoom out" disabled={mapView.zoom === 1}><Minus size={18} /></button>
+                <button type="button" onClick={() => setMapView({ x: 0, y: 0, zoom: 1 })} aria-label="Reset map view"><Maximize2 size={17} /></button>
+              </div>
               {mission.atRisk && <span className="journey-warning" aria-hidden="true"><AlertTriangle size={19} /></span>}
             </>
           )}
         </div>
-        <div className="journey-panel">
+        <button type="button" className="map-detail-toggle" aria-expanded={detailsOpen} onClick={() => setDetailsOpen((open) => !open)}>
+          <PackageCheck size={17} />{detailsOpen ? "Hide route card" : "Show route card"}
+        </button>
+        <div className={`journey-panel ${detailsOpen ? "is-open" : ""}`}>
+          <div className="journey-panel-handle"><span>Route card</span><button type="button" aria-label="Close route card" onClick={() => setDetailsOpen(false)}>×</button></div>
           <div className="estimated-banner"><Truck size={18} /><span><strong>Estimated journey</strong><small>Illustrated route — not live GPS</small></span></div>
           <div className="journey-facts">
             <div><Route size={17} /><span><strong>{mission.estimatedDistanceKm ?? "—"} km</strong><small>Route distance</small></span></div>
