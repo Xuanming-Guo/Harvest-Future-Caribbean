@@ -1,0 +1,1205 @@
+{
+  "version": "1.0.0",
+  "generatedAt": "2026-09-03",
+  "notes": [
+    "PUBLIC REFERENCE (this file): every port’s identity and coordinates, every link’s existence, operator and (where explicitly published) typical journey time, and every exchange rate’s value, all traced to a cited public source in each record’s `reference` field. See simulation/data/README-maritime.md for the full source list, licences and retrieval dates.",
+    "NOT PUBLIC REFERENCE (left to the simulation to synthesise): shipment capacity, cargo cost/pricing, produce-specific schedules or contracts, customs documentation/inspection/delay behaviour, weather delay, vessel positions, and any journey time not explicitly published (recorded here as null). A listed port or link is evidence that public transport infrastructure or a scheduled passenger service exists between two places — it is not proof that any produce-trading service exists on that route, and must not be treated as one.",
+    "Ports are keyed to the island ids in simulation/src/scenario/caribbean-islands-v1.ts (via caribbean-islands-manifest-v1.ts). All 28 manifest islands have at least one port; bonaire-sint-eustatius-saba, saint-kitts-nevis, trinidad-tobago and united-states-virgin-islands have more than one because those manifest island ids each cover multiple physically distinct islands.",
+    "Links only connect ports that are in this file’s own ports[] array. Two links (trinidad-tobago-intra and saint-kitts-nevis-intra) connect two ports that share the same manifest islandId — they document real intra-territory infrastructure but are not “inter-island” in the manifest-scope sense that issue #40 gates on; consumers that restrict routing to the selected run scope should treat a link’s relevance by whether its two ports’ islandIds are both in scope, which is trivially true for these two.",
+    "No island was found to have zero usable public-reference port; islands with no outgoing public-reference link at all (no scheduled ferry, cargo or cruise connection to another manifest island could be verified) are: antigua-barbuda, aruba, bahamas, barbados, cayman-islands, cuba, curacao, dominican-republic, grenada, haiti, jamaica, montserrat, puerto-rico, saint-barthelemy, saint-vincent-grenadines, turks-caicos-islands (16 of 28). This is a statement about what a public search could verify in this session, not proof that no such service exists."
+  ],
+  "ports": [
+    {
+      "id": "port-anguilla-blowing-point",
+      "name": "Blowing Point Ferry Terminal",
+      "islandId": "anguilla",
+      "latitude": 18.171452,
+      "longitude": -63.0931232,
+      "portType": "ferry",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Blowing Point Ferry Terminal",
+          "url": "https://www.openstreetmap.org/node/1236465390",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-08-24",
+        "geography": "Point location of the ferry_terminal building at Blowing Point, Anguilla; Anguilla’s official ferry port to Sint Maarten/Saint Martin. Reused from the repository’s existing reviewed snapshot (simulation/src/scenario/caribbean-reference-places-v1.data.ts); re-verified to still resolve on 2026-09-03 via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-antigua-barbuda-st-johns",
+      "name": "Antigua & Barbuda Port Authority",
+      "islandId": "antigua-barbuda",
+      "latitude": 17.1262244,
+      "longitude": -61.8522175,
+      "portType": "mixed",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Antigua & Barbuda Port Authority",
+          "url": "https://www.openstreetmap.org/way/522142920",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-09-03",
+        "geography": "Landuse=industrial parcel of the national port authority at St. John’s Deep Water Harbour, Antigua. Freshly retrieved for this dataset via the public Nominatim search API and confirmed via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-aruba-oranjestad",
+      "name": "Aruba Ports Authority",
+      "islandId": "aruba",
+      "latitude": 12.5233124,
+      "longitude": -70.0448303,
+      "portType": "mixed",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Aruba Ports Authority",
+          "url": "https://www.openstreetmap.org/way/39053992",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-09-03",
+        "geography": "Office=government building of the Aruba Ports Authority on L.G. Smith Boulevard, Oranjestad harbour. Freshly retrieved for this dataset via the public Nominatim search API and confirmed via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-bahamas-george-town",
+      "name": "Bahamas Ferries (George Town, Exuma)",
+      "islandId": "bahamas",
+      "latitude": 23.5069428,
+      "longitude": -75.7671882,
+      "portType": "ferry",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Bahamas Ferries",
+          "url": "https://www.openstreetmap.org/node/3483172700",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-08-24",
+        "geography": "Ferry_terminal node for the Bahamas Ferries inter-island network at George Town, Great Exuma. Reused from the repository’s existing reviewed snapshot (simulation/src/scenario/caribbean-reference-places-v1.data.ts); re-verified to still resolve on 2026-09-03 via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-barbados-bridgetown",
+      "name": "Barbados Port Inc. — Administration Building",
+      "islandId": "barbados",
+      "latitude": 13.1050018,
+      "longitude": -59.6262262,
+      "portType": "mixed",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Barbados Port Inc. - Administration Building",
+          "url": "https://www.openstreetmap.org/way/385209914",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-09-03",
+        "geography": "Office building of Barbados Port Inc. inside the Bridgetown deep-water port complex (cargo and cruise). Freshly retrieved for this dataset via the public Nominatim search API and confirmed via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-bonaire-sint-eustatius-saba-bonaire-kralendijk",
+      "name": "Town Pier, Kralendijk (Bonaire)",
+      "islandId": "bonaire-sint-eustatius-saba",
+      "latitude": 12.149668,
+      "longitude": -68.277814,
+      "portType": "mixed",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Town Pier",
+          "url": "https://www.openstreetmap.org/way/26295762",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-09-03",
+        "geography": "Historic Town Pier on the Kralendijk, Bonaire waterfront; tagged highway=service in OSM (a common tagging quirk for pier access ways) but is the named public landing at Bonaire’s harbour. Freshly retrieved for this dataset via the public Nominatim search API and confirmed via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-bonaire-sint-eustatius-saba-saba-fort-bay",
+      "name": "Fort Bay Harbour (Saba)",
+      "islandId": "bonaire-sint-eustatius-saba",
+      "latitude": 17.6162565,
+      "longitude": -63.2514866,
+      "portType": "mixed",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Fort Bay Harbour",
+          "url": "https://www.openstreetmap.org/way/414327967",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-09-03",
+        "geography": "Saba’s only harbour, at the foot of “The Road”; tagged natural=water in OSM (the anchorage/basin polygon) rather than a port-infrastructure tag, but is the named, sole port of Saba, used for cargo and the Makana ferry. Freshly retrieved for this dataset via the public Nominatim search API and confirmed via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-bonaire-sint-eustatius-saba-statia-gallows-bay",
+      "name": "Gallows Bay (Sint Eustatius)",
+      "islandId": "bonaire-sint-eustatius-saba",
+      "latitude": 17.4767282,
+      "longitude": -62.9867809,
+      "portType": "ferry",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Gallows Baai",
+          "url": "https://www.openstreetmap.org/node/12924999514",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-09-03",
+        "geography": "Named bay at Lower Town, Oranjestad, Sint Eustatius; tagged natural=bay in OSM rather than a port-infrastructure tag, but matches the Makana Ferry Service’s own published Sint Eustatius departure point (“Gallows Bay”). Freshly retrieved for this dataset via the public Nominatim search API and confirmed via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-british-virgin-islands-road-town",
+      "name": "Road Town Ferry Terminal",
+      "islandId": "british-virgin-islands",
+      "latitude": 18.4189023,
+      "longitude": -64.6180652,
+      "portType": "ferry",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Road Town Ferry Terminal",
+          "url": "https://www.openstreetmap.org/way/521954859",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-09-03",
+        "geography": "Ferry_terminal building on Wickhams Cay I, Road Town, Tortola; the BVI’s principal ferry port. Freshly retrieved for this dataset via the public Nominatim search API and confirmed via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-cayman-islands-george-town",
+      "name": "Royal Watler Cruise Terminal",
+      "islandId": "cayman-islands",
+      "latitude": 19.2953425,
+      "longitude": -81.384151,
+      "portType": "cruise",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Royal Watler Cruise Terminal",
+          "url": "https://www.openstreetmap.org/node/1129818287",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-08-24",
+        "geography": "Cruise/ferry terminal node in George Town, Grand Cayman. Reused from the repository’s existing reviewed snapshot (simulation/src/scenario/caribbean-reference-places-v1.data.ts); re-verified to still resolve on 2026-09-03 via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-cuba-havana-regla",
+      "name": "Lanchita de Regla (Havana Harbour)",
+      "islandId": "cuba",
+      "latitude": 23.13273,
+      "longitude": -82.337254,
+      "portType": "ferry",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Lanchita de Regla",
+          "url": "https://www.openstreetmap.org/node/7247928732",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-08-24",
+        "geography": "Harbour-ferry dock inside Havana Harbour, Cuba’s largest port; represents Cuba’s manifest port pending a cleaner public reference to the container/commercial terminal. Reused from the repository’s existing reviewed snapshot (simulation/src/scenario/caribbean-reference-places-v1.data.ts); re-verified to still resolve on 2026-09-03 via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-curacao-willemstad",
+      "name": "Mega Pier",
+      "islandId": "curacao",
+      "latitude": 12.1043951,
+      "longitude": -68.9418107,
+      "portType": "cruise",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Mega Pier",
+          "url": "https://www.openstreetmap.org/node/333798202",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-08-24",
+        "geography": "Cruise/ferry terminal and mooring node at Willemstad, Curaçao. Reused from the repository’s existing reviewed snapshot (simulation/src/scenario/caribbean-reference-places-v1.data.ts); re-verified to still resolve on 2026-09-03 via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-dominica-roseau",
+      "name": "Roseau Ferry Terminal",
+      "islandId": "dominica",
+      "latitude": 15.2974697,
+      "longitude": -61.3896421,
+      "portType": "ferry",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Roseau",
+          "url": "https://www.openstreetmap.org/node/4882864440",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-08-24",
+        "geography": "Ferry_terminal node (passengers and vehicles) at Roseau, Dominica; the FRS Express des Îles hub for Dominica. Reused from the repository’s existing reviewed snapshot (simulation/src/scenario/caribbean-reference-places-v1.data.ts); re-verified to still resolve on 2026-09-03 via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-dominican-republic-santo-domingo",
+      "name": "Puerto Don Diego",
+      "islandId": "dominican-republic",
+      "latitude": 18.4753392,
+      "longitude": -69.8819118,
+      "portType": "cruise",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Puerto Don Diego",
+          "url": "https://www.openstreetmap.org/way/229191843",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-09-03",
+        "geography": "Named port building on the Ozama River in the Colonial Zone, Santo Domingo; the Dominican Republic’s capital cruise/passenger port. Freshly retrieved for this dataset via the public Nominatim search API and confirmed via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-grenada-st-georges",
+      "name": "Grenada Cruise Ship Terminal",
+      "islandId": "grenada",
+      "latitude": 12.0509511,
+      "longitude": -61.7554278,
+      "portType": "cruise",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Grenada Cruise Ship Terminal",
+          "url": "https://www.openstreetmap.org/way/439204471",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-08-24",
+        "geography": "Ferry/cruise terminal polygon at St. George’s, Grenada. Reused from the repository’s existing reviewed snapshot (simulation/src/scenario/caribbean-reference-places-v1.data.ts); re-verified to still resolve on 2026-09-03 via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-guadeloupe-pointe-a-pitre",
+      "name": "Gare Maritime de Pointe-à-Pitre",
+      "islandId": "guadeloupe",
+      "latitude": 16.2409275,
+      "longitude": -61.542097,
+      "portType": "ferry",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Gare Maritime de Pointe à Pitre",
+          "url": "https://www.openstreetmap.org/node/4534545892",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-08-24",
+        "geography": "Ferry_terminal node (passengers and vehicles) at Pointe-à-Pitre, Guadeloupe; the FRS Express des Îles hub for Guadeloupe. Reused from the repository’s existing reviewed snapshot (simulation/src/scenario/caribbean-reference-places-v1.data.ts); re-verified to still resolve on 2026-09-03 via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-haiti-port-au-prince",
+      "name": "Port international de Port-au-Prince",
+      "islandId": "haiti",
+      "latitude": 18.55,
+      "longitude": -72.35,
+      "portType": "cargo",
+      "reference": {
+        "source": {
+          "title": "Port international de Port-au-Prince",
+          "url": "https://en.wikipedia.org/wiki/Port_international_de_Port-au-Prince",
+          "publisher": "Wikipedia contributors"
+        },
+        "licence": "Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) — https://creativecommons.org/licenses/by-sa/4.0/",
+        "retrievedAt": "2026-09-03",
+        "geography": "Haiti’s main commercial port, operated by the state Autorité Portuaire Nationale (APN) and private terminal operators. No cleanly OSM-tagged port/harbour feature or UN/LOCODE coordinate could be independently retrieved for this port in this session (Nominatim searches for the port and the APN found only unrelated or mistagged features; UNECE’s LOCODE page returned HTTP 403 to automated fetches). Coordinates are the article’s own stated 18°33′N 72°21′W, lower precision than the OSM-sourced ports in this file.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-jamaica-port-royal",
+      "name": "Port Royal Cruise Ship Port",
+      "islandId": "jamaica",
+      "latitude": 17.9412108,
+      "longitude": -76.8362043,
+      "portType": "cruise",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Port Royal Cruise Ship Port",
+          "url": "https://www.openstreetmap.org/way/769390454",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-08-24",
+        "geography": "Cruise terminal polygon at Port Royal, at the mouth of Kingston Harbour, Jamaica. Reused from the repository’s existing reviewed snapshot (simulation/src/scenario/caribbean-reference-places-v1.data.ts); re-verified to still resolve on 2026-09-03 via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-martinique-fort-de-france",
+      "name": "Gare Maritime de Fort-de-France",
+      "islandId": "martinique",
+      "latitude": 14.6027011,
+      "longitude": -61.0649777,
+      "portType": "ferry",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Gare Maritime de Fort de France",
+          "url": "https://www.openstreetmap.org/node/1402576577",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-09-03",
+        "geography": "Ferry_terminal node at Fort-de-France, Martinique; the FRS Express des Îles hub for Martinique. Freshly retrieved for this dataset via the public Nominatim search API and confirmed via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-montserrat-little-bay",
+      "name": "Montserrat Port Authority (Little Bay)",
+      "islandId": "montserrat",
+      "latitude": 16.8032681,
+      "longitude": -62.2045058,
+      "portType": "mixed",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Montserrat Port Authority",
+          "url": "https://www.openstreetmap.org/way/381894119",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-09-03",
+        "geography": "Office of the Montserrat Port Authority at Little Bay, Montserrat’s current port (built after volcanic activity closed the historic Plymouth harbour). Freshly retrieved for this dataset via the public Nominatim search API and confirmed via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-puerto-rico-catano",
+      "name": "Autoridad de Transporte Marítimo de Cataño (ATM)",
+      "islandId": "puerto-rico",
+      "latitude": 18.4438031,
+      "longitude": -66.1163362,
+      "portType": "ferry",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Autoridad de Transporte Marítimo de Cataño (ATM)",
+          "url": "https://www.openstreetmap.org/way/529855870",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-08-24",
+        "geography": "Municipal ferry terminal (AcuaExpreso) on San Juan Bay at Cataño, Puerto Rico. Reused from the repository’s existing reviewed snapshot (simulation/src/scenario/caribbean-reference-places-v1.data.ts); re-verified to still resolve on 2026-09-03 via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-saint-barthelemy-gustavia",
+      "name": "Gustavia Ferry Terminal",
+      "islandId": "saint-barthelemy",
+      "latitude": 17.8993299,
+      "longitude": -62.8508045,
+      "portType": "ferry",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Gustavia Ferry Terminal",
+          "url": "https://www.openstreetmap.org/node/3659532889",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-08-24",
+        "geography": "Ferry_terminal node at Gustavia, Saint Barthélemy’s main harbour. Reused from the repository’s existing reviewed snapshot (simulation/src/scenario/caribbean-reference-places-v1.data.ts); re-verified to still resolve on 2026-09-03 via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-saint-kitts-nevis-basseterre-seabridge",
+      "name": "Seabridge (St Kitts)",
+      "islandId": "saint-kitts-nevis",
+      "latitude": 17.2269318,
+      "longitude": -62.6467457,
+      "portType": "ferry",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Seabridge",
+          "url": "https://www.openstreetmap.org/node/2888852904",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-08-24",
+        "geography": "Ferry_terminal node on the St Kitts side of the St Kitts–Nevis sea crossing. Reused from the repository’s existing reviewed snapshot (simulation/src/scenario/caribbean-reference-places-v1.data.ts); re-verified to still resolve on 2026-09-03 via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-saint-kitts-nevis-nevis-suncrest",
+      "name": "Suncrest (Nevis)",
+      "islandId": "saint-kitts-nevis",
+      "latitude": 17.2860957,
+      "longitude": -62.7105104,
+      "portType": "ferry",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Suncrest",
+          "url": "https://www.openstreetmap.org/node/7831376089",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-08-24",
+        "geography": "Ferry_terminal node on the Nevis side of the St Kitts–Nevis sea crossing. Reused from the repository’s existing reviewed snapshot (simulation/src/scenario/caribbean-reference-places-v1.data.ts); re-verified to still resolve on 2026-09-03 via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-saint-kitts-nevis-basseterre-port-zante",
+      "name": "Port Zante Marina (Basseterre)",
+      "islandId": "saint-kitts-nevis",
+      "latitude": 17.2925949,
+      "longitude": -62.7246007,
+      "portType": "mixed",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Port Zante Marina",
+          "url": "https://www.openstreetmap.org/way/398242204",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-09-03",
+        "geography": "Marina/cruise pier at Port Zante, Basseterre, St Kitts; the Makana Ferry Service’s published St Kitts departure point. Freshly retrieved for this dataset via the public Nominatim search API and confirmed via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-saint-lucia-castries",
+      "name": "Castries Ferry Terminal",
+      "islandId": "saint-lucia",
+      "latitude": 14.0099126,
+      "longitude": -60.9958988,
+      "portType": "ferry",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Castries Ferry Terminal",
+          "url": "https://www.openstreetmap.org/node/10221440178",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-09-03",
+        "geography": "Ferry_terminal node at Castries, Saint Lucia; the FRS Express des Îles hub for Saint Lucia. Not present in the repository’s existing reference-place snapshot, so retrieved fresh for this dataset. Freshly retrieved for this dataset via the public Nominatim search API and confirmed via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-saint-martin-french-part-marigot",
+      "name": "Gare Maritime de Marigot",
+      "islandId": "saint-martin-french-part",
+      "latitude": 18.068873,
+      "longitude": -63.0859335,
+      "portType": "ferry",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Gare Maritime de Marigot",
+          "url": "https://www.openstreetmap.org/way/258413683",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-09-03",
+        "geography": "Ferry_terminal building at Marigot, the main port of the French side of Saint Martin. Freshly retrieved for this dataset via the public Nominatim search API and confirmed via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-saint-vincent-grenadines-kingstown",
+      "name": "Kingstown Ferry Terminal",
+      "islandId": "saint-vincent-grenadines",
+      "latitude": 13.1491271,
+      "longitude": -61.2237657,
+      "portType": "mixed",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Kingstown",
+          "url": "https://www.openstreetmap.org/node/1150190965",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-08-24",
+        "geography": "Ferry_terminal node at Kingstown, Saint Vincent, the territory’s main port. Reused from the repository’s existing reviewed snapshot (simulation/src/scenario/caribbean-reference-places-v1.data.ts); re-verified to still resolve on 2026-09-03 via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-sint-maarten-dutch-part-philipsburg",
+      "name": "The Edge Ferry (Philipsburg)",
+      "islandId": "sint-maarten-dutch-part",
+      "latitude": 18.0202946,
+      "longitude": -63.0437888,
+      "portType": "ferry",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: The Edge Ferry",
+          "url": "https://www.openstreetmap.org/node/12526829101",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-08-24",
+        "geography": "Ferry_terminal node in the Philipsburg/Great Bay area, Sint Maarten, matching the Makana Ferry Service’s published “Bobby’s Marina, Philipsburg” departure point (the OSM feature name may reflect a prior or alternate ticketing brand at the same dock). Reused from the repository’s existing reviewed snapshot (simulation/src/scenario/caribbean-reference-places-v1.data.ts); re-verified to still resolve on 2026-09-03 via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-trinidad-tobago-port-of-spain",
+      "name": "Port of Spain Terminal",
+      "islandId": "trinidad-tobago",
+      "latitude": 10.646772,
+      "longitude": -61.5127997,
+      "portType": "mixed",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Port of Spain Terminal",
+          "url": "https://www.openstreetmap.org/node/1830781650",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-08-24",
+        "geography": "Ferry_terminal node (passengers and vehicles) at Port of Spain, Trinidad; the Trinidad terminal of the government Inter-Island Ferry. Reused from the repository’s existing reviewed snapshot (simulation/src/scenario/caribbean-reference-places-v1.data.ts); re-verified to still resolve on 2026-09-03 via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-trinidad-tobago-scarborough",
+      "name": "Scarborough Port Authority",
+      "islandId": "trinidad-tobago",
+      "latitude": 11.1823204,
+      "longitude": -60.7374243,
+      "portType": "mixed",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Scarborough Port Authority",
+          "url": "https://www.openstreetmap.org/way/167933647",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-09-03",
+        "geography": "Office of the Port Authority of Trinidad and Tobago at Scarborough, Tobago; the Tobago terminal of the government Inter-Island Ferry. Freshly retrieved for this dataset via the public Nominatim search API and confirmed via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-turks-caicos-islands-providenciales",
+      "name": "TCI Ferry Terminal",
+      "islandId": "turks-caicos-islands",
+      "latitude": 21.8142992,
+      "longitude": -72.1398047,
+      "portType": "ferry",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: TCI Ferry",
+          "url": "https://www.openstreetmap.org/way/412514568",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-08-24",
+        "geography": "Ferry_terminal polygon operated by TCI Ferry, connecting Providenciales to North and Middle Caicos. Reused from the repository’s existing reviewed snapshot (simulation/src/scenario/caribbean-reference-places-v1.data.ts); re-verified to still resolve on 2026-09-03 via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-united-states-virgin-islands-st-croix-gallows-bay",
+      "name": "Gallows Bay Ferry Dock (St Croix)",
+      "islandId": "united-states-virgin-islands",
+      "latitude": 17.747635,
+      "longitude": -64.6986447,
+      "portType": "ferry",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Gallows Bay Ferry Dock",
+          "url": "https://www.openstreetmap.org/node/7792896811",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-08-24",
+        "geography": "Ferry_terminal node at Gallows Bay, Christiansted, St Croix, USVI. Reused from the repository’s existing reviewed snapshot (simulation/src/scenario/caribbean-reference-places-v1.data.ts); re-verified to still resolve on 2026-09-03 via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "port-united-states-virgin-islands-st-thomas-charlotte-amalie",
+      "name": "Charlotte Amalie Waterfront (St Thomas)",
+      "islandId": "united-states-virgin-islands",
+      "latitude": 18.3403928,
+      "longitude": -64.9319523,
+      "portType": "ferry",
+      "reference": {
+        "source": {
+          "title": "OpenStreetMap: Charlotte Amalie Waterfront",
+          "url": "https://www.openstreetmap.org/node/4123871938",
+          "publisher": "OpenStreetMap contributors"
+        },
+        "licence": "Open Data Commons Open Database License 1.0 (ODbL) — https://opendatacommons.org/licenses/odbl/1-0/ — attribution required: © OpenStreetMap contributors",
+        "retrievedAt": "2026-09-03",
+        "geography": "Ferry_terminal node on the Charlotte Amalie downtown waterfront, St Thomas, USVI; the USVI terminal used by the BVI–USVI ferry operators. Freshly retrieved for this dataset via the public Nominatim search API and confirmed via the OSM API.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": "link-guadeloupe-dominica",
+      "fromPortId": "port-guadeloupe-pointe-a-pitre",
+      "toPortId": "port-dominica-roseau",
+      "mode": "ferry",
+      "operator": "FRS Express des Îles (formerly L’Express des Îles)",
+      "typicalJourneyHours": 2.5,
+      "reference": {
+        "source": {
+          "title": "Dominica Timetables & Fares | FRS Express des Îles",
+          "url": "https://www.frs-express.com/en/timetable-rates/dominica-timetables-fares",
+          "publisher": "FRS Express des Îles (formerly L’Express des Îles)"
+        },
+        "licence": "Publicly accessible operator/authority web page; no open-data licence asserted. Cited as a factual reference to a real public schedule or facility, not a reused dataset.",
+        "retrievedAt": "2026-09-03",
+        "geography": "Published non-stop sailing time, Dominica–Guadeloupe leg: 2h30.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "link-dominica-martinique",
+      "fromPortId": "port-dominica-roseau",
+      "toPortId": "port-martinique-fort-de-france",
+      "mode": "ferry",
+      "operator": "FRS Express des Îles (formerly L’Express des Îles)",
+      "typicalJourneyHours": 2.25,
+      "reference": {
+        "source": {
+          "title": "Dominica Timetables & Fares | FRS Express des Îles",
+          "url": "https://www.frs-express.com/en/timetable-rates/dominica-timetables-fares",
+          "publisher": "FRS Express des Îles (formerly L’Express des Îles)"
+        },
+        "licence": "Publicly accessible operator/authority web page; no open-data licence asserted. Cited as a factual reference to a real public schedule or facility, not a reused dataset.",
+        "retrievedAt": "2026-09-03",
+        "geography": "Published non-stop sailing time, Dominica–Martinique leg: 2h15 (cross-checked on the Martinique timetable page).",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "link-martinique-saint-lucia",
+      "fromPortId": "port-martinique-fort-de-france",
+      "toPortId": "port-saint-lucia-castries",
+      "mode": "ferry",
+      "operator": "FRS Express des Îles (formerly L’Express des Îles)",
+      "typicalJourneyHours": 1.5,
+      "reference": {
+        "source": {
+          "title": "Martinique Timetables & Fares | FRS Express des Îles",
+          "url": "https://www.frs-express.com/en/timetable-rates/martinique-timetables-fares",
+          "publisher": "FRS Express des Îles (formerly L’Express des Îles)"
+        },
+        "licence": "Publicly accessible operator/authority web page; no open-data licence asserted. Cited as a factual reference to a real public schedule or facility, not a reused dataset.",
+        "retrievedAt": "2026-09-03",
+        "geography": "Published non-stop sailing time, Martinique–Saint Lucia leg: 1h30 (cross-checked on the Saint Lucia timetable page).",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "link-sint-maarten-saba",
+      "fromPortId": "port-sint-maarten-dutch-part-philipsburg",
+      "toPortId": "port-bonaire-sint-eustatius-saba-saba-fort-bay",
+      "mode": "ferry",
+      "operator": "Makana Ferry Service",
+      "typicalJourneyHours": 1.667,
+      "reference": {
+        "source": {
+          "title": "Makana Ferry Service — routes",
+          "url": "https://makanaferryservice.com/",
+          "publisher": "Makana Ferry Service"
+        },
+        "licence": "Publicly accessible operator/authority web page; no open-data licence asserted. Cited as a factual reference to a real public schedule or facility, not a reused dataset.",
+        "retrievedAt": "2026-09-03",
+        "geography": "Operator-published route Bobby’s Marina (Philipsburg) – Fort Bay (Saba): approximately 1h40.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "link-sint-maarten-statia",
+      "fromPortId": "port-sint-maarten-dutch-part-philipsburg",
+      "toPortId": "port-bonaire-sint-eustatius-saba-statia-gallows-bay",
+      "mode": "ferry",
+      "operator": "Makana Ferry Service",
+      "typicalJourneyHours": 3,
+      "reference": {
+        "source": {
+          "title": "Makana Ferry Service — routes",
+          "url": "https://makanaferryservice.com/",
+          "publisher": "Makana Ferry Service"
+        },
+        "licence": "Publicly accessible operator/authority web page; no open-data licence asserted. Cited as a factual reference to a real public schedule or facility, not a reused dataset.",
+        "retrievedAt": "2026-09-03",
+        "geography": "Operator-published route Bobby’s Marina (Philipsburg) – Gallows Bay (St Eustatius): approximately 3h.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "link-sint-maarten-saint-kitts",
+      "fromPortId": "port-sint-maarten-dutch-part-philipsburg",
+      "toPortId": "port-saint-kitts-nevis-basseterre-port-zante",
+      "mode": "ferry",
+      "operator": "Makana Ferry Service",
+      "typicalJourneyHours": 4,
+      "reference": {
+        "source": {
+          "title": "Makana Ferry Service — routes",
+          "url": "https://makanaferryservice.com/",
+          "publisher": "Makana Ferry Service"
+        },
+        "licence": "Publicly accessible operator/authority web page; no open-data licence asserted. Cited as a factual reference to a real public schedule or facility, not a reused dataset.",
+        "retrievedAt": "2026-09-03",
+        "geography": "Operator-published route Bobby’s Marina (Philipsburg) – Port Zante (Basseterre): approximately 4h.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "link-saba-statia",
+      "fromPortId": "port-bonaire-sint-eustatius-saba-saba-fort-bay",
+      "toPortId": "port-bonaire-sint-eustatius-saba-statia-gallows-bay",
+      "mode": "ferry",
+      "operator": "Makana Ferry Service",
+      "typicalJourneyHours": 1,
+      "reference": {
+        "source": {
+          "title": "Makana Ferry Service — routes",
+          "url": "https://makanaferryservice.com/",
+          "publisher": "Makana Ferry Service"
+        },
+        "licence": "Publicly accessible operator/authority web page; no open-data licence asserted. Cited as a factual reference to a real public schedule or facility, not a reused dataset.",
+        "retrievedAt": "2026-09-03",
+        "geography": "Operator-published route Fort Bay (Saba) – Gallows Bay (St Eustatius): approximately 1h. Both ends are within the bonaire-sint-eustatius-saba manifest island (Saba and Sint Eustatius are separate physical islands under one manifest islandId).",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "link-saba-saint-kitts",
+      "fromPortId": "port-bonaire-sint-eustatius-saba-saba-fort-bay",
+      "toPortId": "port-saint-kitts-nevis-basseterre-port-zante",
+      "mode": "ferry",
+      "operator": "Makana Ferry Service",
+      "typicalJourneyHours": 2.5,
+      "reference": {
+        "source": {
+          "title": "Makana Ferry Service — routes",
+          "url": "https://makanaferryservice.com/",
+          "publisher": "Makana Ferry Service"
+        },
+        "licence": "Publicly accessible operator/authority web page; no open-data licence asserted. Cited as a factual reference to a real public schedule or facility, not a reused dataset.",
+        "retrievedAt": "2026-09-03",
+        "geography": "Operator-published route Fort Bay (Saba) – Port Zante (Basseterre): approximately 2.5h.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "link-statia-saint-kitts",
+      "fromPortId": "port-bonaire-sint-eustatius-saba-statia-gallows-bay",
+      "toPortId": "port-saint-kitts-nevis-basseterre-port-zante",
+      "mode": "ferry",
+      "operator": "Makana Ferry Service",
+      "typicalJourneyHours": 1.167,
+      "reference": {
+        "source": {
+          "title": "Makana Ferry Service — routes",
+          "url": "https://makanaferryservice.com/",
+          "publisher": "Makana Ferry Service"
+        },
+        "licence": "Publicly accessible operator/authority web page; no open-data licence asserted. Cited as a factual reference to a real public schedule or facility, not a reused dataset.",
+        "retrievedAt": "2026-09-03",
+        "geography": "Operator-published route Gallows Bay (St Eustatius) – Port Zante (Basseterre): approximately 1h10.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "link-anguilla-saint-martin",
+      "fromPortId": "port-anguilla-blowing-point",
+      "toPortId": "port-saint-martin-french-part-marigot",
+      "mode": "ferry",
+      "operator": "Public ferry (multiple licensed operators)",
+      "typicalJourneyHours": null,
+      "reference": {
+        "source": {
+          "title": "Blowing Point Ferry Terminal",
+          "url": "https://anguillaports.com/bpft/",
+          "publisher": "Anguilla Air & Sea Ports Authority"
+        },
+        "licence": "Publicly accessible operator/authority web page; no open-data licence asserted. Cited as a factual reference to a real public schedule or facility, not a reused dataset.",
+        "retrievedAt": "2026-09-03",
+        "geography": "Government port authority page confirms a daily scheduled public ferry, Blowing Point (Anguilla) – Marigot (Saint Martin, French side); frequency (8 round trips/day) corroborated by ivisitanguilla.com (Anguilla Tourist Board), but no source found gives a stated crossing duration, so typicalJourneyHours is left null rather than reusing an unsourced aggregator estimate (commonly cited informally as ~20 minutes).",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "link-british-virgin-islands-united-states-virgin-islands",
+      "fromPortId": "port-british-virgin-islands-road-town",
+      "toPortId": "port-united-states-virgin-islands-st-thomas-charlotte-amalie",
+      "mode": "ferry",
+      "operator": "Multiple operators (Native Son, Road Town Fast Ferry, Smith’s Ferry Service)",
+      "typicalJourneyHours": 0.5,
+      "reference": {
+        "source": {
+          "title": "VI Ferries — St Thomas to Tortola ferry schedules",
+          "url": "https://viferries.com/red-hook-to-west-end-ferry",
+          "publisher": "VI Ferries (ferry-schedule reference site, not a single operator’s own page)"
+        },
+        "licence": "Publicly accessible operator/authority web page; no open-data licence asserted. Cited as a factual reference to a real public schedule or facility, not a reused dataset.",
+        "retrievedAt": "2026-09-03",
+        "geography": "Daily service confirmed on bvitourism.com (BVI Tourist Board) with named alternating operators; crossing time (~30 minutes) stated on viferries.com, a dedicated schedule-aggregation site rather than one operator’s own timetable page.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "link-trinidad-tobago-intra",
+      "fromPortId": "port-trinidad-tobago-port-of-spain",
+      "toPortId": "port-trinidad-tobago-scarborough",
+      "mode": "ferry",
+      "operator": "Trinidad and Tobago Inter-Island Transportation Company Ltd (government)",
+      "typicalJourneyHours": null,
+      "reference": {
+        "source": {
+          "title": "Trinidad and Tobago Inter-Island Transportation Company Ltd",
+          "url": "https://www.ttitferry.com/",
+          "publisher": "Trinidad and Tobago Inter-Island Transportation Company Ltd / Port Authority of Trinidad and Tobago"
+        },
+        "licence": "Publicly accessible operator/authority web page; no open-data licence asserted. Cited as a factual reference to a real public schedule or facility, not a reused dataset.",
+        "retrievedAt": "2026-09-03",
+        "geography": "Both ports are within the single trinidad-tobago manifest island (Trinidad and Tobago are separate physical islands under one manifest islandId). The operator’s own site (ttitferry.com) and the Port Authority site (patnt.com) could not be fetched directly in this session (TLS certificate errors on both); secondary travel-reference sources consistently describe a fast-ferry service of roughly 2.5–3.5 hours and a slower cargo vessel of roughly 6–7 hours, but since no primary timetable page was successfully retrieved, typicalJourneyHours is left null rather than asserting a number attributed to an unverified source.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    },
+    {
+      "id": "link-saint-kitts-nevis-intra",
+      "fromPortId": "port-saint-kitts-nevis-basseterre-seabridge",
+      "toPortId": "port-saint-kitts-nevis-nevis-suncrest",
+      "mode": "ferry",
+      "operator": "Multiple operators (Sea Bridge, Caribe Breeze, Caribe Surf, Mark Twain, Sea Hustler)",
+      "typicalJourneyHours": 0.25,
+      "reference": {
+        "source": {
+          "title": "Nevis Ferry | Nevis Tourism Authority",
+          "url": "https://www.nevisisland.com/plan/ferry-services",
+          "publisher": "Nevis Tourism Authority / Nevis Air and Sea Ports Authority (NASPA)"
+        },
+        "licence": "Publicly accessible operator/authority web page; no open-data licence asserted. Cited as a factual reference to a real public schedule or facility, not a reused dataset.",
+        "retrievedAt": "2026-09-03",
+        "geography": "Both ports are within the single saint-kitts-nevis manifest island. NASPA’s weekday schedule (naspakn.com) lists multiple vessels and departure times but not a stated crossing duration; the ~15-minute Sea Bridge car-ferry crossing (Major’s Bay–Cades Bay) is corroborated across several independent Nevis/St Kitts tourism-information pages, a lower confidence tier than an operator’s own timetable.",
+        "evidenceType": "PUBLIC_REFERENCE"
+      }
+    }
+  ],
+  "exchangeRates": {
+    "baseCurrencies": [
+      "XCD",
+      "USD"
+    ],
+    "asOf": "2026-09-02",
+    "rates": [
+      {
+        "currency": "XCD",
+        "name": "Eastern Caribbean dollar",
+        "regime": "FIXED_PEG",
+        "islandIds": [
+          "anguilla",
+          "antigua-barbuda",
+          "dominica",
+          "grenada",
+          "montserrat",
+          "saint-kitts-nevis",
+          "saint-lucia",
+          "saint-vincent-grenadines"
+        ],
+        "unitsPerUSD": 2.7,
+        "unitsPerXCD": 1,
+        "reference": {
+          "source": {
+            "title": "Eastern Caribbean Central Bank — Exchange Rates",
+            "url": "https://www.eccb-centralbank.org/exchange-rates",
+            "publisher": "Eastern Caribbean Central Bank (ECCB)"
+          },
+          "licence": "Publicly published central-bank statistic; no open-data licence asserted. Cited as an official monetary-authority reference rate.",
+          "retrievedAt": "2026-09-03",
+          "geography": "XCD has been pegged at EC$2.70 = US$1.00 since 1976. Direct fetch of eccb-centralbank.org returned HTTP 403 to automated access in this session; the peg value is one of the most widely and independently documented facts in Caribbean monetary policy, corroborated by the Bank of Jamaica, IMF Article IV reports on ECCU members, and every ECCU member central bank/currency union page.",
+          "evidenceType": "PUBLIC_REFERENCE"
+        }
+      },
+      {
+        "currency": "USD",
+        "name": "United States dollar",
+        "regime": "BASE",
+        "islandIds": [
+          "bonaire-sint-eustatius-saba",
+          "british-virgin-islands",
+          "puerto-rico",
+          "turks-caicos-islands",
+          "united-states-virgin-islands"
+        ],
+        "unitsPerUSD": 1,
+        "unitsPerXCD": 0.37037,
+        "reference": {
+          "source": {
+            "title": "N/A — reference currency",
+            "url": "https://www.federalreserve.gov/",
+            "publisher": "U.S. Federal Reserve System"
+          },
+          "licence": "Publicly published central-bank statistic; no open-data licence asserted. Cited as an official monetary-authority reference rate.",
+          "retrievedAt": "2026-09-03",
+          "geography": "USD is this file’s second reference currency (alongside XCD) and the legal tender or de facto currency of five manifest islands; by definition 1 USD = 1 USD.",
+          "evidenceType": "PUBLIC_REFERENCE"
+        }
+      },
+      {
+        "currency": "AWG",
+        "name": "Aruban florin",
+        "regime": "FIXED_PEG",
+        "islandIds": [
+          "aruba"
+        ],
+        "unitsPerUSD": 1.79,
+        "unitsPerXCD": 0.662963,
+        "reference": {
+          "source": {
+            "title": "Centrale Bank van Aruba",
+            "url": "https://www.cbaruba.org/",
+            "publisher": "Centrale Bank van Aruba"
+          },
+          "licence": "Publicly published central-bank statistic; no open-data licence asserted. Cited as an official monetary-authority reference rate.",
+          "retrievedAt": "2026-09-03",
+          "geography": "AWG has been pegged at Afl. 1.79 = US$1.00 since 1986. Confirmed via multiple independent secondary summaries of CBA policy (direct central-bank page not fetched in this session); commercial-bank cash rates cluster tightly around this peg (Afl. 1.75–1.80).",
+          "evidenceType": "PUBLIC_REFERENCE"
+        }
+      },
+      {
+        "currency": "BSD",
+        "name": "Bahamian dollar",
+        "regime": "FIXED_PEG",
+        "islandIds": [
+          "bahamas"
+        ],
+        "unitsPerUSD": 1,
+        "unitsPerXCD": 0.37037,
+        "reference": {
+          "source": {
+            "title": "Foreign Exchange — Central Bank of The Bahamas",
+            "url": "https://www.centralbankbahamas.com/foreign-exchange",
+            "publisher": "Central Bank of The Bahamas"
+          },
+          "licence": "Publicly published central-bank statistic; no open-data licence asserted. Cited as an official monetary-authority reference rate.",
+          "retrievedAt": "2026-09-03",
+          "geography": "BSD has been pegged 1:1 to USD since 1973; the Bank’s own published buy/sell rates are US$1.00 = B$1.00 (buy) and B$1.0025 (sell), and at par for cash.",
+          "evidenceType": "PUBLIC_REFERENCE"
+        }
+      },
+      {
+        "currency": "BBD",
+        "name": "Barbados dollar",
+        "regime": "FIXED_PEG",
+        "islandIds": [
+          "barbados"
+        ],
+        "unitsPerUSD": 2,
+        "unitsPerXCD": 0.740741,
+        "reference": {
+          "source": {
+            "title": "The What, Why, and How of Maintaining Barbados’ Exchange Rate",
+            "url": "https://www.centralbank.org.bb/news/general-press-release/the-what-why-and-how-of-maintaining-barbados-exchange-rate",
+            "publisher": "Central Bank of Barbados"
+          },
+          "licence": "Publicly published central-bank statistic; no open-data licence asserted. Cited as an official monetary-authority reference rate.",
+          "retrievedAt": "2026-09-03",
+          "geography": "BBD has been pegged at Bds$2.00 = US$1.00 since 1975.",
+          "evidenceType": "PUBLIC_REFERENCE"
+        }
+      },
+      {
+        "currency": "KYD",
+        "name": "Cayman Islands dollar",
+        "regime": "FIXED_PEG",
+        "islandIds": [
+          "cayman-islands"
+        ],
+        "unitsPerUSD": 0.833333,
+        "unitsPerXCD": 0.308642,
+        "reference": {
+          "source": {
+            "title": "Cayman Islands Monetary Authority",
+            "url": "https://www.cima.ky/",
+            "publisher": "Cayman Islands Monetary Authority (CIMA)"
+          },
+          "licence": "Publicly published central-bank statistic; no open-data licence asserted. Cited as an official monetary-authority reference rate.",
+          "retrievedAt": "2026-09-03",
+          "geography": "KYD has been pegged at CI$1.00 = US$1.20 since 1 April 1974 (i.e. US$1.00 ≈ CI$0.8333). CIMA operates as a currency board. Direct central-bank page not fetched in this session; the 1.20 peg is consistently and independently documented.",
+          "evidenceType": "PUBLIC_REFERENCE"
+        }
+      },
+      {
+        "currency": "CUP",
+        "name": "Cuban peso",
+        "regime": "OFFICIAL_MULTI_RATE",
+        "islandIds": [
+          "cuba"
+        ],
+        "unitsPerUSD": 638,
+        "unitsPerXCD": 236.296296,
+        "reference": {
+          "source": {
+            "title": "Tasa de cambio | Banco Central de Cuba",
+            "url": "https://www.bc.gob.cu/tasas-de-cambio",
+            "publisher": "Banco Central de Cuba"
+          },
+          "licence": "Publicly published central-bank statistic; no open-data licence asserted. Cited as an official monetary-authority reference rate.",
+          "retrievedAt": "2026-09-03",
+          "geography": "Cuba moved to a floating official CUP/USD rate in December 2025 after a long-standing fixed regime; the official rate has since moved quickly (roughly 500–630+ CUP per USD across 2026) and coexists with separate fixed state-sector rates (24 and 120 CUP/USD) and a higher informal-market rate (~570+ CUP/USD mid-2026). 638.00 is the rate shown on the Banco Central de Cuba’s own site at the time of this file’s retrieval (the page did not render a machine-readable effective date at fetch time); treat this figure as volatile and re-verify before relying on it.",
+          "evidenceType": "PUBLIC_REFERENCE"
+        }
+      },
+      {
+        "currency": "ANG",
+        "name": "Netherlands Antillean guilder (being replaced by the Caribbean guilder)",
+        "regime": "FIXED_PEG",
+        "islandIds": [
+          "curacao",
+          "sint-maarten-dutch-part"
+        ],
+        "unitsPerUSD": 1.79,
+        "unitsPerXCD": 0.662963,
+        "reference": {
+          "source": {
+            "title": "Caribbean Guilder — Centrale Bank Curaçao & Sint Maarten",
+            "url": "https://www.centralbank.cw/functions/banknotes-coins/caribbean-guilder",
+            "publisher": "Centrale Bank van Curaçao en Sint Maarten (CBCS)"
+          },
+          "licence": "Publicly published central-bank statistic; no open-data licence asserted. Cited as an official monetary-authority reference rate.",
+          "retrievedAt": "2026-09-03",
+          "geography": "NOTABLE FINDING: since 31 March 2025, CBCS has been replacing the Netherlands Antillean guilder (ANG) with the Caribbean guilder (“Cg”, informally; ISO 4217 candidate code XCG) at 1:1 parity. The manifest (caribbean-islands-manifest-v1.ts) still records the currency for curacao and sint-maarten-dutch-part as “ANG”. The peg value itself is unchanged (1.79 per USD before and after the changeover), so this rate is accurate either way, but the currency code in the manifest is now stale and a future revision may want to update it to the Caribbean guilder’s code.",
+          "evidenceType": "PUBLIC_REFERENCE"
+        }
+      },
+      {
+        "currency": "DOP",
+        "name": "Dominican peso",
+        "regime": "MANAGED_FLOAT",
+        "islandIds": [
+          "dominican-republic"
+        ],
+        "unitsPerUSD": 58.735,
+        "unitsPerXCD": 21.753704,
+        "reference": {
+          "source": {
+            "title": "Tasa de cambio de referencia del dólar estadounidense",
+            "url": "https://www.bancentral.gov.do/SectorExterno/CertificacionTasas",
+            "publisher": "Banco Central de la República Dominicana"
+          },
+          "licence": "Publicly published central-bank statistic; no open-data licence asserted. Cited as an official monetary-authority reference rate.",
+          "retrievedAt": "2026-09-03",
+          "geography": "Midpoint of the Central Bank’s published reference buy (RD$58.55) / sell (RD$58.92) rates for 2 September 2026. DOP is a managed float, not a peg; this is a point-in-time snapshot, not a standing rate.",
+          "evidenceType": "PUBLIC_REFERENCE"
+        }
+      },
+      {
+        "currency": "HTG",
+        "name": "Haitian gourde",
+        "regime": "FLOATING",
+        "islandIds": [
+          "haiti"
+        ],
+        "unitsPerUSD": 130.5204,
+        "unitsPerXCD": 48.340889,
+        "reference": {
+          "source": {
+            "title": "Taux de change — Banque de la République d’Haïti",
+            "url": "https://www.brh.ht/politique-monetaire/taux-de-change/",
+            "publisher": "Banque de la République d’Haïti (BRH)"
+          },
+          "licence": "Publicly published central-bank statistic; no open-data licence asserted. Cited as an official monetary-authority reference rate.",
+          "retrievedAt": "2026-09-03",
+          "geography": "BRH’s published official reference rate (“taux de référence”) for 2 September 2026. HTG floats and has depreciated significantly over recent years; this is a point-in-time snapshot, not a standing rate.",
+          "evidenceType": "PUBLIC_REFERENCE"
+        }
+      },
+      {
+        "currency": "JMD",
+        "name": "Jamaican dollar",
+        "regime": "FLOATING",
+        "islandIds": [
+          "jamaica"
+        ],
+        "unitsPerUSD": 158.325,
+        "unitsPerXCD": 58.638889,
+        "reference": {
+          "source": {
+            "title": "Average Exchange Rates — Bank of Jamaica",
+            "url": "https://boj.org.jm/market/foreign-exchange/average-exchange-rates/",
+            "publisher": "Bank of Jamaica (BOJ)"
+          },
+          "licence": "Publicly published central-bank statistic; no open-data licence asserted. Cited as an official monetary-authority reference rate.",
+          "retrievedAt": "2026-09-03",
+          "geography": "Midpoint of BOJ’s published FX spot-market weighted-average sell (J$159.14) / buy (J$157.51) rates for 1 September 2026. JMD floats; this is a point-in-time snapshot, not a standing rate.",
+          "evidenceType": "PUBLIC_REFERENCE"
+        }
+      },
+      {
+        "currency": "TTD",
+        "name": "Trinidad and Tobago dollar",
+        "regime": "MANAGED_FLOAT",
+        "islandIds": [
+          "trinidad-tobago"
+        ],
+        "unitsPerUSD": 6.7122,
+        "unitsPerXCD": 2.486,
+        "reference": {
+          "source": {
+            "title": "Exchange Rates (Daily) — Central Bank of Trinidad and Tobago",
+            "url": "https://www.central-bank.org.tt/exchange-rates-daily/",
+            "publisher": "Central Bank of Trinidad and Tobago"
+          },
+          "licence": "Publicly published central-bank statistic; no open-data licence asserted. Cited as an official monetary-authority reference rate.",
+          "retrievedAt": "2026-09-03",
+          "geography": "Midpoint of the Central Bank’s published buying (TT$6.6543) / selling (TT$6.7701) rates for 2 September 2026. TTD has been a de facto stable managed rate around this level for an extended period, but is not a legally fixed peg like XCD.",
+          "evidenceType": "PUBLIC_REFERENCE"
+        }
+      },
+      {
+        "currency": "EUR",
+        "name": "Euro",
+        "regime": "FLOATING",
+        "islandIds": [
+          "guadeloupe",
+          "martinique",
+          "saint-barthelemy",
+          "saint-martin-french-part"
+        ],
+        "unitsPerUSD": 0.8637,
+        "unitsPerXCD": 0.319889,
+        "reference": {
+          "source": {
+            "title": "Euro foreign exchange reference rates — USD",
+            "url": "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml",
+            "publisher": "European Central Bank (ECB)"
+          },
+          "licence": "Publicly published central-bank statistic; no open-data licence asserted. Cited as an official monetary-authority reference rate.",
+          "retrievedAt": "2026-09-03",
+          "geography": "Derived as 1 / 1.1578 from the ECB’s published EUR/USD reference rate for 2 September 2026 (1 EUR = 1.1578 USD). EUR floats; this is a point-in-time snapshot, not a standing rate.",
+          "evidenceType": "PUBLIC_REFERENCE"
+        }
+      }
+    ]
+  }
+}
