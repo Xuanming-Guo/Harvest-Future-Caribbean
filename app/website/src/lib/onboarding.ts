@@ -42,19 +42,19 @@ export function clearOnboardingStatus(actor: Pick<SessionActor, "authSubject">) 
 
 export const roleTutorials: Record<ProductRole, RoleTutorial> = {
   FARMER: {
-    introduction: "See how to update a crop, understand safe supply, offer produce, and follow your orders.",
+    introduction: "See where your recommended action lives, how to update a crop, how to offer produce, and how to follow your orders.",
     steps: [
       {
         id: "farmer-home",
         title: "Your farm at a glance",
-        description: "This page brings together your crops, safe-to-promise quantity, decisions, buyer opportunities, and upcoming pickups.",
+        description: "Harvest puts one recommended action at the top. Everything else is a plain step you can open when you need it: update crops, offer produce, see buyer demand, respond, track collection, and check past deliveries.",
         target: '[data-tour="farmer-home"]',
         path: "/farmer",
       },
       {
         id: "farmer-crops",
         title: "Open a crop",
-        description: "Select a crop card whenever you need to report a field update, review its forecast, or offer produce to buyers.",
+        description: "Update what is growing is open by default. Select a crop whenever you need to report a field update, review its forecast, or offer produce to buyers.",
         target: '[data-tour="farmer-crop-link"]',
         path: "/farmer",
         nextLabel: "Open this crop",
@@ -84,7 +84,7 @@ export const roleTutorials: Record<ProductRole, RoleTutorial> = {
       {
         id: "farmer-orders",
         title: "Follow commitments",
-        description: "Your Orders page shows requests involving your farm, approval progress, delivery state, and any problem that needs attention.",
+        description: "Respond to an opportunity and View previous deliveries summarise this on your farm page. Orders shows every request involving your farm in full, with approval progress and delivery state.",
         target: '[data-tour="orders-workspace"]',
         path: "/orders",
         nextLabel: "Finish tutorial",
