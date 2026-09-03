@@ -1,17 +1,9 @@
-<<<<<<< HEAD
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import React from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-import { Badge, Disclosure, MoreDetail } from "@/components/ui";
-=======
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DecisionExplanation, ReasonChooser, decisionReasonCodes, decisionReasonLabel } from "@/components/decision-reason";
-import { Badge } from "@/components/ui";
->>>>>>> origin/main
+import { Badge, Disclosure, MoreDetail } from "@/components/ui";
 import { consumeDevelopmentPersona, currentActor, developmentPersonaFromHash, roleHome } from "@/lib/api";
 import { compactId, formatPercent, titleCase } from "@/lib/format";
 import { clearOnboardingStatus, readOnboardingStatus, roleTutorials, writeOnboardingStatus } from "@/lib/onboarding";
@@ -114,7 +106,6 @@ describe("website presentation helpers", () => {
   });
 });
 
-<<<<<<< HEAD
 describe("workspace disclosure", () => {
   const openSummary = () => screen.getByRole("button", { name: /Track collection/ });
 
@@ -189,7 +180,9 @@ describe("workspace disclosure", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Stops")).toBeVisible();
     expect(screen.getByRole("button", { name: /Hide detail/ })).toBeInTheDocument();
-=======
+  });
+});
+
 describe("decision reason controls", () => {
   it("offers every contract reason code as a custom pill, never a native select", () => {
     const { container } = render(
@@ -235,6 +228,5 @@ describe("decision reason controls", () => {
     expect(card.getByText("Wrong size or grade")).toBeInTheDocument();
     expect(card.getByText("Next step: Grade to at least 15 cm.")).toBeInTheDocument();
     expect(card.getByText("Their note: Three kilograms were small.")).toBeInTheDocument();
->>>>>>> origin/main
   });
 });

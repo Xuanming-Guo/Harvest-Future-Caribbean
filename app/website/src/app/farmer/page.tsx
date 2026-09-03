@@ -62,7 +62,7 @@ export default function FarmerHome() {
   const listings = useQuery({ queryKey: ["listings"], queryFn: () => api.listings(), refetchInterval: 15_000 });
   const opportunities = useQuery({ queryKey: ["market-opportunities"], queryFn: () => api.marketOpportunities(), refetchInterval: 15_000 });
   const missions = useQuery({ queryKey: ["missions"], queryFn: () => api.missions(), refetchInterval: 5_000 });
-  const orders = useQuery({ queryKey: ["orders"], queryFn: api.orders, refetchInterval: 5_000 });
+  const orders = useQuery({ queryKey: ["orders"], queryFn: () => api.orders(), refetchInterval: 5_000 });
   const approvals = useQuery({ queryKey: ["approvals", "PENDING"], queryFn: () => api.approvals("PENDING"), refetchInterval: 5_000 });
   const deviceUpdates = useOutbox();
   const [dismissed, setDismissed] = useState<string[]>([]);
@@ -85,6 +85,7 @@ export default function FarmerHome() {
   const finishedOrders = allOrders.filter((order) => FINISHED_ORDER_STATUSES.includes(order.lifecycleStatus));
   const safeToSell = cropBatches.reduce((sum, batch) => sum + batch.availableToPromise.value, 0);
   const acceptedKg = finishedOrders.reduce((sum, order) => sum + order.acceptedQuantity.value, 0);
+  const needsAction = cropBatches.filter((batch) => batch.latestDecision);
   const requestedKg = finishedOrders.reduce((sum, order) => sum + order.requestedQuantity.value, 0);
 
   const recommendation = selectRecommendedAction(
@@ -100,11 +101,8 @@ export default function FarmerHome() {
     dismissed,
   );
 
-  const needsAction = (batches.data?.items ?? []).filter((batch) => batch.latestDecision);
-
   return (
     <>
-<<<<<<< HEAD
       <div data-tour="farmer-home">
         <PageHeader
           eyebrow="My farm"
@@ -124,6 +122,25 @@ export default function FarmerHome() {
           ]}
         />
       </div>
+
+      {needsAction.length > 0 && (
+        <Card className="section-gap decision-card">
+          <SectionTitle title="What was wrong, and what to do next" detail={`${plural(needsAction.length, "crop batch", "crop batches")} needing your attention`} />
+          <div className="decision-list">
+            {needsAction.map((batch) => (
+              <Link className="decision-row" href={`/crops/${batch.cropBatchId}`} key={batch.cropBatchId}>
+                <div>
+                  <Badge tone="high">{decisionReasonLabel(batch.latestDecision?.reasonCode)}</Badge>
+                  <h3>{titleCase(batch.cropType)}</h3>
+                  <p>{batch.latestDecision?.source === "DELIVERY" ? "A buyer did not accept part of this crop at delivery." : "A coordinator asked for changes to this crop update."}</p>
+                  {batch.latestDecision && <DecisionExplanation decision={batch.latestDecision} title={`Recorded ${formatDate(batch.latestDecision.decidedAt)}`} />}
+                </div>
+                <ArrowRight size={18} aria-hidden="true" />
+              </Link>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {deviceUpdates.length > 0 && (
         <Card className="section-gap">
@@ -146,37 +163,6 @@ export default function FarmerHome() {
             <EmptyState title="No crops recorded yet" detail="Your crop batches appear here once your first one is created." />
           ) : (
             <>
-=======
-      <div data-tour="farmer-home"><PageHeader eyebrow="My farm" title={`Welcome, ${actor?.name.split(" ")[0] ?? "farmer"}`} description="Share a simple crop update, see what can safely be sold, and respond to order requests." /></div>
-      {batches.error ? <ErrorState error={batches.error} /> : !batches.data ? <LoadingState /> : (
-        <>
-          <div className="metric-grid">
-            <Metric label="Crop batches" value={batches.data.items.length} detail="Visible to you" icon={Sprout} />
-            <Metric label="Safe to promise" value={`${batches.data.items.reduce((sum, batch) => sum + batch.availableToPromise.value, 0)} kg`} detail="Across your crops" icon={Scale} tone="blue" />
-            <Metric label="Harvest ready" value={batches.data.items.filter((batch) => batch.status === "HARVEST_READY").length} detail="Ready for market" icon={CalendarDays} tone="amber" />
-          </div>
-          {needsAction.length > 0 && (
-            <Card className="decision-card">
-              <SectionTitle title="What was wrong, and what to do next" detail={`${needsAction.length} crop ${needsAction.length === 1 ? "batch needs" : "batches need"} your attention`} />
-              <div className="decision-list">
-                {needsAction.map((batch) => (
-                  <Link className="decision-row" href={`/crops/${batch.cropBatchId}`} key={batch.cropBatchId}>
-                    <div>
-                      <Badge tone="high">{decisionReasonLabel(batch.latestDecision?.reasonCode)}</Badge>
-                      <h3>{titleCase(batch.cropType)}</h3>
-                      <p>{batch.latestDecision?.source === "DELIVERY" ? "A buyer did not accept part of this crop at delivery." : "A coordinator asked for changes to this crop update."}</p>
-                      {batch.latestDecision && <DecisionExplanation decision={batch.latestDecision} title={`Recorded ${formatDate(batch.latestDecision.decidedAt)}`} />}
-                    </div>
-                    <ArrowRight size={18} />
-                  </Link>
-                ))}
-              </div>
-            </Card>
-          )}
-          <div className="dashboard-grid">
-            <Card>
-              <SectionTitle title="My crops" detail="Update at any time" />
->>>>>>> origin/main
               <div className="crop-grid">
                 {cropBatches.map((batch, index) => {
                   const Icon = CROP_ICONS[batch.status] ?? Sprout;

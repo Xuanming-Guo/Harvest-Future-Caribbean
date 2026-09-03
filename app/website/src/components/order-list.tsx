@@ -25,7 +25,7 @@ export function OrderList({
   emptyTitle?: string;
   emptyDetail?: string;
 }) {
-  const orders = useQuery({ queryKey: ["orders"], queryFn: api.orders, refetchInterval: 5_000 });
+  const orders = useQuery({ queryKey: ["orders"], queryFn: () => api.orders(), refetchInterval: 5_000 });
   if (orders.error) return <ErrorState error={orders.error} />;
   if (!orders.data) return <LoadingState label="Loading orders..." />;
   const matching = filter ? orders.data.items.filter(filter) : orders.data.items;
