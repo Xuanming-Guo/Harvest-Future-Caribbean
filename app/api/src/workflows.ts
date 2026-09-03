@@ -7,6 +7,7 @@ import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { recordEvent } from "./events.js";
 import { httpError, type DecisionReason } from "./http.js";
+import { commitmentValue } from "./payments.js";
 
 const kilograms = (value: number) => ({ value, unit: "kg" });
 
@@ -699,7 +700,15 @@ export async function approveAllocation(
       // the released reservation all have to agree with it rather than with the
       // quantity the buyer originally asked for.
       const committedQuantity = lines.reduce((sum, line) => sum + line.quantity, 0);
-      await tx.order.update({ where: { id: order.id }, data: { lifecycleStatus: "COMMITTED", committedQuantity } });
+      // Price the commitment now, at the listing prices the farmers published
+      // and everyone just approved. Delivery acceptance recomputes it on the
+      // quantities that actually arrived. Harvest records what is owed; it
+      // never moves money.
+      const owed = commitmentValue(lines, [...listingById.values()]);
+      await tx.order.update({
+        where: { id: order.id },
+        data: { lifecycleStatus: "COMMITTED", committedQuantity, paymentAmount: owed.amount, paymentCurrency: owed.currency },
+      });
 
       const route = await buildDeliveryRoute(tx, lines, { latitude: order.latitude, longitude: order.longitude });
       const missionId = randomUUID();

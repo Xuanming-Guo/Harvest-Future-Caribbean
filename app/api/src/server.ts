@@ -13,6 +13,7 @@ import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { recordEvent } from "./events.js";
 import { assertObjectBody, decisionReasonKeys, httpError, idempotent, readDecisionReason, readLocation, readQuantity, requireDecisionReason, sendProblem, type DecisionReasonCode } from "./http.js";
+import { acceptedValue } from "./payments.js";
 import { registerSimulationRoutes } from "./simulation-routes.js";
 import { batchStatusForStage, isReadyStatus } from "./workflows.js";
 import {
@@ -28,6 +29,7 @@ import {
   listingDto,
   missionDto,
   orderDto,
+  orderPaymentDto,
   pageInfo,
   predictionDto,
   quantity,
@@ -62,6 +64,18 @@ async function verificationStatuses(batchIds: string[]) {
   const statuses = new Map<string, string>();
   for (const task of tasks) if (!statuses.has(task.cropBatchId)) statuses.set(task.cropBatchId, task.status);
   return statuses;
+}
+
+/**
+ * Payment status is never stored, so every order read derives it from its own
+ * delivery acceptance time plus the agreed term. One query covers a whole page.
+ */
+async function paymentsByOrder(rows: Array<{ id: string }>) {
+  const acceptances = await prisma.deliveryAcceptance.findMany({
+    where: { orderId: { in: rows.map((row) => row.id) } },
+    select: { orderId: true, acceptedAt: true },
+  });
+  return new Map(acceptances.map((row) => [row.orderId, row.acceptedAt]));
 }
 
 type StoredLineOutcome = { cropBatchId?: unknown; rejectedQuantity?: { value?: unknown }; reasonCode?: unknown; nextAction?: unknown };
@@ -611,12 +625,14 @@ export async function buildServer() {
     const visibleIds = await visibleOrderIds(actor);
     const orderIds = typeof query.cropBatchId === "string" ? await orderIdsForCropBatch(query.cropBatchId, visibleIds) : visibleIds;
     const rows = await prisma.order.findMany({ where: { id: { in: orderIds }, ...(typeof query.status === "string" ? { lifecycleStatus: query.status } : {}), ...(typeof query.atRisk === "string" ? { atRisk: query.atRisk === "true" } : {}) }, orderBy: { updatedAt: "desc" }, take: queryLimit(query.limit) });
-    return { items: rows.map(orderDto), pageInfo };
+    const acceptedAtByOrder = await paymentsByOrder(rows);
+    const now = operationNow();
+    return { items: rows.map((row) => orderDto(row, orderPaymentDto(row, acceptedAtByOrder.get(row.id) ?? null, now))), pageInfo };
   });
 
   server.post("/v1/orders", async (request, reply) => idempotent(request, reply, 201, async () => {
     const actor = requireRole(request, ["BUYER", "ADMIN"]);
-    const body = assertObjectBody(request.body, ["cropType", "requestedQuantity", "neededBy", "deliveryLocation", "minimumAcceptableFraction", "listingIds"], ["cropType", "requestedQuantity", "neededBy", "deliveryLocation"]);
+    const body = assertObjectBody(request.body, ["cropType", "requestedQuantity", "neededBy", "deliveryLocation", "minimumAcceptableFraction", "paymentTermsDays", "listingIds"], ["cropType", "requestedQuantity", "neededBy", "deliveryLocation"]);
     const listingIds = body.listingIds === undefined ? [] : body.listingIds;
     if (!Array.isArray(listingIds) || !listingIds.every((id) => typeof id === "string")) throw httpError(400, "VALIDATION_FAILED", "listingIds must be an array of UUID strings.");
     // A buyer may accept part of an order, but not an arbitrarily small part:
@@ -625,12 +641,19 @@ export async function buildServer() {
     if (typeof minimumAcceptableFraction !== "number" || !Number.isFinite(minimumAcceptableFraction) || minimumAcceptableFraction < 0.5 || minimumAcceptableFraction > 1) {
       throw httpError(422, "INVALID_ACCEPTANCE_THRESHOLD", "minimumAcceptableFraction must be a number between 0.5 and 1.");
     }
+    // Harvest tracks the agreed payment term; it never moves money. The 14-day
+    // default is stakeholder-calibrated from farmer feedback that hotels
+    // currently take one, two, or more months to pay.
+    const paymentTermsDays = body.paymentTermsDays === undefined ? 14 : body.paymentTermsDays;
+    if (typeof paymentTermsDays !== "number" || !Number.isInteger(paymentTermsDays) || paymentTermsDays < 0 || paymentTermsDays > 90) {
+      throw httpError(422, "INVALID_PAYMENT_TERMS", "paymentTermsDays must be a whole number of days between 0 and 90.");
+    }
     const location = readLocation(body.deliveryLocation);
     const orderId = randomUUID();
     const traceId = randomUUID();
     const requestedQuantity = readQuantity(body.requestedQuantity, "requestedQuantity");
     const row = await prisma.$transaction(async (tx) => {
-      const order = await tx.order.create({ data: { id: orderId, buyerId: actor.id, cropType: asString(body.cropType, "cropType").toUpperCase(), requestedQuantity, committedQuantity: 0, acceptedQuantity: 0, minimumAcceptableFraction, neededBy: asDate(body.neededBy, "neededBy"), latitude: location.latitude, longitude: location.longitude, listingIds, lifecycleStatus: "REQUESTED", atRisk: false, activeExceptionIds: [], traceId, simulationRunId: actor.simulationRunId } });
+      const order = await tx.order.create({ data: { id: orderId, buyerId: actor.id, cropType: asString(body.cropType, "cropType").toUpperCase(), requestedQuantity, committedQuantity: 0, acceptedQuantity: 0, minimumAcceptableFraction, paymentTermsDays, neededBy: asDate(body.neededBy, "neededBy"), latitude: location.latitude, longitude: location.longitude, listingIds, lifecycleStatus: "REQUESTED", atRisk: false, activeExceptionIds: [], traceId, simulationRunId: actor.simulationRunId } });
       await tx.agentTrace.create({ data: { id: traceId, subjectType: "ORDER", subjectId: orderId, workflowType: "ORDER_FULFILMENT", stage: "ORDER_REQUESTED", status: "RUNNING", summary: "Validating safe supply for a buyer order.", simulationRunId: actor.simulationRunId } });
       await tx.traceStep.create({ data: { traceId, recordedAt: operationNow(), kind: "INPUT", agentName: "Market Balance Agent", toolName: "read-order-request", provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, summary: `Buyer requested ${requestedQuantity} kg of ${order.cropType} and accepts at least ${Math.round(minimumAcceptableFraction * 100)}% of it.`, simulationRunId: actor.simulationRunId } });
       await recordEvent(tx, { eventType: "ORDER_REQUESTED", actorId: actor.id, entityId: orderId, traceId, provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, simulationRunId: actor.simulationRunId, payload: { orderId, cropType: order.cropType, requestedQuantity: quantity(requestedQuantity), status: "REQUESTED" } });
@@ -653,13 +676,67 @@ export async function buildServer() {
     const mission = await prisma.deliveryMission.findFirst({ where: { orderId }, orderBy: { deadline: "desc" } });
     const acceptance = await prisma.deliveryAcceptance.findUnique({ where: { orderId } });
     return {
-      ...orderDto(row),
+      ...orderDto(row, orderPaymentDto(row, acceptance?.acceptedAt ?? null, operationNow())),
       ...(allocation ? { allocation: { allocationId: allocation.id, status: allocation.status, lines: summarizedLines } } : {}),
       approvalSummary: summarizeApprovals(approvals, actor.id),
       ...(mission ? { deliveryMission: missionDto(mission) } : {}),
       ...(acceptance ? { deliveryAcceptance: deliveryAcceptanceDto(acceptance) } : {}),
     };
   });
+
+  /**
+   * Harvest tracks payment; it does not move money. This records the buyer's
+   * own statement that it settled a delivered order outside Harvest, which is
+   * the only part of the payment story Harvest cannot derive for itself.
+   */
+  server.post("/v1/orders/:orderId/payment-confirmations", async (request, reply) => idempotent(request, reply, 201, async () => {
+    const actor = requireRole(request, ["BUYER", "COORDINATOR", "ADMIN"]);
+    const { orderId } = request.params as { orderId: string };
+    const body = assertObjectBody(request.body ?? {}, ["reference"]);
+    const reference = body.reference === undefined ? null : asString(body.reference, "reference");
+    if (reference !== null && reference.length > 120) throw httpError(422, "INVALID_PAYMENT_REFERENCE", "reference must be at most 120 characters.");
+    if (!(await canAccessOrder(actor, orderId))) throw httpError(404, "ORDER_NOT_FOUND", "Order was not found.");
+    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw httpError(404, "ORDER_NOT_FOUND", "Order was not found.");
+    if (actor.role === "BUYER" && order.buyerId !== actor.id) throw httpError(404, "ORDER_NOT_FOUND", "Order was not found.");
+    if (!["FULFILLED", "PARTIALLY_FULFILLED"].includes(order.lifecycleStatus)) {
+      throw httpError(409, "PAYMENT_NOT_PAYABLE", "Payment can only be confirmed once the delivery outcome has been recorded.");
+    }
+    if (order.paidAt) throw httpError(409, "PAYMENT_ALREADY_CONFIRMED", "This order already has a recorded payment.");
+    if (order.paymentAmount === null) throw httpError(409, "PAYMENT_NOT_PAYABLE", "This order was never priced by an approved commitment.");
+    const acceptance = await prisma.deliveryAcceptance.findUnique({ where: { orderId } });
+    const paidAt = operationNow();
+    const trace = await prisma.agentTrace.findFirst({ where: { subjectType: "ORDER", subjectId: orderId } });
+    const priorEvent = await prisma.domainEvent.findFirst({ where: { entityId: orderId }, orderBy: { occurredAt: "desc" } });
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.order.update({ where: { id: orderId }, data: { paidAt, paymentReference: reference } });
+      const payment = orderPaymentDto(row, acceptance?.acceptedAt ?? null, paidAt);
+      if (trace) {
+        await tx.traceStep.create({ data: { traceId: trace.id, recordedAt: paidAt, kind: "OUTCOME", agentName: "Traceability Agent", toolName: "record-payment-confirmation", provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED, summary: `Recorded the buyer's confirmation that this order was paid${payment?.daysOutstanding !== undefined ? ` ${payment.daysOutstanding} days after delivery` : ""}. Harvest tracks payment and does not move money.`, simulationRunId: actor.simulationRunId } });
+      }
+      await recordEvent(tx, {
+        eventType: "PAYMENT_CONFIRMED",
+        actorId: actor.id,
+        entityId: orderId,
+        traceId: trace?.id ?? randomUUID(),
+        correlationId: priorEvent?.correlationId,
+        causationId: priorEvent?.id,
+        provenance: actor.isSynthetic ? Provenance.SYNTHETIC : Provenance.OBSERVED,
+        simulationRunId: actor.simulationRunId,
+        payload: {
+          orderId,
+          paidAt: paidAt.toISOString(),
+          paymentTermsDays: row.paymentTermsDays,
+          ...(payment?.dueAt ? { dueAt: payment.dueAt } : {}),
+          ...(payment?.amount ? { amount: payment.amount } : {}),
+          ...(reference ? { reference } : {}),
+          ...(payment?.daysOutstanding !== undefined ? { daysOutstanding: payment.daysOutstanding } : {}),
+        },
+      });
+      return { row, payment };
+    });
+    return { orderId, payment: updated.payment };
+  }));
 
   server.get("/v1/agent-traces/:traceId", async (request) => {
     const actor = requireRole(request, [...productRoles]);
@@ -1032,6 +1109,11 @@ export async function buildServer() {
       ...(line.rejected > 0 && line.reasonCode ? { reasonCode: line.reasonCode } : {}),
       ...(line.rejected > 0 && line.nextAction ? { nextAction: line.nextAction } : {}),
     }));
+    // What the buyer now owes is what actually arrived, priced at the listings
+    // that were committed. Rejected produce is not billed. Harvest records the
+    // amount and its due date; it never moves money.
+    const committedListings = await prisma.listing.findMany({ where: { id: { in: [...new Set(allocationLines.map((line) => line.listingId))] } }, select: { id: true, unitPrice: true, currency: true } });
+    const owed = acceptedValue(allocationLines, committedListings, new Map(lineOutcomes.map((line) => [line.cropBatchId, line.accepted])));
     const trace = await prisma.agentTrace.findFirst({ where: { subjectType: "ORDER", subjectId: order.id } });
     const priorEvent = await prisma.domainEvent.findFirst({ where: { traceId: trace?.id, entityId: { in: [order.id, mission.id] } }, orderBy: { occurredAt: "desc" } });
     const acceptance = await prisma.$transaction(async (tx) => {
@@ -1041,6 +1123,8 @@ export async function buildServer() {
         data: {
           lifecycleStatus,
           acceptedQuantity: accepted,
+          paymentAmount: owed.amount,
+          paymentCurrency: owed.currency,
           atRisk: false,
           activeExceptionIds: [],
           outcomeCause: lifecycleStatus === "FULFILLED" ? null : rejected > 0.0001 ? "DELIVERY_REJECTED" : "INSUFFICIENT_SUPPLY",

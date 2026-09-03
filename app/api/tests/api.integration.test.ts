@@ -513,6 +513,23 @@ describe("participant Product API", () => {
     expect(finalSnapshot.openDemands).toBe(finalOutcomes.total);
     expect(finalSnapshot.completedMissionCount).toBeGreaterThan(0);
     expect(finalSnapshot.approvedCommitmentCount).toBeGreaterThanOrEqual(finalSnapshot.completedMissionCount);
+    // Payment behaviour is asserted by its arithmetic rather than by recorded
+    // counts, which live in docs/simulation_api_local_testing.md. Synthetic
+    // buyers order on simulated 7-day terms and pay once their wait elapses, so
+    // nothing is paid for that was never delivered and the overdue count is back
+    // to zero by the horizon.
+    const overduePerFrame = timeline.json().frames.map((frame: { operationsSnapshot?: { paymentOverdueCount?: number } }) => frame.operationsSnapshot?.paymentOverdueCount);
+    expect(overduePerFrame.every((count: number | undefined) => typeof count === "number")).toBe(true);
+    expect(overduePerFrame.at(-1)).toBe(finalSnapshot.paymentOverdueCount);
+    expect(finalSnapshot.paymentOverdueCount).toBe(0);
+    const paymentConfirmations = await prisma.domainEvent.count({ where: { simulationRunId: runId, eventType: "PAYMENT_CONFIRMED" } });
+    const settled = await prisma.order.findMany({ where: { simulationRunId: runId, paidAt: { not: null } }, select: { paymentTermsDays: true } });
+    expect(settled).toHaveLength(paymentConfirmations);
+    // A buyer can only pay for produce it accepted, and every order that ever
+    // ran late was settled, because none is still overdue at the horizon.
+    expect(settled.length).toBeLessThanOrEqual(finalOutcomes.fulfilled + finalOutcomes.partiallyFulfilled);
+    expect(Math.max(...(overduePerFrame as number[]))).toBeLessThanOrEqual(paymentConfirmations);
+    expect(settled.every((order) => order.paymentTermsDays === 7)).toBe(true);
     for (const forbidden of ["potentialYieldKg", "qualityFraction", "dailySpoilageRate", "severity"]) {
       expect(timeline.body).not.toContain(forbidden);
     }
@@ -551,6 +568,7 @@ describe("participant Product API", () => {
         deliveryAcceptedKg: number;
         approvedCommitmentCount: number;
         completedMissionCount: number;
+        paymentOverdueCount?: number;
         activeMissionIds: string[];
         openExceptionIds: string[];
       } | undefined;
@@ -581,6 +599,7 @@ describe("participant Product API", () => {
           deliveryAcceptedKg: snapshot.deliveryAcceptedKg,
           approvedCommitmentCount: snapshot.approvedCommitmentCount,
           completedMissionCount: snapshot.completedMissionCount,
+          paymentOverdueCount: snapshot.paymentOverdueCount,
           activeMissions: snapshot.activeMissionIds.length,
           openExceptions: snapshot.openExceptionIds.length,
         } : null,
@@ -968,5 +987,189 @@ describe("safe partial commitment (#53)", () => {
     const invalid = await server.inject({ method: "POST", url: "/v1/orders", headers: mutationHeaders("buyer-hotel", "invalid-threshold"), payload: { ...orderPayload, requestedQuantity: { value: 6, unit: "kg" }, minimumAcceptableFraction: 0.3 } });
     expect(invalid.statusCode).toBe(422);
     expect(invalid.json().code).toBe("INVALID_ACCEPTANCE_THRESHOLD");
+  });
+});
+
+describe("payment terms and status (#74)", () => {
+  const anaBatchId = "11111111-1111-4111-8111-111111111111";
+  const unitPrice = 7.5;
+  const dayMs = 24 * 60 * 60 * 1_000;
+  const orderPayload = { cropType: "CUCUMBER", neededBy: "2026-09-25T12:00:00Z", deliveryLocation: { latitude: 14.0101, longitude: -60.9875 } };
+
+  /** Leaves exactly `available` kg of one ready cucumber batch orderable at a known price. */
+  async function onlySupply(available: number) {
+    await prisma.order.updateMany({ where: { cropType: "CUCUMBER", lifecycleStatus: { in: ["REQUESTED", "AWAITING_APPROVAL"] } }, data: { lifecycleStatus: "CANCELLED" } });
+    await prisma.allocation.updateMany({ where: { status: "PROPOSED" }, data: { status: "STALE" } });
+    await prisma.listing.updateMany({ where: { cropType: "CUCUMBER" }, data: { status: "SOLD_OUT" } });
+    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", availableToPromise: available } });
+    const published = await server.inject({
+      method: "POST",
+      url: "/v1/listings",
+      headers: mutationHeaders("farmer-ana", "payment-supply"),
+      payload: { cropBatchId: anaBatchId, quantity: { value: available, unit: "kg" }, unitPrice: { amount: unitPrice, currency: "XCD" }, availableFrom: "2026-09-05", availableUntil: "2026-09-26" },
+    });
+    expect(published.statusCode).toBe(201);
+  }
+
+  async function approveFor(persona: string, orderId: string) {
+    const approvals = (await server.inject({ method: "GET", url: "/v1/approvals?status=PENDING", headers: auth(persona) })).json().items;
+    const approval = approvals.find((item: { context?: { orderId?: string } }) => item.context?.orderId === orderId);
+    expect((await decide(persona, approval.approvalId, "APPROVE")).statusCode).toBe(200);
+  }
+
+  async function completeDelivery(orderId: string, quantityKg: number, acceptedKg: number, prefix: string) {
+    const mission = await prisma.deliveryMission.findFirstOrThrow({ where: { orderId } });
+    const vehicles = (await server.inject({ method: "GET", url: "/v1/me/vehicles", headers: auth("transporter-daniel") })).json().items;
+    expect((await server.inject({ method: "POST", url: `/v1/delivery-missions/${mission.id}/acceptance`, headers: mutationHeaders("transporter-daniel", `${prefix}-mission`), payload: { decision: "ACCEPT", vehicleId: vehicles[0].vehicleId } })).statusCode).toBe(200);
+    for (const [index, updateType] of ["ARRIVED", "PICKED_UP", "ARRIVED", "DELIVERED"].entries()) {
+      const update = await server.inject({ method: "POST", url: `/v1/delivery-missions/${mission.id}/updates`, headers: mutationHeaders("transporter-daniel", `${prefix}-${updateType.toLowerCase()}-${index}`), payload: { updateType, recordedAt: new Date(Date.UTC(2026, 8, 20, 9 + index)).toISOString() } });
+      expect(update.statusCode).toBe(201);
+    }
+    const rejectedKg = Number((quantityKg - acceptedKg).toFixed(2));
+    const acceptance = await server.inject({
+      method: "POST",
+      url: `/v1/deliveries/${mission.id}/acceptance`,
+      headers: mutationHeaders("buyer-hotel", `${prefix}-acceptance`),
+      payload: {
+        outcome: rejectedKg > 0 ? "PARTIALLY_ACCEPTED" : "ACCEPTED",
+        acceptedQuantity: { value: acceptedKg, unit: "kg" },
+        rejectedQuantity: { value: rejectedKg, unit: "kg" },
+        lineOutcomes: [{ cropBatchId: anaBatchId, acceptedQuantity: { value: acceptedKg, unit: "kg" }, rejectedQuantity: { value: rejectedKg, unit: "kg" } }],
+        // The Product API refuses a rejection without an actionable reason, so a
+        // priced delivery that is short still tells the farmer what to do next.
+        ...(rejectedKg > 0 ? { reasonCode: "MATURITY_OR_QUALITY", nextAction: "Harvest one day later so the fruit reaches full size." } : {}),
+      },
+    });
+    expect(acceptance.statusCode).toBe(201);
+    return new Date(acceptance.json().acceptedAt as string);
+  }
+
+  /** Runs one order all the way to an accepted delivery. */
+  async function deliveredOrder(quantityKg: number, acceptedKg: number, prefix: string) {
+    await onlySupply(quantityKg);
+    const placed = await server.inject({
+      method: "POST",
+      url: "/v1/orders",
+      headers: mutationHeaders("buyer-hotel", `${prefix}-order`),
+      payload: { ...orderPayload, requestedQuantity: { value: quantityKg, unit: "kg" } },
+    });
+    expect(placed.statusCode).toBe(201);
+    const orderId = placed.json().orderId as string;
+
+    // Nothing is owed before a commitment prices the order.
+    const beforeCommitment = await server.inject({ method: "GET", url: `/v1/orders/${orderId}`, headers: auth("buyer-hotel") });
+    expect(beforeCommitment.json().payment).toBeUndefined();
+
+    await approveFor("buyer-hotel", orderId);
+    await approveFor("farmer-ana", orderId);
+    const acceptedAt = await completeDelivery(orderId, quantityKg, acceptedKg, prefix);
+    return { orderId, acceptedAt };
+  }
+
+  it("applies the stakeholder-calibrated 14-day default and records an agreed 30-day term", async () => {
+    await onlySupply(4);
+    const standard = await server.inject({ method: "POST", url: "/v1/orders", headers: mutationHeaders("buyer-hotel", "payment-default-terms"), payload: { ...orderPayload, requestedQuantity: { value: 4, unit: "kg" } } });
+    expect(standard.statusCode).toBe(201);
+    expect(standard.json().paymentTermsDays).toBe(14);
+    expect(standard.json().payment).toBeUndefined();
+
+    await onlySupply(4);
+    const negotiated = await server.inject({ method: "POST", url: "/v1/orders", headers: mutationHeaders("buyer-hotel", "payment-custom-terms"), payload: { ...orderPayload, requestedQuantity: { value: 4, unit: "kg" }, paymentTermsDays: 30 } });
+    expect(negotiated.statusCode).toBe(201);
+    expect(negotiated.json().paymentTermsDays).toBe(30);
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: negotiated.json().orderId } })).paymentTermsDays).toBe(30);
+
+    const invalid = await server.inject({ method: "POST", url: "/v1/orders", headers: mutationHeaders("buyer-hotel", "payment-invalid-terms"), payload: { ...orderPayload, requestedQuantity: { value: 4, unit: "kg" }, paymentTermsDays: 120 } });
+    expect(invalid.statusCode).toBe(422);
+    expect(invalid.json().code).toBe("INVALID_PAYMENT_TERMS");
+  });
+
+  it("prices the commitment, recomputes it on what arrived, and only starts the term at acceptance", async () => {
+    await onlySupply(8);
+    const placed = await server.inject({ method: "POST", url: "/v1/orders", headers: mutationHeaders("buyer-hotel", "payment-priced-order"), payload: { ...orderPayload, requestedQuantity: { value: 8, unit: "kg" } } });
+    const orderId = placed.json().orderId as string;
+    await approveFor("buyer-hotel", orderId);
+    await approveFor("farmer-ana", orderId);
+
+    // Committed but not delivered: the whole commitment is priced, nothing is due.
+    const committed = await server.inject({ method: "GET", url: `/v1/orders/${orderId}`, headers: auth("buyer-hotel") });
+    expect(committed.json().payment).toMatchObject({ status: "NOT_DUE", amount: { amount: 8 * unitPrice, currency: "XCD" } });
+    expect(committed.json().payment.dueAt).toBeUndefined();
+
+    const acceptedAt = await completeDelivery(orderId, 8, 6, "payment-priced");
+
+    // Rejected produce is not billed: 6 kg at the 7.50 listing price.
+    const settled = await server.inject({ method: "GET", url: `/v1/orders/${orderId}`, headers: auth("buyer-hotel") });
+    expect(settled.json().payment).toMatchObject({ status: "NOT_DUE", amount: { amount: 6 * unitPrice, currency: "XCD" }, daysOutstanding: 0 });
+    expect(new Date(settled.json().payment.dueAt).getTime()).toBe(acceptedAt.getTime() + 14 * dayMs);
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: orderId } })).paymentAmount).toBe(45);
+  });
+
+  it("derives due and overdue from the caller's clock without storing a status", async () => {
+    const { orderId, acceptedAt } = await deliveredOrder(6, 6, "payment-clock");
+    const readAt = (offsetMs: number) => server.inject({
+      method: "GET",
+      url: `/v1/orders/${orderId}`,
+      headers: { ...auth("buyer-hotel"), "x-harvest-simulation-time": new Date(acceptedAt.getTime() + offsetMs).toISOString() },
+    });
+
+    expect((await readAt(13 * dayMs)).json().payment).toMatchObject({ status: "NOT_DUE", daysOutstanding: 13 });
+    expect((await readAt(14 * dayMs)).json().payment).toMatchObject({ status: "DUE", daysOutstanding: 14 });
+    expect((await readAt(20 * dayMs)).json().payment).toMatchObject({ status: "OVERDUE", daysOutstanding: 20 });
+    // No read wrote anything: the status is derived every time.
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: orderId } })).paidAt).toBeNull();
+  });
+
+  it("records one payment confirmation, replays it, and refuses a second", async () => {
+    const { orderId, acceptedAt } = await deliveredOrder(6, 6, "payment-confirm");
+    const paidAt = new Date(acceptedAt.getTime() + 20 * dayMs);
+    const headers = { ...auth("buyer-hotel"), "idempotency-key": `payment-confirmation-${orderId}`, "x-harvest-simulation-time": paidAt.toISOString() };
+
+    const confirmed = await server.inject({ method: "POST", url: `/v1/orders/${orderId}/payment-confirmations`, headers, payload: { reference: "Bank transfer 4471" } });
+    expect(confirmed.statusCode).toBe(201);
+    expect(confirmed.json()).toMatchObject({
+      orderId,
+      payment: { status: "PAID", amount: { amount: 6 * unitPrice, currency: "XCD" }, reference: "Bank transfer 4471", daysOutstanding: 20 },
+    });
+    expect(confirmed.json().payment.paidAt).toBe(paidAt.toISOString());
+
+    const replayed = await server.inject({ method: "POST", url: `/v1/orders/${orderId}/payment-confirmations`, headers, payload: { reference: "Bank transfer 4471" } });
+    expect(replayed.statusCode).toBe(201);
+    expect(replayed.json()).toEqual(confirmed.json());
+
+    const second = await server.inject({ method: "POST", url: `/v1/orders/${orderId}/payment-confirmations`, headers: mutationHeaders("buyer-hotel", "payment-second"), payload: { reference: "Bank transfer 4472" } });
+    expect(second.statusCode).toBe(409);
+    expect(second.json().code).toBe("PAYMENT_ALREADY_CONFIRMED");
+
+    // A paid order stays paid however far past its due date it is read.
+    const long = await server.inject({ method: "GET", url: `/v1/orders/${orderId}`, headers: { ...auth("buyer-hotel"), "x-harvest-simulation-time": new Date(acceptedAt.getTime() + 400 * dayMs).toISOString() } });
+    expect(long.json().payment).toMatchObject({ status: "PAID", daysOutstanding: 20 });
+
+    const event = await prisma.domainEvent.findFirstOrThrow({ where: { eventType: "PAYMENT_CONFIRMED", entityId: orderId }, orderBy: { cursor: "desc" } });
+    expect(event.payload).toMatchObject({ orderId, paymentTermsDays: 14, amount: { amount: 45, currency: "XCD" }, reference: "Bank transfer 4471", daysOutstanding: 20 });
+  });
+
+  it("refuses a confirmation before the delivery outcome is recorded", async () => {
+    await onlySupply(4);
+    const placed = await server.inject({ method: "POST", url: "/v1/orders", headers: mutationHeaders("buyer-hotel", "payment-undelivered"), payload: { ...orderPayload, requestedQuantity: { value: 4, unit: "kg" } } });
+    const orderId = placed.json().orderId as string;
+    const early = await server.inject({ method: "POST", url: `/v1/orders/${orderId}/payment-confirmations`, headers: mutationHeaders("buyer-hotel", "payment-early"), payload: {} });
+    expect(early.statusCode).toBe(409);
+    expect(early.json().code).toBe("PAYMENT_NOT_PAYABLE");
+  });
+
+  it("shows the supplying farmer what is owed and hides it from an unrelated farm", async () => {
+    const { orderId } = await deliveredOrder(6, 6, "payment-visibility");
+
+    const supplier = await server.inject({ method: "GET", url: `/v1/orders/${orderId}`, headers: auth("farmer-ana") });
+    expect(supplier.statusCode).toBe(200);
+    expect(supplier.json().payment).toMatchObject({ status: "NOT_DUE", amount: { amount: 6 * unitPrice, currency: "XCD" } });
+    const listed = await server.inject({ method: "GET", url: "/v1/orders", headers: auth("farmer-ana") });
+    expect(listed.json().items.find((item: { orderId: string }) => item.orderId === orderId).payment).toMatchObject({ amount: { amount: 6 * unitPrice, currency: "XCD" } });
+
+    const unrelated = await server.inject({ method: "GET", url: `/v1/orders/${orderId}`, headers: auth("farmer-marcus") });
+    expect(unrelated.statusCode).toBe(404);
+    const unrelatedConfirmation = await server.inject({ method: "POST", url: `/v1/orders/${orderId}/payment-confirmations`, headers: mutationHeaders("farmer-marcus", "payment-forbidden"), payload: {} });
+    expect(unrelatedConfirmation.statusCode).toBe(403);
   });
 });

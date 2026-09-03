@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { summarizeOrderOutcomes } from "../src/operations-snapshot.js";
+import { countOverduePayments, summarizeOrderOutcomes } from "../src/operations-snapshot.js";
 
 describe("Product API order outcome summary", () => {
   const asOf = new Date("2026-09-22T06:00:00.000Z");
@@ -80,5 +80,33 @@ describe("Product API order outcome summary", () => {
 
     expect(before).toMatchObject({ pending: 1, unfulfilled: 0 });
     expect(atDeadline).toMatchObject({ pending: 0, unfulfilled: 1 });
+  });
+});
+
+describe("overdue payment count (#74)", () => {
+  const acceptedAt = new Date("2026-09-10T09:00:00.000Z");
+  const delivered = { id: "order-1", lifecycleStatus: "FULFILLED", paymentTermsDays: 14, paymentAmount: 148.5, paidAt: null as Date | null };
+  const accepted = new Map([["order-1", acceptedAt]]);
+
+  it("counts an order only once its agreed term has fully expired", () => {
+    // Inside the term, on the day it falls due, and the day after.
+    expect(countOverduePayments([delivered], accepted, new Date("2026-09-23T09:00:00.000Z"))).toBe(0);
+    expect(countOverduePayments([delivered], accepted, new Date("2026-09-24T09:00:00.000Z"))).toBe(0);
+    expect(countOverduePayments([delivered], accepted, new Date("2026-09-25T09:00:00.000Z"))).toBe(1);
+  });
+
+  it("never counts an order that has no delivery acceptance, however old it is", () => {
+    expect(countOverduePayments([delivered], new Map(), new Date("2027-01-01T00:00:00.000Z"))).toBe(0);
+  });
+
+  it("stops counting an order once payment is recorded, and ignores unpriced or cancelled orders", () => {
+    const paid = { ...delivered, paidAt: new Date("2026-09-26T09:00:00.000Z") };
+    const unpriced = { ...delivered, id: "order-2", paymentAmount: null };
+    const cancelled = { ...delivered, id: "order-3", lifecycleStatus: "CANCELLED" };
+    const asOf = new Date("2026-10-01T09:00:00.000Z");
+
+    expect(countOverduePayments([paid], accepted, asOf)).toBe(0);
+    expect(countOverduePayments([unpriced], new Map([["order-2", acceptedAt]]), asOf)).toBe(0);
+    expect(countOverduePayments([cancelled], new Map([["order-3", acceptedAt]]), asOf)).toBe(0);
   });
 });
