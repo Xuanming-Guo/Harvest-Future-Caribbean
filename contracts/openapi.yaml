@@ -1418,10 +1418,18 @@ components:
           items: {type: string, format: uuid}
         traceId: {type: string, format: uuid}
         allocation: {$ref: '#/components/schemas/AllocationSummary'}
+        outcomeCause: {$ref: '#/components/schemas/OrderOutcomeCause'}
+        outcomeNote: {type: string, maxLength: 300}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
     OrderStatus:
       enum: [REQUESTED, ALLOCATION_PROPOSED, AWAITING_APPROVAL, COMMITTED, IN_DELIVERY, FULFILLED, PARTIALLY_FULFILLED, REJECTED, CANCELLED]
+    OrderOutcomeCause:
+      description: >-
+        The latest recorded reason an order is not (yet) fulfilled. Written at
+        each matching, approval, and delivery decision so an unfulfilled order
+        always carries one explainable cause; absent on fulfilled orders.
+      enum: [NO_READY_SUPPLY, INSUFFICIENT_SUPPLY, SUPPLY_CHANGED, APPROVAL_REJECTED, APPROVAL_TIMEOUT, MISSION_LATE, DELIVERY_REJECTED, CANCELLED]
     OrderPage:
       type: object
       additionalProperties: false

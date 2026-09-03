@@ -1,6 +1,6 @@
 import type { Approval } from "@prisma/client";
 
-import { approveAllocation, produceFixturePrediction, proposeAllocation, rejectApproval } from "../workflows.js";
+import { approveAllocation, produceFixturePrediction, proposeAllocation, rejectApproval, rematchWaitingOrders } from "../workflows.js";
 import type { CropObservationPromptInput, RecoveryExplanationPromptInput } from "./prompts.js";
 import { createAgentTextAdapter } from "./text-adapter.js";
 
@@ -12,6 +12,7 @@ export function createAgentCoordinator() {
     draftCropObservation: (input: CropObservationPromptInput) => textAdapter.extractCropObservation(input),
     refreshCropIntelligence: produceFixturePrediction,
     matchOrder: proposeAllocation,
+    rematchWaitingOrders,
     decideApproval: (approvalId: string, actorId: string, decision: "APPROVE" | "REJECT", reason?: string): Promise<Approval> =>
       decision === "APPROVE"
         ? approveAllocation(approvalId, actorId, reason)

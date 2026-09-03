@@ -14,6 +14,7 @@ import { prisma } from "./db.js";
 import { recordEvent } from "./events.js";
 import { assertObjectBody, httpError, idempotent, readLocation, readQuantity, sendProblem } from "./http.js";
 import { registerSimulationRoutes } from "./simulation-routes.js";
+import { batchStatusForStage, isReadyStatus } from "./workflows.js";
 import {
   approvalDto,
   cropBatchDto,
@@ -338,7 +339,15 @@ export async function buildServer() {
       }
       await tx.traceStep.create({ data: { traceId, recordedAt, kind: "INPUT", agentName: "Intake Agent", toolName: "confirm-human-observation", provenance, summary: `Human confirmed ${asString(body.cropStage, "cropStage")} observation${estimatedQuantity !== null ? ` with ${estimatedQuantity} kg estimate` : ""}.`, simulationRunId: actor.simulationRunId } });
       await tx.cropObservation.create({ data: { id: observationId, cropBatchId, actorId: actor.id, observedAt, recordedAt, cropStage: asString(body.cropStage, "cropStage"), notes: typeof body.notes === "string" ? body.notes : null, estimatedQuantity, provenance, traceId, simulationRunId: actor.simulationRunId } });
-      await tx.cropBatch.update({ where: { id: cropBatchId }, data: { latestObservationId: observationId, provenance } });
+      // The reported stage drives the batch status, which gates ATP and
+      // listings. Leaving readiness withdraws any remaining active offer so a
+      // buyer cannot be matched to produce that is no longer there.
+      const previous = await tx.cropBatch.findUniqueOrThrow({ where: { id: cropBatchId }, select: { status: true } });
+      const nextStatus = batchStatusForStage(asString(body.cropStage, "cropStage"));
+      await tx.cropBatch.update({ where: { id: cropBatchId }, data: { latestObservationId: observationId, provenance, status: nextStatus } });
+      if (isReadyStatus(previous.status) && !isReadyStatus(nextStatus)) {
+        await tx.listing.updateMany({ where: { cropBatchId, status: "ACTIVE", simulationRunId: actor.simulationRunId }, data: { status: "WITHDRAWN" } });
+      }
       const intakeEvent = intake ? await tx.domainEvent.findFirst({ where: { eventType: "CROP_OBSERVATION_INTAKE_DRAFTED", entityId: intake.id }, orderBy: { occurredAt: "desc" } }) : null;
       const createdEvent = await recordEvent(tx, { eventType: "CROP_OBSERVATION_SUBMITTED", actorId: actor.id, entityId: cropBatchId, traceId, correlationId: intakeEvent?.correlationId, causationId: intakeEvent?.id, provenance, simulationRunId: actor.simulationRunId, payload: { observationId, cropBatchId, observedAt: observedAt.toISOString(), cropStage: body.cropStage as string, ...(intake ? { intakeId: intake.id } : {}) } });
       const batch = await tx.cropBatch.findUniqueOrThrow({ where: { id: cropBatchId } });
@@ -479,6 +488,7 @@ export async function buildServer() {
     if (!(await canAccessBatch(actor, cropBatchId))) throw httpError(404, "CROP_BATCH_NOT_FOUND", "Crop batch was not found.");
     const batch = await prisma.cropBatch.findUniqueOrThrow({ where: { id: cropBatchId } });
     const amount = readQuantity(body.quantity);
+    if (!isReadyStatus(batch.status)) throw httpError(422, "CROP_NOT_READY", "Only a crop reported harvest ready can be listed.");
     if (amount > batch.availableToPromise) throw httpError(422, "ATP_EXCEEDED", "Listing quantity exceeds available-to-promise supply.");
     const money = body.unitPrice as JsonObject;
     if (!money || typeof money.amount !== "number" || typeof money.currency !== "string") throw httpError(400, "VALIDATION_FAILED", "unitPrice requires amount and currency.");
@@ -493,6 +503,9 @@ export async function buildServer() {
       await recordEvent(tx, { eventType: "LISTING_PUBLISHED", actorId: actor.id, entityId: listingId, traceId, provenance: batch.provenance, simulationRunId: actor.simulationRunId, payload: { listingId, cropBatchId, quantity: quantity(amount), availableFrom: listing.availableFrom.toISOString().slice(0, 10) } });
       return listing;
     });
+    // New supply is the moment a waiting order can move; nothing else
+    // re-runs matching, so do it here rather than hoping a buyer reorders.
+    await agentCoordinator.rematchWaitingOrders(batch.cropType, actor.id, actor.simulationRunId);
     return listingDto(row);
   }));
 
@@ -907,7 +920,17 @@ export async function buildServer() {
     const priorEvent = await prisma.domainEvent.findFirst({ where: { traceId: trace?.id, entityId: { in: [order.id, mission.id] } }, orderBy: { occurredAt: "desc" } });
     const acceptance = await prisma.$transaction(async (tx) => {
       const created = await tx.deliveryAcceptance.create({ data: { id: acceptanceId, orderId: order.id, outcome, acceptedQuantity: accepted, rejectedQuantity: rejected, lineOutcomes: serializedLineOutcomes, note: typeof body.note === "string" ? body.note : null, acceptedBy: actor.id, acceptedAt, simulationRunId: actor.simulationRunId } });
-      await tx.order.update({ where: { id: order.id }, data: { lifecycleStatus, acceptedQuantity: accepted, atRisk: false, activeExceptionIds: [] } });
+      await tx.order.update({
+        where: { id: order.id },
+        data: {
+          lifecycleStatus,
+          acceptedQuantity: accepted,
+          atRisk: false,
+          activeExceptionIds: [],
+          outcomeCause: lifecycleStatus === "FULFILLED" ? null : "DELIVERY_REJECTED",
+          outcomeNote: lifecycleStatus === "FULFILLED" ? null : `${rejected} kg of ${mission.quantity} kg rejected at delivery${typeof body.note === "string" && body.note ? `: ${body.note}` : "."}`,
+        },
+      });
       await tx.reservation.updateMany({ where: { allocationId: { in: (await tx.allocation.findMany({ where: { orderId: order.id }, select: { id: true } })).map((row) => row.id) } }, data: { status: "RELEASED" } });
       for (const line of lineOutcomes) {
         const batch = await tx.cropBatch.findUnique({ where: { id: line.cropBatchId } });
