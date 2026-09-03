@@ -223,6 +223,8 @@ model VerificationTask {
   resolvedBy  String?  @map("resolved_by") @db.Uuid
   resolvedAt  DateTime? @map("resolved_at") @db.Timestamptz(3)
   note        String?
+  reasonCode  String?  @map("reason_code")
+  nextAction  String?  @map("next_action")
   simulationRunId String? @map("simulation_run_id") @db.Uuid
 
   @@index([farmId, status])
@@ -356,6 +358,8 @@ model Approval {
   decidedBy   String?   @map("decided_by") @db.Uuid
   decidedAt   DateTime? @map("decided_at") @db.Timestamptz(3)
   reason      String?
+  reasonCode  String?   @map("reason_code")
+  nextAction  String?   @map("next_action")
   simulationRunId String? @map("simulation_run_id") @db.Uuid
 
   @@map("approvals")
@@ -418,6 +422,8 @@ model DeliveryAcceptance {
   acceptedQuantity Float    @map("accepted_quantity")
   rejectedQuantity Float    @map("rejected_quantity")
   note             String?
+  reasonCode       String?  @map("reason_code")
+  nextAction       String?  @map("next_action")
   acceptedBy       String   @map("accepted_by") @db.Uuid
   acceptedAt       DateTime @map("accepted_at") @db.Timestamptz(3)
   lineOutcomes     Json     @map("line_outcomes")

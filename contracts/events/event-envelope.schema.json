@@ -258,7 +258,9 @@
         "cropBatchId": { "$ref": "../common.schema.json#/$defs/Uuid" },
         "observationId": { "$ref": "../common.schema.json#/$defs/Uuid" },
         "status": { "enum": ["OPEN", "VERIFIED", "CHANGES_REQUESTED"] },
-        "note": { "type": "string", "maxLength": 1000 }
+        "note": { "type": "string", "maxLength": 1000 },
+        "reasonCode": { "enum": ["QUANTITY_MISMATCH", "MATURITY_OR_QUALITY", "DAMAGE", "CLEANLINESS", "SIZE_OR_GRADE", "MISSING_INFORMATION", "OTHER"] },
+        "nextAction": { "type": "string", "minLength": 1, "maxLength": 300 }
       }
     },
     "ForecastProducedPayload": {
@@ -352,7 +354,9 @@
         "approvalId": { "$ref": "../common.schema.json#/$defs/Uuid" },
         "subjectType": { "enum": ["ALLOCATION", "RECOVERY"] },
         "subjectId": { "$ref": "../common.schema.json#/$defs/Uuid" },
-        "decision": { "enum": ["APPROVE", "REJECT"] }
+        "decision": { "enum": ["APPROVE", "REJECT"] },
+        "reasonCode": { "enum": ["QUANTITY_MISMATCH", "MATURITY_OR_QUALITY", "DAMAGE", "CLEANLINESS", "SIZE_OR_GRADE", "MISSING_INFORMATION", "OTHER"] },
+        "nextAction": { "type": "string", "minLength": 1, "maxLength": 300 }
       }
     },
     "AllocationInvalidatedPayload": {
@@ -449,6 +453,8 @@
         "acceptedQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
         "rejectedQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
         "outcome": { "enum": ["ACCEPTED", "PARTIALLY_ACCEPTED", "REJECTED"] },
+        "reasonCode": { "enum": ["QUANTITY_MISMATCH", "MATURITY_OR_QUALITY", "DAMAGE", "CLEANLINESS", "SIZE_OR_GRADE", "MISSING_INFORMATION", "OTHER"] },
+        "nextAction": { "type": "string", "minLength": 1, "maxLength": 300 },
         "lineOutcomes": {
           "type": "array",
           "minItems": 1,
@@ -459,7 +465,9 @@
             "properties": {
               "cropBatchId": { "$ref": "../common.schema.json#/$defs/Uuid" },
               "acceptedQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
-              "rejectedQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" }
+              "rejectedQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
+              "reasonCode": { "enum": ["QUANTITY_MISMATCH", "MATURITY_OR_QUALITY", "DAMAGE", "CLEANLINESS", "SIZE_OR_GRADE", "MISSING_INFORMATION", "OTHER"] },
+              "nextAction": { "type": "string", "minLength": 1, "maxLength": 300 }
             }
           }
         }
@@ -827,7 +835,7 @@
       "causationId": "e0000000-0000-4000-8000-000000000010",
       "schemaVersion": "1.0",
       "provenance": "SYNTHETIC",
-      "payload": {"deliveryId": "20000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "acceptedQuantity": {"value": 120, "unit": "kg"}, "rejectedQuantity": {"value": 0, "unit": "kg"}, "lineOutcomes": [{"cropBatchId": "10000000-0000-4000-8000-000000000001", "acceptedQuantity": {"value": 120, "unit": "kg"}, "rejectedQuantity": {"value": 0, "unit": "kg"}}], "outcome": "ACCEPTED"}
+      "payload": {"deliveryId": "20000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "acceptedQuantity": {"value": 118, "unit": "kg"}, "rejectedQuantity": {"value": 2, "unit": "kg"}, "lineOutcomes": [{"cropBatchId": "10000000-0000-4000-8000-000000000001", "acceptedQuantity": {"value": 118, "unit": "kg"}, "rejectedQuantity": {"value": 2, "unit": "kg"}, "reasonCode": "SIZE_OR_GRADE", "nextAction": "Grade cucumbers to at least 15 cm before the next pickup."}], "outcome": "PARTIALLY_ACCEPTED", "reasonCode": "SIZE_OR_GRADE", "nextAction": "Grade cucumbers to at least 15 cm before the next pickup."}
     },
     {
       "eventId": "e0000000-0000-4000-8000-000000000014",

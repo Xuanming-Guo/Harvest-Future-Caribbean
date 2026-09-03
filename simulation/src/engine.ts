@@ -171,6 +171,40 @@ export interface InjectedDisruption {
   publicDescription: string;
 }
 
+/**
+ * Why one demand ended short.
+ *
+ * A fulfilment rate says how often the system failed; this vocabulary says
+ * where. The order is the ladder `classifyDemand` walks, from the earliest
+ * point in the chain that can fail to the latest, so a demand nothing was ever
+ * promised against is not also counted as a late delivery.
+ */
+export const UNMET_CAUSES = [
+  /** The run's horizon closed before the buyer's window did. */
+  'HORIZON_TRUNCATED',
+  /** Nothing was promised: no batch had evidence recent enough to commit against. */
+  'NO_READY_SUPPLY',
+  /** A human approval gate declined the promise. */
+  'APPROVAL_REJECTED',
+  /** Nothing reached the buyer in time: the delivery arrived late or never ran. */
+  'MISSION_LATE',
+  /** The vehicle arrived, but the field no longer held what had been promised. */
+  'SPOILED_BEFORE_PICKUP',
+  /** The load arrived and part of it was refused at the gate. */
+  'DELIVERY_REJECTED',
+  /** Everything promised was delivered and accepted; the promise was too small. */
+  'INSUFFICIENT_SUPPLY',
+] as const;
+
+export type UnmetCause = (typeof UNMET_CAUSES)[number];
+
+/** Rounding slack when comparing kilogram figures for a cause. */
+const CAUSE_TOLERANCE_KG = 0.5;
+
+function emptyCauseCounts(): Record<UnmetCause, number> {
+  return Object.fromEntries(UNMET_CAUSES.map((cause) => [cause, 0])) as Record<UnmetCause, number>;
+}
+
 /** Mirrors `BenchmarkMetrics` in contracts/openapi.yaml, plus run diagnostics. */
 export interface RunMetrics {
   /** Share of demanded kilograms met from local farms, in [0, 1]. */
@@ -195,6 +229,12 @@ export interface RunMetrics {
   missionsCancelled: number;
   /** Times the policy asked a grower to go and look. Zero for the baseline. */
   observationRequests: number;
+  /**
+   * One cause per demand that ended unmet or partially met, so the headline
+   * rate can be read against where the workflow actually broke. Sums to
+   * `demandsUnmet + demandsPartiallyMet`.
+   */
+  causeCounts: Record<UnmetCause, number>;
   eventsProcessed: number;
 }
 
@@ -255,6 +295,10 @@ export class SimulationEngine {
   private readonly pendingObservationRequests = new Map<string, SimulationInstant>();
   /** How many times planning has been retried for a demand, to bound replanning. */
   private readonly planAttempts = new Map<string, number>();
+  /** How many times newly reported supply has re-triggered planning for a demand. */
+  private readonly rematchAttempts = new Map<string, number>();
+  /** Why a demand ended short, recorded as it settles. */
+  private readonly demandCauses = new Map<string, UnmetCause>();
   private observationRequestCount = 0;
   private readonly captureFrames: boolean;
   private readonly coordinationMode: CoordinationMode;
@@ -822,6 +866,10 @@ export class SimulationEngine {
       .filter((batch) => batch.farmId === farmId)
       .sort((a, b) => a.batchId.localeCompare(b.batchId));
 
+    // Crops this report moves into READY for the first time. New promisable
+    // supply is the trigger for looking again at demand nobody could fill.
+    const newlyReadyCrops = new Set<string>();
+
     for (const batch of farmBatches) {
       const truth = this.world.truth.crops.get(batch.batchId);
       if (!truth || truth.stage === 'HARVESTED') continue;
@@ -845,14 +893,68 @@ export class SimulationEngine {
         provenance: 'SYNTHETIC' as const,
       };
 
+      const previousStage = batch.lastReportedStage;
       batch.observations.push(observation);
       batch.lastObservedAt = this.clock;
       batch.lastReportedStage = truth.stage;
+      if (previousStage !== 'READY' && truth.stage === 'READY') newlyReadyCrops.add(batch.crop);
     }
+
+    if (newlyReadyCrops.size > 0) this.rematchWaitingDemand(newlyReadyCrops);
 
     const intervalDays = 2 + (1 - farm.diligence) * 12;
     const jitter = stream.float(0.6, 1.4);
     this.schedule(this.clock + intervalDays * jitter * DAY_MS, 'FARMER_OBSERVATION', Priority.Actor, { farmId });
+  }
+
+  /** Sweep-triggered planning attempts per demand, bounded apart from replans. */
+  private static readonly MAX_REMATCH_ATTEMPTS = 3;
+
+  /**
+   * Plans again for demand still waiting, after new ready supply was reported.
+   *
+   * Planning otherwise fires once per demand, thirty minutes after the order
+   * arrives, plus a few replans while the policy is chasing observations. A
+   * batch reported ready on day nine is therefore invisible to an order placed
+   * on day eight that nobody could fill at the time, even though the two now
+   * match — the order simply waits out its deadline beside supply that exists.
+   *
+   * One bounded pass per trigger: each waiting demand for that crop, oldest
+   * deadline first, at most `MAX_REMATCH_ATTEMPTS` times over the whole run, so
+   * a steady drip of grower reports cannot spin the queue.
+   */
+  private rematchWaitingDemand(crops: ReadonlySet<string>): void {
+    // In a connected run the Product API owns matching, and the engine must not
+    // queue a second coordinator against the same orders.
+    if (this.coordinationMode !== 'INTERNAL_POLICY') return;
+    if (!this.policy.capabilities.rematchOnNewSupply) return;
+
+    const waiting = [...this.world.observed.demands.values()]
+      .filter((demand) => demand.status === 'PENDING')
+      .filter((demand) => crops.has(demand.crop))
+      .filter((demand) => demand.neededBy > this.clock)
+      .filter((demand) => (this.rematchAttempts.get(demand.demandId) ?? 0) < SimulationEngine.MAX_REMATCH_ATTEMPTS)
+      // Oldest deadline first, then id: the queue order must not depend on Map
+      // iteration remaining incidental.
+      .sort((a, b) => a.neededBy - b.neededBy || a.demandId.localeCompare(b.demandId));
+
+    if (waiting.length === 0) return;
+
+    for (const demand of waiting) {
+      this.rematchAttempts.set(demand.demandId, (this.rematchAttempts.get(demand.demandId) ?? 0) + 1);
+      this.schedule(this.clock + 15 * MINUTE_MS, 'PLAN_ALLOCATION', Priority.Actor, { demandId: demand.demandId });
+    }
+
+    this.decisions.push({
+      at: this.clock,
+      kind: 'REMATCH_WAITING_DEMAND',
+      summary: `New ready supply was reported, so ${waiting.length} waiting order(s) were matched again.`,
+      evidence: {
+        crops: [...crops].sort().join(','),
+        demandsReplanned: waiting.length,
+        demandIds: waiting.map((demand) => demand.demandId).join(','),
+      },
+    });
   }
 
   private onBuyerDemand(buyerId: string): void {
@@ -1081,6 +1183,30 @@ export class SimulationEngine {
     this.planMission(commitment);
   }
 
+  /**
+   * When a commitment's batches were first reported ready, or null.
+   *
+   * Null unless every allocated batch carries a READY report: a mission cannot
+   * be brought forward on the strength of one pickup being ready while another
+   * is not. The answer is the latest of those first reports, because that is
+   * when the whole load became collectable.
+   *
+   * Deliberately built from `observations`, which is observed state. Reading
+   * `HiddenCropTruth.readyAt` here would schedule against a readiness nobody has
+   * seen, which is the foresight the benchmark exists to rule out.
+   */
+  private reportedReadyAt(commitment: Commitment): SimulationInstant | null {
+    let latest: SimulationInstant | null = null;
+    for (const allocation of commitment.allocations) {
+      const batch = this.world.observed.batches.get(allocation.batchId);
+      if (!batch || batch.lastReportedStage !== 'READY') return null;
+      const firstReady = batch.observations.find((observation) => observation.reportedStage === 'READY');
+      if (!firstReady) return null;
+      latest = latest === null ? firstReady.observedAt : Math.max(latest, firstReady.observedAt);
+    }
+    return latest;
+  }
+
   private planMission(commitment: Commitment): void {
     const demand = this.world.observed.demands.get(commitment.demandId);
     if (!demand) return;
@@ -1117,7 +1243,26 @@ export class SimulationEngine {
 
     // Depart in time to arrive before the deadline, but not before now.
     const desiredArrival = demand.neededBy - HOUR_MS;
-    const departAt = Math.max(this.clock + HOUR_MS, desiredArrival - travelMs - handlingMs);
+    const deadlineDeparture = Math.max(this.clock + HOUR_MS, desiredArrival - travelMs - handlingMs);
+
+    // Just-in-time pickup is the wrong default for a crop losing six to
+    // fourteen percent of itself a day. Once every allocated batch has been
+    // *reported* ready, waiting for the deadline leaves produce spoiling in the
+    // field that the buyer is already promised, so a policy that coordinates
+    // collection sends the vehicle as soon as one can be there.
+    //
+    // Readiness only ever brings a departure forward: the deadline stays the
+    // upper bound, and the readiness figure is the grower's report rather than
+    // the hidden `readyAt`, so this buys no foresight.
+    const { collectOnReadiness, maxHoldMs } = this.policy.capabilities;
+    const reportedReadyAt = collectOnReadiness ? this.reportedReadyAt(commitment) : null;
+
+    let departAt = deadlineDeparture;
+    if (reportedReadyAt !== null && deadlineDeparture - reportedReadyAt > maxHoldMs) {
+      const promptDeparture = Math.max(this.clock + HOUR_MS, reportedReadyAt + handlingMs);
+      departAt = Math.min(deadlineDeparture, promptDeparture);
+    }
+
     const arriveAt = departAt + travelMs + handlingMs;
 
     const mission: DeliveryMission = {
@@ -1446,6 +1591,8 @@ export class SimulationEngine {
       demand.substitutedKg += shortfall;
       if (demand.status === 'PENDING' || demand.status === 'COMMITTED') demand.status = 'UNMET';
     }
+
+    this.demandCauses.set(demandId, this.classifyDemand(demand));
   }
 
   private settleOutstandingDemand(): void {
@@ -1458,7 +1605,52 @@ export class SimulationEngine {
       const shortfall = Math.max(0, demand.quantity.value - demand.acceptedKg);
       demand.substitutedKg += shortfall;
       if (settled !== 'PARTIALLY_FULFILLED') demand.status = 'UNMET';
+
+      this.demandCauses.set(demand.demandId, this.classifyDemand(demand));
     }
+  }
+
+  /**
+   * Why one demand ended short, as a single cause.
+   *
+   * A ladder rather than a set of tallies: a demand nothing was ever promised
+   * against would otherwise also register as a late delivery and a short load,
+   * and the histogram would count the same failure three times. The first rung
+   * that matches is the one that broke, so the counts sum to the number of
+   * demands that missed.
+   *
+   * This reads physical and observed state, which the engine may do; it never
+   * reaches a policy, and it changes nothing about the run.
+   */
+  private classifyDemand(demand: BuyerDemand): UnmetCause {
+    // The scenario horizon closed before the buyer's window did, so this order
+    // was never given a chance rather than being coordinated badly. Classified
+    // only: clamping demand generation to the horizon is a separate question
+    // and would change what the benchmark measures.
+    if (demand.neededBy + SUBSTITUTION_GRACE_MS > this.endsAt) return 'HORIZON_TRUNCATED';
+
+    const commitments = [...this.world.observed.commitments.values()].filter(
+      (candidate) => candidate.demandId === demand.demandId,
+    );
+    const commitment = commitments.find((candidate) => candidate.status !== 'CANCELLED') ?? commitments.at(-1);
+    if (!commitment) return 'NO_READY_SUPPLY';
+    if (commitment.status === 'CANCELLED' && commitment.approvedAt === null) return 'APPROVAL_REJECTED';
+
+    const delivered = [...this.world.observed.missions.values()].find(
+      (mission) => mission.commitmentId === commitment.commitmentId && mission.status === 'COMPLETED',
+    );
+    // Nothing reached the buyer in time: the run ended with the vehicle still
+    // out, the mission was cancelled, or it arrived after the window closed.
+    if (!delivered) return 'MISSION_LATE';
+    if (delivered.actualArrivalAt !== null && delivered.actualArrivalAt > demand.neededBy) return 'MISSION_LATE';
+
+    const committedKg = commitment.allocations.reduce((total, allocation) => total + allocation.quantityKg, 0);
+    if (delivered.loadedKg + CAUSE_TOLERANCE_KG < committedKg) return 'SPOILED_BEFORE_PICKUP';
+    if (demand.acceptedKg + CAUSE_TOLERANCE_KG < delivered.loadedKg) return 'DELIVERY_REJECTED';
+
+    // Promised, collected, delivered and accepted in full: the promise itself
+    // was smaller than the order.
+    return 'INSUFFICIENT_SUPPLY';
   }
 
   // ------------------------------------------------------------------
@@ -1636,6 +1828,15 @@ export class SimulationEngine {
     const demandsPartiallyMet = demands.filter((demand) => demand.status === 'PARTIALLY_FULFILLED').length;
     const demandsUnmet = demands.filter((demand) => demand.status === 'UNMET').length;
 
+    // One cause per demand that ended short, taken from what was recorded as it
+    // settled. A demand that a late arrival pushed over the line after its
+    // deadline keeps no cause, so the histogram always sums to the misses.
+    const causeCounts = emptyCauseCounts();
+    for (const demand of demands) {
+      if (demand.status !== 'UNMET' && demand.status !== 'PARTIALLY_FULFILLED') continue;
+      causeCounts[this.demandCauses.get(demand.demandId) ?? this.classifyDemand(demand)] += 1;
+    }
+
     const metrics: RunMetrics = {
       localProcurementRate: totalDemandedKg > 0 ? clampUnit(totalAcceptedKg / totalDemandedKg) : 0,
       fulfilmentRate: demands.length > 0 ? clampUnit(demandsFullyMet / demands.length) : 0,
@@ -1653,6 +1854,7 @@ export class SimulationEngine {
       missionsCompleted: this.missionsCompleted,
       missionsCancelled: this.missionsCancelled,
       observationRequests: this.observationRequestCount,
+      causeCounts,
       eventsProcessed: this.eventsProcessed,
     };
 

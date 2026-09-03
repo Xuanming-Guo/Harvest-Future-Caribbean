@@ -5,6 +5,7 @@ import { Check, Leaf, Plus, ShoppingCart } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
+import { OfflineHint, useOnlineStatus } from "@/components/offline";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, PageHeader, SectionTitle } from "@/components/ui";
 import { useSession } from "@/components/providers";
 import { api } from "@/lib/api";
@@ -16,6 +17,7 @@ const ACCEPTANCE_OPTIONS = [0.8, 0.9, 1] as const;
 export default function MarketplacePage() {
   const router = useRouter();
   const { actor } = useSession();
+  const online = useOnlineStatus();
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<string[]>([]);
   const [cropType, setCropType] = useState("CUCUMBER");
@@ -95,7 +97,7 @@ export default function MarketplacePage() {
         </div>
         <Card className="sticky-card" data-tour="marketplace-requirement">
           <SectionTitle title="Your requirement" detail={`${actor?.name ?? "Buyer"} · ${actor?.serviceZone ?? "Delivery zone not set"}`} />
-          <form className="form-grid" onSubmit={(event: FormEvent) => { event.preventDefault(); order.mutate(); }}>
+          <form className="form-grid" onSubmit={(event: FormEvent) => { event.preventDefault(); if (online) order.mutate(); }}>
             <div className="field"><label>Crop</label><input value={cropType} onChange={(event) => setCropType(event.target.value.toUpperCase())} /></div>
             <div className="field"><label>Quantity (kg)</label><input type="number" min="0.1" step="0.1" value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} /></div>
             <div className="field field-full"><label>Needed by</label><input type="datetime-local" value={neededBy} onChange={(event) => setNeededBy(event.target.value)} /></div>
@@ -120,8 +122,9 @@ export default function MarketplacePage() {
               <small className="field-hint">Hotels often take part of an order and source the rest elsewhere.</small>
             </div>
             <div className="field-full order-summary"><span>Requested <strong>{quantity} kg</strong></span><span>Selected <strong>{selectedSupply} kg</strong></span></div>
-            <button type="button" className="button button-secondary" disabled={demand.isPending} onClick={() => demand.mutate()}><Plus size={16} />{demand.isPending ? "Saving..." : "Save as demand"}</button>
-            <button className="button" disabled={order.isPending || !selected.length || !actor?.deliveryLocation}><ShoppingCart size={16} />{order.isPending ? "Placing order..." : "Place order"}</button>
+            {!online && <div className="field-full"><OfflineHint>An order reserves supply from other farms, so it is never queued. Reconnect to send it.</OfflineHint></div>}
+            <button type="button" className="button button-secondary" disabled={demand.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) demand.mutate(); }}><Plus size={16} />{demand.isPending ? "Saving..." : "Save as demand"}</button>
+            <button className="button" aria-disabled={!online || undefined} disabled={order.isPending || !selected.length || !actor?.deliveryLocation}><ShoppingCart size={16} />{order.isPending ? "Placing order..." : "Place order"}</button>
           </form>
           {(message || demand.error || order.error) && <p className={(demand.error || order.error) ? "form-error" : "form-success"}>{message ?? demand.error?.message ?? order.error?.message}</p>}
         </Card>

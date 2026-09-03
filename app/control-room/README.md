@@ -107,13 +107,17 @@ CesiumJS renders a real terrain globe. Moving between regions flies out to
 globe scale, rotates the earth, and descends into the destination, which is
 what `flyToRegion` in `src/components/globe/camera.ts` sequences.
 
-**No Cesium ion token is required.** The default imagery is Esri's World
-Imagery — real satellite photography, no account and no credential. Imagery
-falls back in order: ion (only if `NEXT_PUBLIC_CESIUM_ION_TOKEN` is set) →
-Esri satellite → OpenStreetMap. Each step is guarded, because a demo that
-shows a blank blue sphere when a third-party tile service is having a bad
-morning is worse than one that quietly falls back to a map. The token is
-strictly an upgrade, never a dependency.
+**No Cesium ion token is required.** The default imagery is OpenStreetMap's
+standard tile layer — ODbL data, no account and no credential, matching the
+licence posture of the reference places. Imagery falls back in order: ion
+(only if `NEXT_PUBLIC_CESIUM_ION_TOKEN` is set) → OpenStreetMap → Esri World
+Imagery. Each step is guarded, because a demo that shows a blank blue sphere
+when a third-party tile service is having a bad morning is worse than one that
+quietly falls back. The token is strictly an upgrade, never a dependency.
+
+OpenStreetMap's public tile server permits light demo traffic only. A hosted
+deployment should point `OSM_TILE_URL` in `CesiumGlobe.tsx` at a dedicated
+tile provider before opening the control room to more than a demo audience.
 
 Sun lighting, ground and sky atmosphere, and distance fog are enabled: they are
 what separate a textured sphere from something that reads as photographed from
@@ -199,7 +203,7 @@ a long debugging detour once already.
 
 ## Evidence status
 
-Everything operational on screen is **synthetic**. Satellite imagery and the
+Everything operational on screen is **synthetic**. Map tiles and the
 named OpenStreetMap reference places are public geographic context, but every
 farm, buyer, order, yield and delivery is invented. Selecting a reference shows
 its source, licence, retrieval metadata and the explicit statement that it is

@@ -350,6 +350,10 @@ paths:
         - name: atRisk
           in: query
           schema: {type: boolean}
+        - name: cropBatchId
+          in: query
+          description: Return only orders whose latest allocation commits this crop batch.
+          schema: {type: string, format: uuid}
       responses:
         '200':
           description: Orders visible to the caller.
@@ -462,7 +466,10 @@ paths:
               reason: Quantity and collection window confirmed.
       responses:
         '200':
-          description: Decision recorded; approved allocation/recovery emits its corresponding event.
+          description: >-
+            Decision recorded; approved allocation/recovery emits its
+            corresponding event. `REJECT` without `reasonCode` and `nextAction`
+            fails with `422 DECISION_REASON_REQUIRED`.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Approval'}
@@ -657,7 +664,10 @@ paths:
             schema: {$ref: '#/components/schemas/VerificationDecision'}
       responses:
         '200':
-          description: Final verification decision recorded.
+          description: >-
+            Final verification decision recorded. `REQUEST_CHANGES` without
+            `reasonCode` and `nextAction` fails with
+            `422 DECISION_REASON_REQUIRED`.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/VerificationTask'}
@@ -754,7 +764,10 @@ paths:
               note: Produce received in good condition.
       responses:
         '201':
-          description: Outcome stored; delivery/order outcome events emitted atomically.
+          description: >-
+            Outcome stored; delivery/order outcome events emitted atomically.
+            Any rejected quantity without `reasonCode` and `nextAction` fails
+            with `422 DECISION_REASON_REQUIRED`.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/DeliveryAcceptance'}
@@ -1238,6 +1251,22 @@ components:
         availableToPromise: {$ref: './common.schema.json#/$defs/Quantity'}
         provenance: {$ref: './common.schema.json#/$defs/Provenance'}
         verificationStatus: {$ref: '#/components/schemas/VerificationStatus'}
+        latestDecision: {$ref: '#/components/schemas/BatchDecisionExplanation'}
+    BatchDecisionExplanation:
+      description: >-
+        Latest actionable rejection affecting this batch: a coordinator
+        REQUEST_CHANGES decision or a rejected delivery line. Present only when
+        such a decision exists. Traceability evidence, not food-safety
+        certification.
+      type: object
+      additionalProperties: false
+      required: [source, decidedAt]
+      properties:
+        source: {enum: [VERIFICATION, DELIVERY]}
+        reasonCode: {$ref: '#/components/schemas/DecisionReasonCode'}
+        nextAction: {$ref: '#/components/schemas/DecisionNextAction'}
+        note: {type: string, maxLength: 1000}
+        decidedAt: {type: string, format: date-time}
     CropBatchPage:
       type: object
       additionalProperties: false
@@ -1486,12 +1515,17 @@ components:
             deliveryMission: {$ref: '#/components/schemas/DeliveryMission'}
             deliveryAcceptance: {$ref: '#/components/schemas/DeliveryAcceptance'}
     ApprovalDecision:
+      description: >-
+        REJECT must carry reasonCode and nextAction so the affected participant
+        receives an actionable explanation.
       type: object
       additionalProperties: false
       required: [decision]
       properties:
         decision: {enum: [APPROVE, REJECT]}
         reason: {type: string, maxLength: 1000}
+        reasonCode: {$ref: '#/components/schemas/DecisionReasonCode'}
+        nextAction: {$ref: '#/components/schemas/DecisionNextAction'}
     Approval:
       type: object
       additionalProperties: false
@@ -1506,6 +1540,8 @@ components:
         decidedBy: {type: string, format: uuid}
         decidedAt: {type: string, format: date-time}
         reason: {type: string, maxLength: 1000}
+        reasonCode: {$ref: '#/components/schemas/DecisionReasonCode'}
+        nextAction: {$ref: '#/components/schemas/DecisionNextAction'}
         context: {$ref: '#/components/schemas/ApprovalContext'}
     ApprovalContext:
       type: object
@@ -1652,6 +1688,17 @@ components:
         pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
     VerificationStatus:
       enum: [OPEN, VERIFIED, CHANGES_REQUESTED, UNVERIFIED]
+    DecisionReasonCode:
+      description: >-
+        Structured reason a participant rejected produce, requested changes, or
+        declined an approval. It records an operational quality judgement for
+        traceability; it is not a food-safety certification.
+      enum: [QUANTITY_MISMATCH, MATURITY_OR_QUALITY, DAMAGE, CLEANLINESS, SIZE_OR_GRADE, MISSING_INFORMATION, OTHER]
+    DecisionNextAction:
+      description: Plain-language action the affected farmer should take next.
+      type: string
+      minLength: 1
+      maxLength: 300
     VerificationTask:
       type: object
       additionalProperties: false
@@ -1669,6 +1716,8 @@ components:
         resolvedBy: {type: string, format: uuid}
         resolvedAt: {type: string, format: date-time}
         note: {type: string, maxLength: 1000}
+        reasonCode: {$ref: '#/components/schemas/DecisionReasonCode'}
+        nextAction: {$ref: '#/components/schemas/DecisionNextAction'}
     VerificationTaskPage:
       type: object
       additionalProperties: false
@@ -1677,12 +1726,17 @@ components:
         items: {type: array, items: {$ref: '#/components/schemas/VerificationTask'}}
         pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
     VerificationDecision:
+      description: >-
+        REQUEST_CHANGES must carry reasonCode and nextAction so the farmer is
+        told what was wrong and what to do next.
       type: object
       additionalProperties: false
       required: [decision]
       properties:
         decision: {enum: [VERIFY, REQUEST_CHANGES]}
         note: {type: string, maxLength: 1000}
+        reasonCode: {$ref: '#/components/schemas/DecisionReasonCode'}
+        nextAction: {$ref: '#/components/schemas/DecisionNextAction'}
     ExceptionCreate:
       type: object
       additionalProperties: false
@@ -1732,6 +1786,9 @@ components:
         items: {type: array, items: {$ref: '#/components/schemas/OperationalException'}}
         pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
     DeliveryAcceptanceCreate:
+      description: >-
+        Any rejected quantity must carry reasonCode and nextAction, either on
+        the acceptance itself or on every rejected line.
       type: object
       additionalProperties: false
       required: [outcome, acceptedQuantity, rejectedQuantity, lineOutcomes]
@@ -1740,6 +1797,8 @@ components:
         acceptedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
         rejectedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
         note: {type: string, maxLength: 1000}
+        reasonCode: {$ref: '#/components/schemas/DecisionReasonCode'}
+        nextAction: {$ref: '#/components/schemas/DecisionNextAction'}
         lineOutcomes:
           type: array
           minItems: 1
@@ -1755,6 +1814,8 @@ components:
         acceptedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
         rejectedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
         note: {type: string, maxLength: 1000}
+        reasonCode: {$ref: '#/components/schemas/DecisionReasonCode'}
+        nextAction: {$ref: '#/components/schemas/DecisionNextAction'}
         acceptedBy: {type: string, format: uuid}
         acceptedAt: {type: string, format: date-time}
         lineOutcomes:
@@ -1769,6 +1830,8 @@ components:
         cropBatchId: {type: string, format: uuid}
         acceptedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
         rejectedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        reasonCode: {$ref: '#/components/schemas/DecisionReasonCode'}
+        nextAction: {$ref: '#/components/schemas/DecisionNextAction'}
     OperationsSnapshot:
       type: object
       additionalProperties: false

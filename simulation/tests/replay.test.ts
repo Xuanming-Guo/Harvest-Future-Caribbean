@@ -227,16 +227,23 @@ describe('injected disruptions', () => {
   it('damages only remaining crops at the affected farms', () => {
     const base = runScenario({ scenarioId: SCENARIO, policy: 'HARVEST', seed: 500 });
     const probe = new SimulationEngine({ scenarioId: SCENARIO, policy: 'HARVEST', seed: 500 });
+    const description = 'All test farms report crop damage.';
     const damaged = execute({
       type: 'CROP',
       offsetMs: 0,
       durationMs: DAY_MS,
       affectedEntityIds: probe.controlRoomScene.farms.map((farm) => farm.farmId),
-      publicDescription: 'All test farms report crop damage.',
+      publicDescription: description,
     });
+    const cropDisruptionId = disruptionId(damaged.result, description);
 
     expect(damaged.result.metrics.wasteQuantity.value).toBeGreaterThan(base.metrics.wasteQuantity.value);
-    expect(damaged.engine.observedDisruptionMissionImpacts).toEqual([]);
+    // A crop incident destroys produce; it moves no vehicle. Asserted against
+    // this disruption rather than against an empty list, because the scenario's
+    // own road and vehicle disruptions legitimately impact missions in the same
+    // run.
+    expect(damaged.engine.observedDisruptionMissionImpacts.some((impact) =>
+      impact.disruptionId === cropDisruptionId)).toBe(false);
   });
 
   it('ignores an injection scheduled past the horizon', () => {
