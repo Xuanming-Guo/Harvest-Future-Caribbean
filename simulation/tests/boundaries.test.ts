@@ -152,15 +152,18 @@ describe('evidence labelling', () => {
 describe('policy behaviour', () => {
   // NOTE ON WHAT IS DELIBERATELY *NOT* ASSERTED HERE.
   //
-  // There is no test claiming the Harvest policy beats the baseline, because
-  // on the current scenario it does not, and a test tuned until it did would
-  // be manufacturing the result the project exists to measure honestly.
+  // There is no test claiming the Harvest policy beats the baseline, even
+  // though on the current scenario and the recorded seeds it now does. Pinning
+  // that to an assertion would turn a measurement into a requirement, and the
+  // next honest change to the scenario would then read as a broken test rather
+  // than as a result.
   //
   // Establishing a counterfactual advantage is issue #11's job: repeated
   // paired seeds, reported distributions, and stated limitations. Issue #4
   // owns the machinery that makes such a comparison possible — identical
   // worlds, isolated policy hooks, reproducible seeds — and that is what these
-  // tests cover. See simulation/README.md for the two causes identified so far.
+  // tests cover. simulation/benchmarks/ records the comparison itself, and
+  // simulation/README.md states where it still falls short.
 
   it('gives the Harvest policy a solicitation lever the baseline does not use', () => {
     // The mechanism, not the outcome: Harvest asks growers to check when its
