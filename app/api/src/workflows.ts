@@ -6,10 +6,29 @@ import { operationNow } from "./clock.js";
 import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { recordEvent } from "./events.js";
-import { httpError } from "./http.js";
+import { httpError, type DecisionReason } from "./http.js";
 import { commitmentValue } from "./payments.js";
 
 const kilograms = (value: number) => ({ value, unit: "kg" });
+
+/** Nullable reason columns written alongside a recorded human decision. */
+const decisionReasonColumns = (decisionReason?: DecisionReason) => ({
+  reasonCode: decisionReason?.reasonCode ?? null,
+  nextAction: decisionReason?.nextAction ?? null,
+});
+
+/** Additive reason fields carried on an `APPROVAL_DECIDED` payload. */
+const decisionReasonPayload = (decisionReason?: DecisionReason) => ({
+  ...(decisionReason?.reasonCode ? { reasonCode: decisionReason.reasonCode } : {}),
+  ...(decisionReason?.nextAction ? { nextAction: decisionReason.nextAction } : {}),
+});
+
+/** Plain-language order note explaining a declined commitment. */
+function declineNote(reason: string | undefined, decisionReason?: DecisionReason) {
+  const parts = [reason ?? "A participant declined the proposed commitment."];
+  if (decisionReason?.nextAction) parts.push(`Next: ${decisionReason.nextAction}`);
+  return parts.join(" ");
+}
 
 /** Crop-batch statuses whose produce may be promised and listed. */
 export const READY_BATCH_STATUSES = new Set(["HARVEST_READY", "HARVESTED"]);
@@ -562,6 +581,7 @@ export async function approveAllocation(
   approvalId: string,
   actorId: string,
   reason?: string,
+  decisionReason?: DecisionReason,
 ) {
   return serializableTransaction(
     async (tx) => {
@@ -570,7 +590,7 @@ export async function approveAllocation(
       if (approval.status !== "PENDING") throw httpError(409, "APPROVAL_ALREADY_DECIDED", "This approval already has a final decision.");
       if (approval.requestedFromActorId !== actorId) throw httpError(403, "APPROVAL_FORBIDDEN", "This decision belongs to another participant.");
       if (approval.subjectType !== "ALLOCATION") {
-        return approveRecovery(tx, approval, actorId, reason);
+        return approveRecovery(tx, approval, actorId, reason, decisionReason);
       }
 
       const allocation = await tx.allocation.findUnique({ where: { id: approval.subjectId } });
@@ -583,7 +603,7 @@ export async function approveAllocation(
       const decidedAt = operationNow();
       const updatedApproval = await tx.approval.update({
         where: { id: approvalId },
-        data: { status: "APPROVED", decidedBy: actorId, decidedAt, reason },
+        data: { status: "APPROVED", decidedBy: actorId, decidedAt, reason, ...decisionReasonColumns(decisionReason) },
       });
       const trace = await tx.agentTrace.findFirst({ where: { subjectType: "ORDER", subjectId: order.id } });
       const traceId = order.traceId ?? trace?.id ?? randomUUID();
@@ -743,6 +763,7 @@ async function approveRecovery(
   approval: { id: string; subjectType: string; subjectId: string; simulationRunId: string | null },
   actorId: string,
   reason?: string,
+  decisionReason?: DecisionReason,
 ) {
   if (approval.subjectType !== "RECOVERY") {
     throw httpError(422, "UNSUPPORTED_APPROVAL_SUBJECT", "Only allocation and recovery approvals are implemented in this workflow.");
@@ -757,7 +778,7 @@ async function approveRecovery(
   const mission = await tx.deliveryMission.findUnique({ where: { id: changes.missionId } });
   if (!mission || ["DELIVERED", "CANCELLED"].includes(mission.status)) throw httpError(409, "STALE_APPROVAL", "The delivery mission can no longer be rescheduled.");
   const decidedAt = operationNow();
-  await tx.approval.update({ where: { id: approval.id }, data: { status: "APPROVED", decidedBy: actorId, decidedAt, reason } });
+  await tx.approval.update({ where: { id: approval.id }, data: { status: "APPROVED", decidedBy: actorId, decidedAt, reason, ...decisionReasonColumns(decisionReason) } });
   await tx.deliveryMission.update({ where: { id: mission.id }, data: { deadline: proposedDeadline } });
   await tx.operationalException.update({ where: { id: exception.id }, data: { status: "RESOLVED" } });
   const order = await tx.order.findUnique({ where: { id: mission.orderId } });
@@ -799,17 +820,17 @@ async function approveRecovery(
   return tx.approval.findUniqueOrThrow({ where: { id: approval.id } });
 }
 
-export async function rejectApproval(approvalId: string, actorId: string, reason?: string) {
+export async function rejectApproval(approvalId: string, actorId: string, reason?: string, decisionReason?: DecisionReason) {
   return prisma.$transaction(async (tx) => {
     const approval = await tx.approval.findUnique({ where: { id: approvalId } });
     if (!approval) throw httpError(404, "APPROVAL_NOT_FOUND", "Approval was not found.");
     if (approval.status !== "PENDING") throw httpError(409, "APPROVAL_ALREADY_DECIDED", "This approval already has a final decision.");
     if (approval.requestedFromActorId !== actorId) throw httpError(403, "APPROVAL_FORBIDDEN", "This decision belongs to another participant.");
     const decidedAt = operationNow();
-    const updated = await tx.approval.update({ where: { id: approvalId }, data: { status: "REJECTED", decidedBy: actorId, decidedAt, reason } });
+    const updated = await tx.approval.update({ where: { id: approvalId }, data: { status: "REJECTED", decidedBy: actorId, decidedAt, reason, ...decisionReasonColumns(decisionReason) } });
     if (approval.subjectType === "ALLOCATION") {
       const allocation = await tx.allocation.update({ where: { id: approval.subjectId }, data: { status: "REJECTED" } });
-      const order = await tx.order.update({ where: { id: allocation.orderId }, data: { lifecycleStatus: "REJECTED", outcomeCause: "APPROVAL_REJECTED", outcomeNote: reason ?? "A participant declined the proposed commitment." } });
+      const order = await tx.order.update({ where: { id: allocation.orderId }, data: { lifecycleStatus: "REJECTED", outcomeCause: "APPROVAL_REJECTED", outcomeNote: declineNote(reason, decisionReason) } });
       await tx.approval.updateMany({
         where: { subjectType: "ALLOCATION", subjectId: allocation.id, status: "PENDING" },
         data: { status: "CANCELLED", decidedAt, reason: "Cancelled after another participant rejected the allocation." },
@@ -817,7 +838,7 @@ export async function rejectApproval(approvalId: string, actorId: string, reason
       const trace = await tx.agentTrace.findFirst({ where: { subjectType: "ORDER", subjectId: allocation.orderId } });
       const traceId = order.traceId ?? trace?.id ?? randomUUID();
       const proposedEvent = await tx.domainEvent.findFirst({ where: { eventType: "ALLOCATION_PROPOSED", entityId: allocation.id }, orderBy: { occurredAt: "desc" } });
-      await recordEvent(tx, { eventType: "APPROVAL_DECIDED", actorId, entityId: approvalId, traceId, correlationId: proposedEvent?.correlationId, causationId: proposedEvent?.id, provenance: Provenance.OBSERVED, simulationRunId: approval.simulationRunId, payload: { approvalId, subjectType: "ALLOCATION", subjectId: allocation.id, decision: "REJECT" } });
+      await recordEvent(tx, { eventType: "APPROVAL_DECIDED", actorId, entityId: approvalId, traceId, correlationId: proposedEvent?.correlationId, causationId: proposedEvent?.id, provenance: Provenance.OBSERVED, simulationRunId: approval.simulationRunId, payload: { approvalId, subjectType: "ALLOCATION", subjectId: allocation.id, decision: "REJECT", ...decisionReasonPayload(decisionReason) } });
       if (trace) {
         await tx.agentTrace.update({ where: { id: traceId }, data: { status: "COMPLETED", stage: "ALLOCATION_REJECTED", summary: "A participant rejected the proposed commitment; no stock was reserved." } });
         await tx.traceStep.create({ data: { traceId, recordedAt: decidedAt, kind: "APPROVAL", agentName: "Commitment Agent", toolName: "record-human-decision", provenance: Provenance.OBSERVED, summary: `Human rejected the allocation${reason ? `: ${reason}` : "."}`, simulationRunId: approval.simulationRunId } });
@@ -827,7 +848,7 @@ export async function rejectApproval(approvalId: string, actorId: string, reason
       const trace = await tx.agentTrace.findFirst({ where: { subjectType: "EXCEPTION", subjectId: exception.id } });
       const traceId = exception.traceId ?? trace?.id ?? randomUUID();
       const proposedEvent = await tx.domainEvent.findFirst({ where: { eventType: "RECOVERY_PROPOSED", entityId: exception.id }, orderBy: { occurredAt: "desc" } });
-      await recordEvent(tx, { eventType: "APPROVAL_DECIDED", actorId, entityId: approvalId, traceId, correlationId: proposedEvent?.correlationId, causationId: proposedEvent?.id, provenance: Provenance.OBSERVED, simulationRunId: approval.simulationRunId, payload: { approvalId, subjectType: "RECOVERY", subjectId: exception.id, decision: "REJECT" } });
+      await recordEvent(tx, { eventType: "APPROVAL_DECIDED", actorId, entityId: approvalId, traceId, correlationId: proposedEvent?.correlationId, causationId: proposedEvent?.id, provenance: Provenance.OBSERVED, simulationRunId: approval.simulationRunId, payload: { approvalId, subjectType: "RECOVERY", subjectId: exception.id, decision: "REJECT", ...decisionReasonPayload(decisionReason) } });
       if (trace) {
         await tx.agentTrace.update({ where: { id: traceId }, data: { status: "WAITING", stage: "MANUAL_RECOVERY", summary: "The automatic recovery proposal was rejected and the exception remains open." } });
         await tx.traceStep.create({ data: { traceId, recordedAt: decidedAt, kind: "APPROVAL", agentName: "Exception Agent", toolName: "record-human-decision", provenance: Provenance.OBSERVED, summary: `Human rejected the recovery proposal${reason ? `: ${reason}` : "."}`, simulationRunId: approval.simulationRunId } });

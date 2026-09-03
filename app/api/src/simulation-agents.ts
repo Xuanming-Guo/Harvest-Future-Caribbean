@@ -564,11 +564,10 @@ class ProductTools {
   placeOrder(participant: ProductParticipant, at: string, payload: JsonObject, summary: string) {
     return this.mutate<OrderDto>(participant, at, "place_order", "/v1/orders", payload, summary);
   }
-  decideApproval(participant: ProductParticipant, at: string, approvalId: string, summary: string) {
-    return this.mutate<ApprovalDto>(participant, at, "decide_approval", `/v1/approvals/${approvalId}/decisions`, {
-      decision: "APPROVE",
-      reason: "Synthetic participant approved this feasible run-scoped proposal.",
-    }, summary);
+  decideApproval(participant: ProductParticipant, at: string, approvalId: string, summary: string, decision: "APPROVE" | "REJECT" = "APPROVE") {
+    return this.mutate<ApprovalDto>(participant, at, "decide_approval", `/v1/approvals/${approvalId}/decisions`, decision === "APPROVE"
+      ? { decision, reason: "Synthetic participant approved this feasible run-scoped proposal." }
+      : { decision, reason: "Synthetic participant declined this proposal.", ...SYNTHETIC_REJECTION_REASON }, summary);
   }
   acceptMission(participant: ProductParticipant, at: string, missionId: string, vehicleId: string, quantityKg: number) {
     return this.mutate<MissionDto>(participant, at, "accept_delivery_mission", `/v1/delivery-missions/${missionId}/acceptance`, {
@@ -588,11 +587,11 @@ class ProductTools {
       provenance: "SYNTHETIC",
     }, "Reported an observable disruption affecting an active delivery.");
   }
-  verifyObservation(participant: ProductParticipant, at: string, taskId: string) {
-    return this.mutate<VerificationTaskDto>(participant, at, "verify_observation", `/v1/verification-tasks/${taskId}/decisions`, {
-      decision: "VERIFY",
-      note: "Synthetic coordinator verified the observable simulation update.",
-    }, "Verified the newly visible crop observation.");
+  verifyObservation(participant: ProductParticipant, at: string, taskId: string, decision: "VERIFY" | "REQUEST_CHANGES" = "VERIFY") {
+    return this.mutate<VerificationTaskDto>(participant, at, "verify_observation", `/v1/verification-tasks/${taskId}/decisions`, decision === "VERIFY"
+      ? { decision, note: "Synthetic coordinator verified the observable simulation update." }
+      : { decision, note: "Synthetic coordinator could not confirm the observable simulation update.", ...SYNTHETIC_REJECTION_REASON },
+      decision === "VERIFY" ? "Verified the newly visible crop observation." : "Requested changes to the newly visible crop observation.");
   }
   acceptDelivery(participant: ProductParticipant, at: string, missionId: string, payload: JsonObject, acceptedKg: number) {
     return this.mutate<JsonObject>(participant, at, "record_delivery_acceptance", `/v1/deliveries/${missionId}/acceptance`, payload, `Recorded ${acceptedKg.toFixed(2)} kg as physically accepted.`);
@@ -603,6 +602,15 @@ class ProductTools {
     }, `Recorded paying this delivered order ${daysAfterDelivery} simulated days after accepting it. Harvest tracks the payment; it does not move money.`);
   }
 }
+
+/**
+ * Deterministic explanation attached to every synthetic rejection so connected
+ * runs satisfy the same actionable-reason rule the website enforces.
+ */
+const SYNTHETIC_REJECTION_REASON = {
+  reasonCode: "MATURITY_OR_QUALITY",
+  nextAction: "Re-check ripeness before the next pickup and record an updated observation.",
+} as const;
 
 interface ProductMissionBinding {
   missionId: string;
@@ -1078,10 +1086,12 @@ async function processMissionArrival(
   const allocation = projector.allocationForOrder(binding.orderId);
   const lineOutcomes = [...allocation.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([cropBatchId, committed]) => {
     const accepted = Math.min(committed, binding.pickedByProductBatch.get(cropBatchId) ?? 0);
+    const rejected = Math.max(0, committed - accepted);
     return {
       cropBatchId,
       acceptedQuantity: kilograms(accepted),
-      rejectedQuantity: kilograms(Math.max(0, committed - accepted)),
+      rejectedQuantity: kilograms(rejected),
+      ...(rejected > 0 ? SYNTHETIC_REJECTION_REASON : {}),
     };
   });
   const acceptedKg = Number(lineOutcomes.reduce((sum, line) => sum + line.acceptedQuantity.value, 0).toFixed(2));
@@ -1093,6 +1103,7 @@ async function processMissionArrival(
     rejectedQuantity: kilograms(rejectedKg),
     lineOutcomes,
     note: "Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected.",
+    ...(rejectedKg > 0 ? SYNTHETIC_REJECTION_REASON : {}),
   }, acceptedKg);
   recordResult(accepted, actions, projector);
   // A rejected delivery leaves nothing to pay for; every other outcome starts

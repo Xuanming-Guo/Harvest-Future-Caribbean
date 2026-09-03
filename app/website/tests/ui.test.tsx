@@ -1,7 +1,8 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { DecisionExplanation, ReasonChooser, decisionReasonCodes, decisionReasonLabel } from "@/components/decision-reason";
 import { Badge } from "@/components/ui";
 import { consumeDevelopmentPersona, currentActor, developmentPersonaFromHash, roleHome } from "@/lib/api";
 import { compactId, formatPercent, titleCase } from "@/lib/format";
@@ -133,5 +134,53 @@ describe("money owed to a farmer (#74)", () => {
   it("shows a currency amount a farmer can read at a glance", () => {
     expect(formatMoney(199.75, "XCD")).toBe("XCD 199.75");
     expect(formatMoney(1200, "XCD")).toBe("XCD 1,200.00");
+  });
+});
+
+describe("decision reason controls", () => {
+  it("offers every contract reason code as a custom pill, never a native select", () => {
+    const { container } = render(
+      <ReasonChooser idPrefix="test" label="What was wrong?" onChange={() => undefined} value={null} />,
+    );
+
+    expect(container.querySelector("select")).toBeNull();
+    const options = within(container).getAllByRole("button");
+    expect(options).toHaveLength(decisionReasonCodes.length);
+    expect(options.every((option) => option.getAttribute("type") === "button")).toBe(true);
+    expect(options.every((option) => option.getAttribute("aria-pressed") === "false")).toBe(true);
+    expect(within(container).getByText("What was wrong?")).toBeInTheDocument();
+  });
+
+  it("reports the chosen code and clears it when the same pill is pressed again", () => {
+    const chosen: Array<string | null> = [];
+    const chooser = render(
+      <ReasonChooser idPrefix="chosen" label="Why?" onChange={(value) => chosen.push(value)} value="DAMAGE" />,
+    );
+    const pills = within(chooser.container);
+
+    expect(pills.getByRole("button", { name: "Damaged" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(pills.getByRole("button", { name: "Wrong size or grade" }));
+    fireEvent.click(pills.getByRole("button", { name: "Damaged" }));
+    expect(chosen).toEqual(["SIZE_OR_GRADE", null]);
+  });
+
+  it("puts every reason code into plain language and stays honest when none was recorded", () => {
+    expect(decisionReasonLabel("MATURITY_OR_QUALITY")).toBe("Not ripe enough");
+    expect(decisionReasonLabel("MISSING_INFORMATION")).toBe("Information missing");
+    expect(decisionReasonLabel(undefined)).toBe("Reason not recorded");
+    expect(decisionReasonCodes.every((code) => decisionReasonLabel(code) !== "Reason not recorded")).toBe(true);
+  });
+
+  it("tells the farmer what was wrong and what to do next", () => {
+    const explanation = render(
+      <DecisionExplanation
+        decision={{ source: "DELIVERY", reasonCode: "SIZE_OR_GRADE", nextAction: "Grade to at least 15 cm.", note: "Three kilograms were small." }}
+      />,
+    );
+    const card = within(explanation.container);
+
+    expect(card.getByText("Wrong size or grade")).toBeInTheDocument();
+    expect(card.getByText("Next step: Grade to at least 15 cm.")).toBeInTheDocument();
+    expect(card.getByText("Their note: Three kilograms were small.")).toBeInTheDocument();
   });
 });

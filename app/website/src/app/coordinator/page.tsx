@@ -6,18 +6,20 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { ApprovalList } from "@/components/approval-list";
+import { OfflineHint, useOnlineStatus } from "@/components/offline";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, Metric, PageHeader, SectionTitle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatDate, titleCase } from "@/lib/format";
 
 export default function CoordinatorHome() {
   const queryClient = useQueryClient();
+  const online = useOnlineStatus();
   const [selectedExceptionId, setSelectedExceptionId] = useState<string>();
   const approvals = useQuery({ queryKey: ["approvals", "PENDING"], queryFn: () => api.approvals("PENDING"), refetchInterval: 5_000 });
   const exceptions = useQuery({ queryKey: ["exceptions"], queryFn: api.exceptions, refetchInterval: 5_000 });
   const batches = useQuery({ queryKey: ["crop-batches"], queryFn: api.cropBatches, refetchInterval: 15_000 });
   const verification = useQuery({ queryKey: ["verification-tasks", "OPEN"], queryFn: () => api.verificationTasks("OPEN"), refetchInterval: 5_000 });
-  const orders = useQuery({ queryKey: ["orders"], queryFn: api.orders, refetchInterval: 15_000 });
+  const orders = useQuery({ queryKey: ["orders"], queryFn: () => api.orders(), refetchInterval: 15_000 });
   const exceptionDetail = useQuery({ queryKey: ["exception", selectedExceptionId], queryFn: () => api.exception(selectedExceptionId!), enabled: Boolean(selectedExceptionId), refetchInterval: 5_000 });
   const decideVerification = useMutation({
     mutationFn: ({ taskId, decision }: { taskId: string; decision: "VERIFY" | "REQUEST_CHANGES" }) => api.decideVerificationTask(taskId, decision),
@@ -43,8 +45,9 @@ export default function CoordinatorHome() {
         <Card data-tour="coordinator-verification">
           <SectionTitle title="Verification queue" detail={`${verification.data.items.length} open`} />
           {!verification.data.items.length ? <EmptyState title="Crop updates are verified" detail="New farmer observations will appear here automatically." /> : <div className="task-list">{verification.data.items.map((task) => (
-            <article className="task-row" key={task.taskId}><div><Badge tone="pending">Verification</Badge><h3>{task.summary}</h3><Link className="text-link" href={`/crops/${task.cropBatchId}`}>Review crop evidence <ArrowRight size={15} /></Link></div><div className="inline-actions"><button className="button button-danger" disabled={decideVerification.isPending} onClick={() => decideVerification.mutate({ taskId: task.taskId, decision: "REQUEST_CHANGES" })}><X size={16} />Request changes</button><button className="button" disabled={decideVerification.isPending} onClick={() => decideVerification.mutate({ taskId: task.taskId, decision: "VERIFY" })}><Check size={16} />Verify</button></div></article>
+            <article className="task-row" key={task.taskId}><div><Badge tone="pending">Verification</Badge><h3>{task.summary}</h3><Link className="text-link" href={`/crops/${task.cropBatchId}`}>Review crop evidence <ArrowRight size={15} /></Link></div><div className="inline-actions"><button className="button button-danger" disabled={decideVerification.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) decideVerification.mutate({ taskId: task.taskId, decision: "REQUEST_CHANGES" }); }}><X size={16} />Request changes</button><button className="button" disabled={decideVerification.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) decideVerification.mutate({ taskId: task.taskId, decision: "VERIFY" }); }}><Check size={16} />Verify</button></div></article>
           ))}</div>}
+          {!online && <OfflineHint>A verification decision changes what buyers can rely on, so it is never queued. Reconnect to decide.</OfflineHint>}
         </Card>
       </div>
       <Card className="section-gap" data-tour="coordinator-exceptions">

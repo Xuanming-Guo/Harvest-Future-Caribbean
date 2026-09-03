@@ -45,6 +45,52 @@ export function readQuantity(value: unknown, field = "quantity") {
   return quantity.value;
 }
 
+export const decisionReasonCodes = [
+  "QUANTITY_MISMATCH",
+  "MATURITY_OR_QUALITY",
+  "DAMAGE",
+  "CLEANLINESS",
+  "SIZE_OR_GRADE",
+  "MISSING_INFORMATION",
+  "OTHER",
+] as const;
+
+export type DecisionReasonCode = (typeof decisionReasonCodes)[number];
+
+export interface DecisionReason {
+  reasonCode: DecisionReasonCode | null;
+  nextAction: string | null;
+}
+
+export const decisionReasonKeys = ["reasonCode", "nextAction"] as const;
+
+/**
+ * Reads the optional structured explanation attached to a rejection. Both
+ * fields stay optional here so historic records and accepted outcomes keep
+ * working; `requireDecisionReason` enforces them where a rejection happened.
+ */
+export function readDecisionReason(value: Record<string, unknown>, field = ""): DecisionReason {
+  const prefix = field ? `${field}.` : "";
+  const rawCode = value.reasonCode;
+  const rawAction = value.nextAction;
+  if (rawCode !== undefined && (typeof rawCode !== "string" || !decisionReasonCodes.includes(rawCode as DecisionReasonCode))) {
+    throw httpError(422, "INVALID_DECISION_REASON", `${prefix}reasonCode must be one of ${decisionReasonCodes.join(", ")}.`);
+  }
+  if (rawAction !== undefined && (typeof rawAction !== "string" || !rawAction.trim() || rawAction.trim().length > 300)) {
+    throw httpError(422, "INVALID_DECISION_REASON", `${prefix}nextAction must be plain text of 1-300 characters.`);
+  }
+  return {
+    reasonCode: rawCode === undefined ? null : (rawCode as DecisionReasonCode),
+    nextAction: typeof rawAction === "string" ? rawAction.trim() : null,
+  };
+}
+
+/** A rejection must say what was wrong and what the affected person does next. */
+export function requireDecisionReason(reason: DecisionReason, detail: string) {
+  if (!reason.reasonCode || !reason.nextAction) throw httpError(422, "DECISION_REASON_REQUIRED", detail);
+  return reason;
+}
+
 export function readLocation(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw httpError(400, "VALIDATION_FAILED", "deliveryLocation must be an object.");
