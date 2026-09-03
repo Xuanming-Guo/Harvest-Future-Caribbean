@@ -10,10 +10,43 @@ interface ObservableOrder {
   id: string;
   lifecycleStatus: string;
   neededBy: Date;
+  outcomeCause: string | null;
+}
+
+/**
+ * Every non-fulfilled order gets exactly one cause. The recorded cause wins;
+ * when an order simply ran out of time in a state that never recorded one,
+ * the state itself is the explanation.
+ */
+export function deriveOutcomeCause(
+  order: Pick<ObservableOrder, "lifecycleStatus" | "outcomeCause">,
+): string {
+  if (order.outcomeCause) return order.outcomeCause;
+  switch (order.lifecycleStatus) {
+    case "PARTIALLY_FULFILLED":
+    case "REJECTED":
+      return "DELIVERY_REJECTED";
+    case "CANCELLED":
+      return "CANCELLED";
+    case "AWAITING_APPROVAL":
+      return "APPROVAL_TIMEOUT";
+    case "COMMITTED":
+    case "IN_DELIVERY":
+      return "MISSION_LATE";
+    default:
+      return "NO_READY_SUPPLY";
+  }
 }
 
 export interface OperationsSnapshotQuery {
   asOf: Date;
+  /**
+   * Instant the run's scenario horizon closes, when the projection is scoped to
+   * a saved run. Orders whose deadline falls after it can never be observed
+   * completing inside the run, so once the horizon passes they are reported as
+   * truncated by the run window rather than as an operational failure.
+   */
+  horizonEndsAt?: Date;
   listingWhere: Prisma.ListingWhereInput;
   demandWhere: Prisma.BuyerDemandWhereInput;
   orderWhere: Prisma.OrderWhereInput;
@@ -27,9 +60,11 @@ export interface OperationsSnapshotQuery {
  * then it remains pending rather than being reported as a failure early.
  */
 export function summarizeOrderOutcomes(
-  orders: Array<Pick<ObservableOrder, "lifecycleStatus" | "neededBy">>,
+  orders: Array<Pick<ObservableOrder, "lifecycleStatus" | "neededBy"> & Partial<Pick<ObservableOrder, "outcomeCause">>>,
   asOf: Date,
+  horizonEndsAt?: Date,
 ): SimulationOrderOutcomes {
+  const causes = new Map<string, number>();
   const outcomes: SimulationOrderOutcomes = {
     total: orders.length,
     fulfilled: 0,
@@ -37,23 +72,38 @@ export function summarizeOrderOutcomes(
     unfulfilled: 0,
     pending: 0,
   };
+  const countCause = (order: (typeof orders)[number], override?: string) => {
+    const cause = override ?? deriveOutcomeCause({ lifecycleStatus: order.lifecycleStatus, outcomeCause: order.outcomeCause ?? null });
+    causes.set(cause, (causes.get(cause) ?? 0) + 1);
+  };
+  // Only once the window has actually closed. Before that the order is still
+  // live and may yet be delivered early, so calling it truncated would report a
+  // failure that has not happened.
+  const horizonClosed = horizonEndsAt !== undefined && asOf.getTime() >= horizonEndsAt.getTime();
 
   for (const order of orders) {
+    const settled = ["REJECTED", "CANCELLED"].includes(order.lifecycleStatus);
+    const pastHorizon = horizonClosed && !settled && order.neededBy.getTime() > horizonEndsAt!.getTime();
     if (order.lifecycleStatus === "FULFILLED") {
       outcomes.fulfilled += 1;
     } else if (order.lifecycleStatus === "PARTIALLY_FULFILLED") {
       outcomes.partiallyFulfilled += 1;
+      countCause(order);
+    } else if (pastHorizon) {
+      outcomes.unfulfilled += 1;
+      countCause(order, "HORIZON_TRUNCATED");
     } else if (
-      order.lifecycleStatus === "REJECTED" ||
-      order.lifecycleStatus === "CANCELLED" ||
+      settled ||
       order.neededBy.getTime() <= asOf.getTime()
     ) {
       outcomes.unfulfilled += 1;
+      countCause(order);
     } else {
       outcomes.pending += 1;
     }
   }
 
+  outcomes.causes = Object.fromEntries([...causes.entries()].sort(([left], [right]) => left.localeCompare(right)));
   return outcomes;
 }
 
@@ -66,7 +116,7 @@ export async function buildOperationsSnapshot(
     prisma.buyerDemand.count({ where: query.demandWhere }),
     prisma.order.findMany({
       where: query.orderWhere,
-      select: { id: true, lifecycleStatus: true, neededBy: true },
+      select: { id: true, lifecycleStatus: true, neededBy: true, outcomeCause: true },
       orderBy: { id: "asc" },
     }),
     prisma.deliveryMission.findMany({
@@ -105,7 +155,7 @@ export async function buildOperationsSnapshot(
     activeListings,
     openDemands,
     ordersByStatus: Object.fromEntries([...statusCounts.entries()].sort(([left], [right]) => left.localeCompare(right))),
-    orderOutcomes: summarizeOrderOutcomes(orders, query.asOf),
+    orderOutcomes: summarizeOrderOutcomes(orders, query.asOf, query.horizonEndsAt),
     deliveryAcceptedKg: Number((acceptedDelivery._sum.acceptedQuantity ?? 0).toFixed(2)),
     approvedCommitmentCount,
     completedMissionCount,

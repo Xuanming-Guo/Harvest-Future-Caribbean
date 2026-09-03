@@ -63,6 +63,16 @@ export const baselinePolicy: CoordinationPolicy = {
     'Fragmented coordination: single-farm sourcing, undiscounted grower estimates, no approval step, ' +
     'and no recovery path when a delivery is disrupted.',
 
+  // Nobody is watching the whole picture, so nothing brings a pickup forward
+  // when a grower mentions the crop is ready, and nobody revisits an order that
+  // could not be filled when it was first phoned round. The truck turns up when
+  // the buyer said they needed it.
+  capabilities: {
+    collectOnReadiness: false,
+    maxHoldMs: Number.POSITIVE_INFINITY,
+    rematchOnNewSupply: false,
+  },
+
   estimateAvailableKg(_context: PolicyContext, batch: ObservedCropBatch): number {
     return quotedAvailableKg(batch);
   },

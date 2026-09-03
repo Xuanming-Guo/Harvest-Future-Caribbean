@@ -114,6 +114,18 @@ function printUsage(): void {
   );
 }
 
+/**
+ * The unmet-demand histogram, nonzero causes only.
+ *
+ * Record insertion order follows the fixed cause vocabulary, so the column
+ * reads the same way in every line and between runs.
+ */
+function formatCauses(result: RunResult): string {
+  const present = Object.entries(result.metrics.causeCounts).filter(([, count]) => count > 0);
+  if (present.length === 0) return 'causes=none';
+  return `causes=${present.map(([cause, count]) => `${cause}:${count}`).join(',')}`;
+}
+
 function formatMetricsLine(result: RunResult): string {
   const { metrics } = result;
   return [
@@ -128,6 +140,7 @@ function formatMetricsLine(result: RunResult): string {
     ).padStart(2)}`,
     `events=${String(metrics.eventsProcessed).padStart(5)}`,
     `digest=${result.digest}`,
+    formatCauses(result),
   ].join('  ');
 }
 

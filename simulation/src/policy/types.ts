@@ -108,9 +108,36 @@ export interface RecoveryProposal {
   summary: string;
 }
 
+/**
+ * Coordination levers the engine grants a policy.
+ *
+ * These are scheduling behaviours the engine performs, so they cannot live
+ * inside a policy function, but they are coordination rather than physics: a
+ * fragmented market where nobody holds the whole picture does not notice that a
+ * crop was reported ready this morning, and does not revisit an order it
+ * already failed to fill. Declaring them here keeps the engine from branching
+ * on a policy's name, and keeps the difference between the two arms of the
+ * benchmark visible in one place.
+ */
+export interface PolicyCapabilities {
+  /**
+   * Collect a batch once it has been reported ready, rather than scheduling the
+   * pickup to arrive just before the delivery deadline.
+   */
+  readonly collectOnReadiness: boolean;
+  /**
+   * Longest a batch reported ready may be left in the field before collection
+   * is brought forward. Only consulted when `collectOnReadiness` is set.
+   */
+  readonly maxHoldMs: number;
+  /** Re-run matching for demand still waiting when new ready supply is reported. */
+  readonly rematchOnNewSupply: boolean;
+}
+
 export interface CoordinationPolicy {
   readonly name: 'BASELINE' | 'HARVEST';
   readonly description: string;
+  readonly capabilities: PolicyCapabilities;
 
   /**
    * Called when a buyer posts demand. Returning `null` means no promise was
