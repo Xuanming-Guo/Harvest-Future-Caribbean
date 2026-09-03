@@ -24,6 +24,7 @@
 import type { SimulationInstant } from './core/time.js';
 import type { ObservableActor, ObservableDisruptionView } from './world/observable.js';
 import type { CropStage, GeoPoint, ReferenceDataSource, ReferencePlace } from './world/types.js';
+import type { ForecastDay, TempBand, WeatherCondition, WeatherLegend } from './world/weather.js';
 import type { DecisionRecord } from './policy/types.js';
 
 /** Static furniture, sent once rather than repeated in every frame. */
@@ -47,6 +48,18 @@ export interface ControlRoomScene {
   referenceDataSources: ReferenceDataSource[];
   /** Run-scoped Product API identities. Baseline participants have no product actor. */
   participants: SimulationParticipant[];
+  /**
+   * Units, thresholds and provenance for the weather carried on every frame.
+   *
+   * Sent once with the scene rather than repeated per frame, because it is
+   * constant, and published at all so that a client drawing rain, cloud, storm
+   * and wind does not have to hard-code the thresholds the engine used. A
+   * viewer has to be able to tell ordinary weather from meaningful weather, and
+   * that is a question about thresholds.
+   *
+   * Optional so replays saved before this field existed still load.
+   */
+  weatherLegend?: WeatherLegend;
   /** Repeated here so a consumer cannot render the scene without the label. */
   evidenceLabel: string;
 }
@@ -109,6 +122,35 @@ export interface SimulationOrderOutcomes {
    * saved frames from before this field existed still replay.
    */
   causes?: Record<string, number>;
+}
+
+/**
+ * Observable weather for one island at one replay instant.
+ *
+ * Everything a control-room overlay needs to draw the sky and nothing it does
+ * not: today's realised conditions, and the forecast issued today. Realised
+ * weather for a *later* frame is never here, which is what stops a saved replay
+ * from being a route to hidden future weather.
+ *
+ * `windFromDegrees` is the meteorological convention, the direction the wind
+ * blows *from*, clockwise from true north. `cloudCoverFraction` is carried
+ * alongside `condition` because a four-value enum cannot drive a gradient.
+ */
+export interface ControlRoomWeather {
+  islandId: string;
+  /** ISO-8601 calendar date of the realised reading. */
+  date: string;
+  condition: WeatherCondition;
+  rainMm: number;
+  windKph: number;
+  windFromDegrees: number;
+  cloudCoverFraction: number;
+  tempBand: TempBand;
+  /** Realised weather is a synthetic record. */
+  provenance: 'SYNTHETIC';
+  /** A forecast is a synthetic prediction, which is a different kind of claim. */
+  forecastProvenance: 'MODEL_PREDICTED';
+  forecast: ForecastDay[];
 }
 
 /** A delivery mission, with the timings needed to animate it. */
@@ -176,6 +218,13 @@ export interface ControlRoomFrame {
   demands: ControlRoomDemand[];
   disruptions: ObservableDisruptionView[];
   degradedRoadSegmentIds: string[];
+  /**
+   * Observable weather per island at this instant.
+   *
+   * Optional so frames saved before issue #37 still replay; present on every
+   * frame a current engine records.
+   */
+  weather?: ControlRoomWeather[];
   /** Decisions recorded since the previous frame. */
   newDecisions: DecisionRecord[];
   /** Product API actions performed by simulated participants during this frame. */

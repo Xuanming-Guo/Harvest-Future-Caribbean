@@ -123,31 +123,43 @@ $run | Select-Object runId, status, policy, decisionMode,
   decisionAdapter, frameCount, decisionCount, metrics
 ```
 
-Expected engine values for seed `42`, re-recorded from a real run after the
-horizon clamp and payment tracking. These move whenever the engine or the Product API changes, so
-the connected-run test checks determinism, outcome arithmetic, and the cause
-vocabulary rather than pinning these counts; this document is where the counts
-themselves are kept:
+Expected engine values for seed `42`, re-recorded from a real run after
+realised weather (#37). These move whenever the engine or the Product API
+changes, so the connected-run test checks determinism, outcome arithmetic, and
+the cause vocabulary rather than pinning these counts; this document is where the
+counts themselves are kept:
 
 ```text
 status            COMPLETED
 policy            HARVEST
 decisionMode      DETERMINISTIC
 decisionAdapter   deterministic
-frameCount        119
-eventsProcessed    76
+frameCount        110
+eventsProcessed    72
 totalDemandedKg   2183
-totalAcceptedKg   1000.63
+totalAcceptedKg   838.94
+```
+
+`metrics.weather` records what the sky did to this run, as a counterfactual
+against the same run in mild weather:
+
+```text
+wetDays                    10
+stormDays                   4
+readinessDelayDays       9.72
+qualityLost              1.12
+weatherSpoilageKg      311.03
+weatherDelayedMissions      2
 ```
 
 `metrics.productActions` must also exist with positive attempted, succeeded and
 domain-event counts. For the deterministic seed-`42` run, expect:
 
 ```text
-attempted             125
-succeeded             125
+attempted             113
+succeeded             113
 rejected                0
-domainEventsCreated   201
+domainEventsCreated   184
 activeListings          5
 openDemands              8
 totalOrders              8
@@ -155,17 +167,34 @@ activeMissions           0
 openExceptions           0
 ```
 
+`attempted` counts tool calls that tried to *change* operational state. The
+`read_weather` reads are not in it, because a read changes nothing; they appear
+on the replay frames instead. For seed `42` there are **36** of them, across all
+three roles that plan around the weather:
+
+```text
+read_weather actions      36
+roles                     FARMER, COORDINATOR, TRANSPORTER
+island-days stored        22
+frames carrying weather   110 of 110
+realised conditions       CLEAR 3, CLOUD 9, RAIN 6, STORM 4
+```
+
+Every stored island-day is a day that had already occurred when it was written,
+which is why `GET /v1/weather` cannot return a future day for this run however
+`asOf` is set.
+
 The final Product API outcome summary is separate from the physical engine
 metrics above. For deterministic seed `42`, expect:
 
 ```text
 total orders               8
-fulfilled                  3
+fulfilled                  2
 partially fulfilled        1
-unfulfilled                4
+unfulfilled                5
 pending                    0
-approved commitments       5
-completed missions         5
+approved commitments       3
+completed missions         3
 overdue payments           0
 ```
 
@@ -175,16 +204,16 @@ tenth simulated day, so every settled order is paid three days late and shows
 as overdue in between. Across the saved timeline:
 
 ```text
-frames with an overdue payment    19 of 119
-highest overdue count in a frame   2
-delivered orders                   5
-paid inside the run window         2
+frames with an overdue payment    16 of 110
+highest overdue count in a frame   1
+delivered orders                   3
+paid inside the run window         1
 ```
 
-The two paid orders were accepted 12.7 and 11.6 days before the run ended, far
-enough ahead for their tenth day to arrive. The remaining three were accepted
-6.7 days or less before the end, so they are still inside their term when the
-window closes; that, and not prompt payment, is why the final count is `0`.
+The one paid order was accepted 12.7 days before the run ended, far enough ahead
+for its tenth day to arrive. The other two were accepted 5.5 and 3.5 days before
+the end, so they are still inside their term when the window closes; that, and
+not prompt payment, is why the final count is `0`.
 Scrub the control room back into the middle of the run to see the overdue
 count rise and fall. Harvest tracks these payments; it moves no money.
 
@@ -192,9 +221,10 @@ count rise and fall. Harvest tracks these payments; it moves no money.
 order. For seed `42`:
 
 ```text
+INSUFFICIENT_SUPPLY        3
 DELIVERY_REJECTED          1
-INSUFFICIENT_SUPPLY        2
-NO_READY_SUPPLY            2
+NO_READY_SUPPLY            1
+SUPPLY_CHANGED             1
 ```
 
 `HORIZON_TRUNCATED` no longer appears. The engine used to raise orders whose
@@ -210,23 +240,24 @@ failure.
 Every figure above is read from a real run, never edited by hand. The five
 columns show what each change to the fulfilment path moved:
 
-| Value | Before the #53 fixes | After readiness/expiry/re-match | After safe partial commitment | After the horizon clamp | After payment tracking |
-|---|---|---|---|---|---|
-| `frameCount` | 130 | 119 | 127 | 117 | 119 |
-| `eventsProcessed` | 82 | 76 | 80 | 76 | 76 |
-| `productActions.attempted` | 154 | 140 | 151 | 123 | 125 |
-| `productActions.domainEventsCreated` | 242 | 222 | 238 | 199 | 201 |
-| `activeListings` | 7 | 3 | 3 | 5 | 5 |
-| total orders | 11 | 11 | 11 | 8 | 8 |
-| fulfilled | 2 | 3 | 4 | 3 | 3 |
-| partially fulfilled | 0 | 2 | 2 | 1 | 1 |
-| unfulfilled | 8 | 5 | 5 | 4 | 4 |
-| pending | 1 | 1 | 0 | 0 | 0 |
-| approved commitments | 8 | 5 | 7 | 5 | 5 |
-| completed missions | 8 | 5 | 7 | 5 | 5 |
-| `deliveryAcceptedKg` | 359 | 1387.75 | 1545.13 | 1000.63 | 1000.63 |
-| overdue payments at run end | n/a | n/a | n/a | n/a | 0 |
-| frames showing an overdue payment | n/a | n/a | n/a | n/a | 19 |
+| Value | Before the #53 fixes | After readiness/expiry/re-match | After safe partial commitment | After the horizon clamp | After payment tracking | After realised weather |
+|---|---|---|---|---|---|---|
+| `frameCount` | 130 | 119 | 127 | 117 | 119 | 110 |
+| `eventsProcessed` | 82 | 76 | 80 | 76 | 76 | 72 |
+| `productActions.attempted` | 154 | 140 | 151 | 123 | 125 | 113 |
+| `productActions.domainEventsCreated` | 242 | 222 | 238 | 199 | 201 | 184 |
+| `activeListings` | 7 | 3 | 3 | 5 | 5 | 5 |
+| total orders | 11 | 11 | 11 | 8 | 8 | 8 |
+| fulfilled | 2 | 3 | 4 | 3 | 3 | 2 |
+| partially fulfilled | 0 | 2 | 2 | 1 | 1 | 1 |
+| unfulfilled | 8 | 5 | 5 | 4 | 4 | 5 |
+| pending | 1 | 1 | 0 | 0 | 0 | 0 |
+| approved commitments | 8 | 5 | 7 | 5 | 5 | 3 |
+| completed missions | 8 | 5 | 7 | 5 | 5 | 3 |
+| `deliveryAcceptedKg` | 359 | 1387.75 | 1545.13 | 1000.63 | 1000.63 | 838.94 |
+| overdue payments at run end | n/a | n/a | n/a | n/a | 0 | 0 |
+| frames showing an overdue payment | n/a | n/a | n/a | n/a | 19 | 16 |
+| `read_weather` actions | n/a | n/a | n/a | n/a | n/a | 36 |
 
 The first column is the pre-#53 baseline this document recorded before the
 readiness fixes, when unready crop was still listable, so eight commitments
@@ -245,17 +276,29 @@ the comparison, and it holds: 4 of 11 fully met before, 3 of 8 after, with one
 partial on each side. `activeListings` rises because supply that would have
 been committed to a withheld order stays on the marketplace instead.
 
-The last column adds payment tracking on top of that smaller order book: two
+The fifth column adds payment tracking on top of that smaller order book: two
 synthetic buyers record paying a delivered order, which is two more product
 actions, two more domain events, and two more agent-cycle checkpoint frames.
 No physical outcome moves, because recording a payment mutates no world state,
 and giving the synthetic buyers 7-day terms changes none of these totals
 either: it changes only which payment status those same orders report.
 
-`deliveryAcceptedKg` is the sum of the five immutable delivery acceptances,
+The last column is realised weather, and it is the second column after the
+horizon clamp that changes the world rather than how the world is handled. The
+same eight orders are raised, but the crop underneath them is harder to deliver:
+ten of the run's twenty-two days are wet, four of them storms, ripening slips
+9.7 batch-days in total and the weather adds 311 kg of spoilage. Two commitments
+that previously reached delivery no longer do, so `deliveryAcceptedKg` falls
+from 1,000.63 kg to 838.94 kg and one fulfilled order becomes unfulfilled.
+Read that column as a harder world rather than as a regression in the workflow:
+every simulated action still succeeds, and the ten paired benchmark seeds in
+[`simulation/benchmarks/README.md`](../simulation/benchmarks/README.md) show the
+same effect and what it costs the policy comparison.
+
+`deliveryAcceptedKg` is the sum of the three immutable delivery acceptances,
 not the engine's `totalAcceptedKg`. The control room uses this Product API
 quantity for its Harvest **Delivered** card. For seed `42`, both values are
-`1000.63 kg` because the engine applies the Product API delivery acceptances back
+`838.94 kg` because the engine applies the Product API delivery acceptances back
 to physical state as each mission arrives.
 
 The `runId` is a fresh UUID. All evidence is explicitly labelled synthetic and
@@ -363,6 +406,30 @@ JSON uses a UUID `eventId` and contains:
 - a simulated `simulationTime`;
 - synthetic/model provenance as appropriate;
 - actor, entity, trace and correlation IDs.
+
+### Read the shared weather
+
+The same endpoint answers a human on the website and a simulated participant
+inside a run. Without `simulationRunId` it returns the seeded development
+island; with one it returns that run's own series.
+
+```powershell
+Invoke-RestMethod `
+  -Uri "$base/v1/weather?islandId=saint-lucia&simulationRunId=$runId" `
+  -Headers @{ Authorization = "Bearer $($session.accessToken)" } |
+  ConvertTo-Json -Depth 5
+```
+
+Expect `current.provenance` to be `SYNTHETIC` and every `forecast[].provenance`
+to be `MODEL_PREDICTED`, with `confidence` decaying as `leadDays` grows. Ask for
+a date past the end of the run and the answer does not move: only days that have
+occurred are stored, so `asOf` cannot reach past the newest recorded one.
+
+```powershell
+(Invoke-RestMethod `
+  -Uri "$base/v1/weather?simulationRunId=$runId&asOf=2099-01-01" `
+  -Headers @{ Authorization = "Bearer $($session.accessToken)" }).asOf
+```
 
 ## 7. Open a participant read-only
 

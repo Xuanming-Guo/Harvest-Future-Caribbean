@@ -26,6 +26,7 @@ import { DecisionExplanation, decisionReasonLabel } from "@/components/decision-
 import { DeviceUpdateList, useOutbox } from "@/components/offline";
 import { OrderList } from "@/components/order-list";
 import { useSession } from "@/components/providers";
+import { FarmWeather } from "@/components/weather";
 import { Badge, Card, Disclosure, EmptyState, ErrorState, LoadingState, MoreDetail, PageHeader, SectionTitle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { compactId, formatDate, formatKg, plural, titleCase } from "@/lib/format";
@@ -139,6 +140,10 @@ export default function FarmerHome() {
           <p>Harvest tracks payment; it does not move money. This is what buyers have agreed to pay you for produce they already accepted.</p>
         </div>
       </Card>
+
+      <div className="section-gap">
+        <FarmWeather />
+      </div>
 
       {needsAction.length > 0 && (
         <Card className="section-gap decision-card">

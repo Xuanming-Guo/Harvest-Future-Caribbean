@@ -286,7 +286,7 @@ export default function ControlRoomPage() {
       <ReferenceAttribution sources={scene.referenceDataSources} />
       <div className="chrome">
         <div className="chrome-header">
-          <Masthead scene={scene} />
+          <Masthead scene={scene} frame={frame} />
           {setup}
           {error && <p className="run-error" role="alert">{error}</p>}
         </div>

@@ -30,6 +30,7 @@ Recorded paired-seed comparisons live in
 | `src/core/time.ts` | Simulation time; the only file allowed to touch `Date` |
 | `src/world/types.ts` | The hidden-truth / observed-world split |
 | `src/world/observable.ts` | Contract projection, leak guard, world digest |
+| `src/world/weather.ts` | Realised weather, imperfect forecasts, and what weather does |
 | `src/scenario/` | Scenario recipes; `saint-lucia-demo-v1` is the hero |
 | `src/policy/` | `baseline` and `harvest` coordination policies |
 | `src/engine.ts` | Clock, handlers, validation, metrics |
@@ -81,11 +82,21 @@ unchanged when it does not intersect relevant activity.
 ## Honest status of the baseline-versus-Harvest comparison
 
 **On the current scenario the Harvest policy outperforms the fragmented
-baseline, after issue #53 fixed three coordination defects and one measurement
-defect.** Across the same ten paired seeds, mean fulfilment is 47.7% for Harvest
-against 11.7% for the baseline. Harvest wins eight of the ten seeds and ties two;
-it loses none. Before any of the fixes it was 11.0% against 8.7%, losing on five
-seeds and carried on the mean by one.
+baseline, but by less than it did, and it now loses one seed.** Across the same
+ten paired seeds, mean fulfilment is 32.7% for Harvest against 11.6% for the
+baseline: seven wins, two ties, and one loss. Before realised weather (#37) it
+was 47.7% against 11.7%, with eight wins, two ties and no losses. Before the
+issue #53 fixes it was 11.0% against 8.7%, losing on five seeds and carried on
+the mean by one.
+
+Weather cost Harvest roughly a third of its lead and cost the baseline almost
+nothing, for a reason worth stating plainly: **Harvest's advantage is delivered
+through promises, and weather is a machine for invalidating promises.** A batch
+that ripens up to three days late, loses grade to rain and rots faster once
+ready is a batch Harvest has already committed against; the baseline was mostly
+failing those orders anyway. The full mechanism, the losing seed, and what was
+*not* done about it are in [`benchmarks/README.md`](benchmarks/README.md). No
+weather constant was tuned to recover the earlier numbers.
 
 The per-seed table, the supporting waste and substitution figures, and the
 unmet-demand histogram are in [`benchmarks/README.md`](benchmarks/README.md).
@@ -155,26 +166,54 @@ seeds that Harvest was winning into ties. The baseline's physical outcome is
 untouched: its waste, accepted kilograms, deliveries and fully met orders are
 identical per seed, and only its fulfilment denominator moved.
 
+### Realised weather is the second world change, and the costlier one
+
+Issue #37 gave every island-day a condition, a rainfall, a wind and a
+temperature band, and let those act on the crop: wet days slow ripening (capped
+at three days per batch), wet and hot-dry days raise spoilage, wet days take
+marketable grade off, storms degrade more roads, and a vehicle that departs into
+rain arrives later. All of it is physics, so both arms face it and every digest
+moved again. The order book did not move: the same 85 orders are raised, because
+weather does not touch demand generation.
+
+The forecast is the other half and is deliberately not physics. It is a noised,
+lossy model of the realised series whose error grows with the square root of
+lead time; it misses storms and predicts storms that never arrive, and
+`tests/weather.test.ts` asserts both. It reaches the Harvest policy through
+`PolicyContext.weather`, which refuses realised weather for a day that has not
+occurred. Harvest uses it to bring a pickup forward when a storm falls inside
+the ready-hold window, and uses *realised* rain to decide that a report written
+before a soaking is no longer evidence. The baseline is given neither, declared
+as `readsForecast: false` in `PolicyCapabilities` rather than hidden in a
+policy-name check, and the tests assert no baseline decision ever cites a
+forecast.
+
 What is still unresolved, from the cause histogram:
 
-- **`INSUFFICIENT_SUPPLY` is now Harvest's largest bucket**, at 18 against the
-  baseline's 10. That is the expected shape of the trade — orders Harvest
-  previously never attempted now land as partial deliveries — but it is the
-  biggest remaining category and it has not been attacked.
-- **`APPROVAL_REJECTED` at 7.** The approval gate re-checks a promise against
-  evidence that decayed after the proposal, and now has more commitments to
-  decline. Whether that gate is calibrated or merely strict is open.
-- **`NO_READY_SUPPLY` at 15.** Orders nothing could be promised against at all.
-  This is the part a better yield forecast, not better coordination, would move.
+- **`INSUFFICIENT_SUPPLY` is Harvest's largest bucket**, at 23 against the
+  baseline's 5, up from 18 before weather. That is the expected shape of the
+  trade — orders Harvest previously never attempted now land as partial
+  deliveries — but it is the biggest remaining category and it has not been
+  attacked.
+- **`APPROVAL_REJECTED` at 12, up from 7.** The approval gate re-checks a
+  promise against evidence that decayed after the proposal, and weather is now a
+  second way for evidence to decay. Whether that gate is calibrated or merely
+  strict matters more than it did.
+- **`NO_READY_SUPPLY` at 17.** Orders nothing could be promised against at all.
+  This is the part a better *yield* forecast (#7), not better coordination and
+  not a weather forecast, would move. Knowing a storm is coming does not create
+  ready crop.
 
 Issue #4 owns the machinery that makes an honest comparison possible —
 identical worlds, isolated policy hooks, reproducible seeds. Issue #11 owns the
 comparison itself. Adjusting scenario constants until the favoured policy wins
 would fabricate the very result those issues exist to measure. No scenario
-constant has been touched: supply sizes, order sizes, readiness windows,
+constant has been touched: supply sizes, order sizes, readiness windows, base
 spoilage rates and observation intervals are all unchanged, and the deadline
-draw is still three to seven days. The one world change is which orders get
-raised at all, and it is stated above together with what it cost each arm.
+draw is still three to seven days. The two world changes are which orders get
+raised at all, and what the weather does to the crop; both are stated here
+together with what they cost each arm. The weather coefficients were set once
+from plausibility and were not revisited after the benchmark was read.
 
 ## Control-room outcome boundary
 

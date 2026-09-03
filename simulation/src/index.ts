@@ -31,12 +31,28 @@ export type {
   ControlRoomMission,
   ControlRoomScene,
   ControlRoomTotals,
+  ControlRoomWeather,
   ReplayTimeline,
   SimulationAgentAction,
   SimulationOperationsSnapshot,
   SimulationOrderOutcomes,
   SimulationParticipant,
 } from './replay.js';
+
+export {
+  CLOUD_DAY_MM,
+  FORECAST_HORIZON_DAYS,
+  FORECAST_PROVENANCE,
+  RAIN_DAY_MM,
+  REALISED_WEATHER_PROVENANCE,
+  STORM_DAY_MM,
+  STORM_WIND_KPH,
+  WEATHER_LEGEND,
+  WeatherModel,
+  classifyCondition,
+  weatherKey,
+} from './world/weather.js';
+export type { ForecastDay, RealisedWeather, TempBand, WeatherCondition, WeatherLegend, WeatherReading } from './world/weather.js';
 
 export { EventQueue, Priority } from './core/queue.js';
 export type { ScheduledEvent } from './core/queue.js';

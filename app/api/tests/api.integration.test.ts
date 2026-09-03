@@ -645,6 +645,7 @@ describe("participant Product API", () => {
         demands: frame.demands,
         disruptions: frame.disruptions,
         degradedRoadSegmentIds: frame.degradedRoadSegmentIds,
+        weather: frame.weather,
         newDecisions: frame.newDecisions,
         totals: frame.totals,
         agentActions: (frame.agentActions as Array<Record<string, unknown>> | undefined)?.map((action) => ({
@@ -684,6 +685,39 @@ describe("participant Product API", () => {
       prisma.agentTrace.count({ where: { simulationRunId: runId } }),
     ]);
     expect(connectedCounts.every((count) => count > 0)).toBe(true);
+
+    // Weather the run published is the run's own, and it is only ever a day
+    // that had already occurred when it was written.
+    const runWeatherRows = await prisma.weatherObservation.findMany({
+      where: { simulationRunId: runId },
+      orderBy: { observedOn: "asc" },
+    });
+    expect(runWeatherRows.length).toBeGreaterThan(0);
+    expect(runWeatherRows.every((row) => row.provenance === "SYNTHETIC")).toBe(true);
+    expect(runWeatherRows.every((row) => row.forecastProvenance === "MODEL_PREDICTED")).toBe(true);
+    const runWeather = await server.inject({
+      method: "GET",
+      url: `/v1/weather?islandId=saint-lucia&simulationRunId=${runId}`,
+      headers: auth("operations-demo"),
+    });
+    expect(runWeather.statusCode).toBe(200);
+    expect(runWeather.json()).toMatchObject({ islandId: "saint-lucia", simulationRunId: runId });
+    expect(runWeather.json().current.provenance).toBe("SYNTHETIC");
+    // The seeded development world is a different island-day series entirely.
+    const seededWeather = await server.inject({ method: "GET", url: "/v1/weather", headers: auth("farmer-ana") });
+    expect(seededWeather.statusCode).toBe(200);
+    expect(seededWeather.json().simulationRunId).toBeUndefined();
+    expect(seededWeather.json().asOf).not.toBe(runWeather.json().asOf);
+
+    // Every simulated participant that plans around the weather actually read it.
+    const weatherReads = timeline.json().frames
+      .flatMap((frame: { agentActions?: Array<{ toolName: string; role: string; status: string }> }) => frame.agentActions ?? [])
+      .filter((action: { toolName: string }) => action.toolName === "read_weather");
+    expect(weatherReads.length).toBeGreaterThan(0);
+    expect(weatherReads.every((action: { status: string }) => action.status === "SUCCEEDED")).toBe(true);
+    expect(new Set(weatherReads.map((action: { role: string }) => action.role))).toEqual(
+      new Set(["FARMER", "COORDINATOR", "TRANSPORTER"]),
+    );
 
     const derived = await server.inject({
       method: "POST",
@@ -781,6 +815,17 @@ describe("participant Product API", () => {
     const participantAuth = { authorization: `Bearer ${participantSession.json().accessToken}` };
     const me = await server.inject({ method: "GET", url: "/v1/me", headers: participantAuth });
     expect(me.json()).toMatchObject({ role: "BUYER", synthetic: true, simulationRunId: runId, readOnly: true });
+    const participantWeather = await server.inject({ method: "GET", url: "/v1/weather", headers: participantAuth });
+    expect(participantWeather.statusCode).toBe(200);
+    expect(participantWeather.json().simulationRunId).toBe(runId);
+    const otherRunWeather = await server.inject({
+      method: "GET",
+      url: `/v1/weather?simulationRunId=${pair.json().baselineRunId}`,
+      headers: participantAuth,
+    });
+    expect(otherRunWeather.statusCode).toBe(403);
+    expect(otherRunWeather.json().code).toBe("RUN_SCOPE_FORBIDDEN");
+
     const blockedMutation = await server.inject({
       method: "POST",
       url: "/v1/buyer-demands",

@@ -547,3 +547,32 @@ model IdempotencyRecord {
   @@unique([actorId, method, path, key])
   @@map("idempotency_records")
 }
+
+/// One island-day of observed weather, plus the forecast issued on that day.
+///
+/// Only days that have already occurred are ever written, so this table cannot
+/// hold future weather and the endpoint over it cannot leak any. Realised
+/// fields are SYNTHETIC records; `forecast` is a MODEL_PREDICTED array of
+/// `WeatherForecastDay`, which is a different kind of claim and carries its own
+/// label. Rows with a null `simulationRunId` belong to the seeded development
+/// world; a connected run writes its own.
+model WeatherObservation {
+  id                 String     @id @default(uuid()) @db.Uuid
+  islandId           String     @map("island_id")
+  observedOn         DateTime   @map("observed_on") @db.Date
+  condition          String
+  rainMm             Float      @map("rain_mm")
+  windKph            Float      @map("wind_kph")
+  windFromDegrees    Float      @map("wind_from_degrees")
+  cloudCoverFraction Float      @map("cloud_cover_fraction")
+  tempBand           String     @map("temp_band")
+  provenance         Provenance
+  forecast           Json
+  forecastProvenance Provenance @map("forecast_provenance")
+  simulationRunId    String?    @map("simulation_run_id") @db.Uuid
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([simulationRunId, islandId, observedOn])
+  @@index([islandId, observedOn])
+  @@map("weather_observations")
+}

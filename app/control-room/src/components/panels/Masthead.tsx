@@ -10,13 +10,20 @@
  * right next to the claim.
  */
 
-import type { ControlRoomScene } from "@harvest/simulation";
+import type { ControlRoomFrame, ControlRoomScene } from "@harvest/simulation";
+
+import { weatherHeadline } from "@/lib/run";
 
 export interface MastheadProps {
   scene: ControlRoomScene;
+  frame?: ControlRoomFrame;
 }
 
-export default function Masthead({ scene }: MastheadProps): React.JSX.Element {
+export default function Masthead({ scene, frame }: MastheadProps): React.JSX.Element {
+  // Weather comes off the saved frame rather than from a request, so scrubbing
+  // backwards shows the sky as it was, never as it is now. Absent on replays
+  // saved before issue #37, in which case the pill simply is not there.
+  const weather = frame ? weatherHeadline(frame) : null;
   return (
     <div className="masthead">
       <span className="masthead-mark" aria-hidden="true">
@@ -30,6 +37,11 @@ export default function Masthead({ scene }: MastheadProps): React.JSX.Element {
 
       <span className="pill">{scene.policy.toLowerCase()}</span>
       <span className="pill">seed {scene.seed}</span>
+      {weather && (
+        <span className="pill" title="Synthetic realised weather; forecasts are model predictions and can be wrong.">
+          {weather}
+        </span>
+      )}
 
       {/*
        * Mandatory, never dismissible: this run is entirely synthetic and must

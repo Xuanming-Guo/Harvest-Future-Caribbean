@@ -23,6 +23,7 @@ import type {
   BuyerDemand,
   Commitment,
   Farm,
+  ObservableWeatherAccess,
   ObservedCropBatch,
   ObservedDisruption,
   ObservedWorld,
@@ -57,6 +58,16 @@ export interface PolicyContext {
   readonly ids: IdFactory;
   /** A stream reserved for policy decisions, independent of world generation. */
   readonly random: RandomStream;
+  /**
+   * Weather, as a participant may see it.
+   *
+   * Realised days that have already happened, and forecasts for the ones that
+   * have not. A policy cannot reach realised weather for a future day through
+   * this object — the accessor refuses it — so acting on a forecast is acting
+   * on something that can be wrong, which is the point. A forecast informs a
+   * decision; it never changes what the crop does.
+   */
+  readonly weather: ObservableWeatherAccess;
   /** Records a decision for the trace. */
   record(decision: Omit<DecisionRecord, 'at'>): void;
   /**
@@ -132,6 +143,16 @@ export interface PolicyCapabilities {
   readonly maxHoldMs: number;
   /** Re-run matching for demand still waiting when new ready supply is reported. */
   readonly rematchOnNewSupply: boolean;
+  /**
+   * Read the shared weather forecast when scheduling a collection.
+   *
+   * Declared here for the same reason the two levers above are: it is a
+   * coordination behaviour the engine performs, and a fragmented market has
+   * nobody comparing a forecast against a field full of ready crop. Withholding
+   * it from the baseline is a modelling choice, and it is stated rather than
+   * hidden inside an `if (policy.name === ...)`.
+   */
+  readonly readsForecast: boolean;
 }
 
 export interface CoordinationPolicy {
