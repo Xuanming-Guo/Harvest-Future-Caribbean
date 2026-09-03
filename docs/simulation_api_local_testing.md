@@ -208,7 +208,7 @@ columns show what each change to the fulfilment path moved:
 
 The first column is the pre-#53 baseline this document recorded before the
 readiness fixes, when unready crop was still listable, so eight commitments
-were approved but only 359 kg survived to delivery. The middle column is the
+were approved but only 359 kg survived to delivery. The second column is the
 readiness, expiry, and re-match fixes. The third adds safe partial commitment:
 two more orders reach a commitment they would previously have waited out, and
 the horizon-truncated order carries a cause instead of sitting in `pending`.
