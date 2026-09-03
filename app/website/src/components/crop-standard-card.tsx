@@ -16,6 +16,7 @@ export function CropStandardCard({ standard }: { standard: ApiSchema<"CropStanda
       <SectionTitle title="What buyers expect" detail={`${standard.publisherName} v${standard.version}`} />
       <div className="crop-standard-meta">
         <Badge>{standard.status}</Badge>
+        <Badge tone="amber">Reference material</Badge>
         <span>{standard.geography}</span>
         <span>Reviewed {formatDate(standard.reviewedAt, false)}</span>
       </div>

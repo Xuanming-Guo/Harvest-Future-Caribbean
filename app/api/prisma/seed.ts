@@ -42,7 +42,7 @@ const cardiGreenhouseUrl = "https://www.cardi.org/wp-content/uploads/2020/01/TRO
 const cardiDasheenUrl = "https://www.cardi.org/wp-content/uploads/2011/02/Commercial-Dasheen-Production-and-Postharvest-protocol-for-OECS.pdf";
 const faoGapUrl = "https://www.fao.org/4/i3284e/i3284e.pdf";
 const faoPackhouseUrl = "https://www.fao.org/4/i2678e/i2678e00.pdf";
-const uneceCucumberUrl = "https://unece.org/fileadmin/DAM/trade/agr/standard/standard/fresh/FFV-Std/English/15_Cucumbers.pdf";
+const uneceCucumberUrl = "https://unece.org/trade/wp7/FFV-Standards";
 
 async function main() {
   // Development seed data is disposable. Clear derived workflow state first so
@@ -112,45 +112,45 @@ async function main() {
         reviewedAt: at("2026-09-03T12:00:00Z"),
         geography: "Saint Lucia buyer reference; adapt to local field conditions with an agricultural adviser",
         source: {
-          title: "Stakeholder/reference material: UNECE Standard FFV-15 — Cucumbers (2017)",
+          title: "UNECE Standard FFV-15 — Cucumbers (2017)",
           url: uneceCucumberUrl,
           licence: "© United Nations; linked for reference under UN terms of use",
           retrievedAt,
         },
         checklist: [
-          { key: "VARIETY", requirement: "Stakeholder/reference material: Supply fresh slicing varieties of Cucumis sativus L. and keep each package uniform by variety." },
-          { key: "SIZE_AND_GRADE", requirement: "Stakeholder/reference material: Keep cucumbers reasonably uniform in size within each package and identify the agreed buyer grade and size range." },
-          { key: "MATURITY_AND_APPEARANCE", requirement: "Stakeholder/reference material: Fruit should be firm, fresh, sufficiently developed with soft seeds, and green without visible yellowing." },
-          { key: "PERMITTED_DEFECTS", requirement: "Stakeholder/reference material: Only slight shape or colouring defects that do not affect the flesh, keeping quality, or presentation are acceptable; decay is not acceptable." },
-          { key: "CLEANING", requirement: "Stakeholder/reference material: Cucumbers should be clean, practically free of visible foreign matter, and free of abnormal external moisture." },
-          { key: "PACKAGING", requirement: "Stakeholder/reference material: Use clean protective packaging, keep contents uniform in quality and size, and avoid handling damage." },
+          { key: "VARIETY", requirement: "Supply fresh slicing varieties of Cucumis sativus L. and keep each package uniform by variety." },
+          { key: "SIZE_AND_GRADE", requirement: "Keep cucumbers reasonably uniform in size within each package and identify the agreed buyer grade and size range." },
+          { key: "MATURITY_AND_APPEARANCE", requirement: "Fruit should be firm, fresh, sufficiently developed with soft seeds, and green without visible yellowing." },
+          { key: "PERMITTED_DEFECTS", requirement: "Only slight shape or colouring defects that do not affect the flesh, keeping quality, or presentation are acceptable; decay is not acceptable." },
+          { key: "CLEANING", requirement: "Cucumbers should be clean, practically free of visible foreign matter, and free of abnormal external moisture." },
+          { key: "PACKAGING", requirement: "Use clean protective packaging, keep contents uniform in quality and size, and avoid handling damage." },
         ],
         images: [],
         guidance: [
           {
             topic: "HARVEST_WINDOW",
-            text: "Stakeholder/reference material: CARDI reports about 50–70 days from seeding to the first cucumber harvest, with timing dependent on variety and growing conditions.",
-            source: { title: "Stakeholder/reference material: CARDI Tropical Greenhouse Growers Manual", url: cardiGreenhouseUrl, retrievedAt },
+            text: "CARDI reports about 50–70 days from seeding to the first cucumber harvest, with timing dependent on variety and growing conditions.",
+            source: { title: "CARDI Tropical Greenhouse Growers Manual", url: cardiGreenhouseUrl, retrievedAt },
           },
           {
             topic: "PEST_AND_DISEASE_SIGNS",
-            text: "Stakeholder/reference material: Check for thrips-related fruit crooking, yellow angular leaf spots, white powdery growth on leaves or stems, mosaic symptoms, and grey mould or stem rot.",
-            source: { title: "Stakeholder/reference material: CARDI Tropical Greenhouse Growers Manual", url: cardiGreenhouseUrl, retrievedAt },
+            text: "Check for thrips-related fruit crooking, yellow angular leaf spots, white powdery growth on leaves or stems, mosaic symptoms, and grey mould or stem rot.",
+            source: { title: "CARDI Tropical Greenhouse Growers Manual", url: cardiGreenhouseUrl, retrievedAt },
           },
           {
             topic: "GOOD_AGRICULTURAL_PRACTICE",
-            text: "Stakeholder/reference material: Plan harvest and packing together, train harvest workers, use clean sharp tools, handle fruit gently, and move harvested produce promptly into shade.",
-            source: { title: "Stakeholder/reference material: FAO Good Agricultural Practices for Greenhouse Vegetable Crops", url: faoGapUrl, retrievedAt },
+            text: "Plan harvest and packing together, train harvest workers, use clean sharp tools, handle fruit gently, and move harvested produce promptly into shade.",
+            source: { title: "FAO Good Agricultural Practices for Greenhouse Vegetable Crops", url: faoGapUrl, retrievedAt },
           },
           {
             topic: "HARVEST_READINESS",
-            text: "Stakeholder/reference material: Harvest near full size while seeds remain soft; firmness, gloss, uniform shape, dark green colour, and no yellowing are practical readiness checks.",
-            source: { title: "Stakeholder/reference material: FAO Good Agricultural Practices for Greenhouse Vegetable Crops", url: faoGapUrl, retrievedAt },
+            text: "Harvest near full size while seeds remain soft; firmness, gloss, uniform shape, dark green colour, and no yellowing are practical readiness checks.",
+            source: { title: "FAO Good Agricultural Practices for Greenhouse Vegetable Crops", url: faoGapUrl, retrievedAt },
           },
           {
             topic: "SORTING_GRADING_CLEANING_STORAGE",
-            text: "Stakeholder/reference material: Field-sort out produce with mechanical damage, pest damage, decay, or severe misshaping; grade to the buyer's size and quality criteria and keep produce shaded while it moves to packing.",
-            source: { title: "Stakeholder/reference material: FAO Good Practice in the Design, Management and Operation of a Fresh Produce Packing-House", url: faoPackhouseUrl, retrievedAt },
+            text: "Field-sort out produce with mechanical damage, pest damage, decay, or severe misshaping; grade to the buyer's size and quality criteria and keep produce shaded while it moves to packing.",
+            source: { title: "FAO Good Practice in the Design, Management and Operation of a Fresh Produce Packing-House", url: faoPackhouseUrl, retrievedAt },
           },
         ],
       },
@@ -163,45 +163,45 @@ async function main() {
         reviewedAt: at("2026-09-03T12:00:00Z"),
         geography: "Saint Lucia and the OECS; stakeholder/reference material for buyer review",
         source: {
-          title: "Stakeholder/reference material: CARDI Commercial Dasheen Production and Post-Harvest Protocol for the OECS",
+          title: "CARDI Commercial Dasheen Production and Post-Harvest Protocol for the OECS",
           url: cardiDasheenUrl,
           licence: "Copyright CARDI; linked and paraphrased as reference material",
           retrievedAt,
         },
         checklist: [
-          { key: "VARIETY", requirement: "Stakeholder/reference material: Any dasheen variety may be supplied when it meets the agreed corm specifications." },
-          { key: "SIZE_AND_GRADE", requirement: "Stakeholder/reference material: Corms should weigh 0.9–4.5 kg; separate undersized, malformed, soft, insect-damaged, mechanically damaged, or diseased corms." },
-          { key: "MATURITY_AND_APPEARANCE", requirement: "Stakeholder/reference material: Supply mature, rounded, symmetrical corms with moist white flesh and no internal breakdown or discolouration." },
-          { key: "PERMITTED_DEFECTS", requirement: "Stakeholder/reference material: Small cormel attachment scars and a trimmed tail are acceptable; other cuts, softening, surface mould, and multi-headed deformation are not." },
-          { key: "CLEANING", requirement: "Stakeholder/reference material: Remove roots, dead tissue, loose soil, and visible field debris without bruising or cutting the corm." },
-          { key: "PACKAGING", requirement: "Stakeholder/reference material: Use rigid field crates before packing; final export packs are typically 18–20 kg and should carry packer, producer, origin, size, grade, and net-weight details." },
+          { key: "VARIETY", requirement: "Any dasheen variety may be supplied when it meets the agreed corm specifications." },
+          { key: "SIZE_AND_GRADE", requirement: "Corms should weigh 0.9–4.5 kg; separate undersized, malformed, soft, insect-damaged, mechanically damaged, or diseased corms." },
+          { key: "MATURITY_AND_APPEARANCE", requirement: "Supply mature, rounded, symmetrical corms with moist white flesh and no internal breakdown or discolouration." },
+          { key: "PERMITTED_DEFECTS", requirement: "Small cormel attachment scars and a trimmed tail are acceptable; other cuts, softening, surface mould, and multi-headed deformation are not." },
+          { key: "CLEANING", requirement: "Remove roots, dead tissue, loose soil, and visible field debris without bruising or cutting the corm." },
+          { key: "PACKAGING", requirement: "Use rigid field crates before packing; final export packs are typically 18–20 kg and should carry packer, producer, origin, size, grade, and net-weight details." },
         ],
         images: [],
         guidance: [
           {
             topic: "HARVEST_WINDOW",
-            text: "Stakeholder/reference material: CARDI reports harvest at about 7–8 months in drier areas and 9–10 months in wetter areas; local rainfall and the agro-ecological zone affect timing.",
-            source: { title: "Stakeholder/reference material: CARDI Commercial Dasheen Production and Post-Harvest Protocol for the OECS", url: cardiDasheenUrl, retrievedAt },
+            text: "CARDI reports harvest at about 7–8 months in drier areas and 9–10 months in wetter areas; local rainfall and the agro-ecological zone affect timing.",
+            source: { title: "CARDI Commercial Dasheen Production and Post-Harvest Protocol for the OECS", url: cardiDasheenUrl, retrievedAt },
           },
           {
             topic: "PEST_AND_DISEASE_SIGNS",
-            text: "Stakeholder/reference material: Inspect corms for beetle holes and tunnels, and watch harvested corms for wounds, browning, fungal growth, softening, or soft rot that can indicate post-harvest infection.",
-            source: { title: "Stakeholder/reference material: CARDI Commercial Dasheen Production and Post-Harvest Protocol for the OECS", url: cardiDasheenUrl, retrievedAt },
+            text: "Inspect corms for beetle holes and tunnels, and watch harvested corms for wounds, browning, fungal growth, softening, or soft rot that can indicate post-harvest infection.",
+            source: { title: "CARDI Commercial Dasheen Production and Post-Harvest Protocol for the OECS", url: cardiDasheenUrl, retrievedAt },
           },
           {
             topic: "GOOD_AGRICULTURAL_PRACTICE",
-            text: "Stakeholder/reference material: Select vigorous planting material, match planting and spacing to soil and rainfall conditions, maintain ground cover where suitable, and use cultural monitoring to reduce crop damage.",
-            source: { title: "Stakeholder/reference material: CARDI Commercial Dasheen Production and Post-Harvest Protocol for the OECS", url: cardiDasheenUrl, retrievedAt },
+            text: "Select vigorous planting material, match planting and spacing to soil and rainfall conditions, maintain ground cover where suitable, and use cultural monitoring to reduce crop damage.",
+            source: { title: "CARDI Commercial Dasheen Production and Post-Harvest Protocol for the OECS", url: cardiDasheenUrl, retrievedAt },
           },
           {
             topic: "HARVEST_READINESS",
-            text: "Stakeholder/reference material: Most leaves beginning to senesce and the main corm becoming visible as it pushes toward the soil surface are practical maturity signs; sample plants before harvesting the lot.",
-            source: { title: "Stakeholder/reference material: CARDI Commercial Dasheen Production and Post-Harvest Protocol for the OECS", url: cardiDasheenUrl, retrievedAt },
+            text: "Most leaves beginning to senesce and the main corm becoming visible as it pushes toward the soil surface are practical maturity signs; sample plants before harvesting the lot.",
+            source: { title: "CARDI Commercial Dasheen Production and Post-Harvest Protocol for the OECS", url: cardiDasheenUrl, retrievedAt },
           },
           {
             topic: "SORTING_GRADING_CLEANING_STORAGE",
-            text: "Stakeholder/reference material: Remove cormels and loose soil, reject undersized, malformed, damaged, soft, insect-damaged, or diseased corms, and move accepted corms in rigid crates. CARDI reports storage at 12–13°C and 80–90% relative humidity for up to 3–4 weeks.",
-            source: { title: "Stakeholder/reference material: CARDI Commercial Dasheen Production and Post-Harvest Protocol for the OECS", url: cardiDasheenUrl, retrievedAt },
+            text: "Remove cormels and loose soil, reject undersized, malformed, damaged, soft, insect-damaged, or diseased corms, and move accepted corms in rigid crates. CARDI reports storage at 12–13°C and 80–90% relative humidity for up to 3–4 weeks.",
+            source: { title: "CARDI Commercial Dasheen Production and Post-Harvest Protocol for the OECS", url: cardiDasheenUrl, retrievedAt },
           },
         ],
       },
