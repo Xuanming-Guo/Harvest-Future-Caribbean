@@ -6,11 +6,12 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 
+import { DecisionExplanation, decisionReasonLabel } from "@/components/decision-reason";
 import { DeviceUpdateList, OfflineHint, useOnlineStatus, useOutbox } from "@/components/offline";
 import { useSession } from "@/components/providers";
 import { Badge, Card, ErrorState, LoadingState, PageHeader, SectionTitle } from "@/components/ui";
 import { ApiProblem, api } from "@/lib/api";
-import { dateInputOffset, formatDate, formatPercent, titleCase } from "@/lib/format";
+import { compactId, dateInputOffset, formatDate, formatPercent, titleCase } from "@/lib/format";
 import {
   clearCropDraft,
   enqueueOutboxItem,
@@ -21,7 +22,6 @@ import {
   type ObservationBody,
   type OutboxItem,
 } from "@/lib/outbox";
-
 /** A queued write is a success for the farmer, so both paths share one result. */
 type SubmitResult = { queued: boolean };
 
@@ -44,6 +44,22 @@ export default function CropDetailPage() {
   const [message, setMessage] = useState<string | null>(null);
 
   const batch = useQuery({ queryKey: ["crop-batch", cropBatchId], queryFn: () => api.cropBatch(cropBatchId), refetchInterval: 15_000 });
+  // Composed client-side from existing read endpoints. No new endpoint, and no
+  // private farm coordinates are exposed here.
+  const journey = useQuery({
+    queryKey: ["crop-journey", cropBatchId],
+    queryFn: async () => {
+      const list = await api.orders(cropBatchId);
+      const details = await Promise.all(list.items.map((item) => api.order(item.orderId)));
+      return Promise.all(details.map(async (order) => {
+        const missionId = order.deliveryMission?.missionId;
+        const updates = missionId ? await api.missionUpdates(missionId).catch(() => null) : null;
+        const stamp = (updateType: string) => updates?.items.find((item) => item.updateType === updateType)?.recordedAt;
+        return { order, pickedUpAt: stamp("PICKED_UP"), deliveredAt: stamp("DELIVERED") };
+      }));
+    },
+    refetchInterval: 30_000,
+  });
   const prediction = useQuery({
     queryKey: ["prediction", batch.data?.latestPredictionId],
     queryFn: () => api.prediction(batch.data!.latestPredictionId!),
@@ -196,6 +212,13 @@ export default function CropDetailPage() {
     <>
       <Link className="back-link" href={actor?.role === "COORDINATOR" ? "/coordinator" : "/farmer"}><ArrowLeft size={16} />Back to crops</Link>
       <PageHeader eyebrow="Crop batch" title={batch.data.cropType} description={`${batch.data.availableToPromise.value} kg can currently be promised without overcommitting.`} actions={<Badge>{batch.data.status}</Badge>} />
+      {batch.data.latestDecision && (
+        <Card className="decision-card">
+          <SectionTitle title="What was wrong, and what to do next" detail={`Recorded ${formatDate(batch.data.latestDecision.decidedAt)}`} />
+          <p className="decision-source">{batch.data.latestDecision.source === "DELIVERY" ? "A buyer did not accept part of this crop at delivery." : "A coordinator asked for changes before this crop update could be verified."}</p>
+          <DecisionExplanation decision={batch.data.latestDecision} title={decisionReasonLabel(batch.data.latestDecision.reasonCode)} />
+        </Card>
+      )}
       <div className="grid two-column">
         <div data-tour="crop-outlook"><Card>
           <SectionTitle title="Harvest outlook" detail="Range, not a false promise" />
@@ -279,6 +302,64 @@ export default function CropDetailPage() {
           </form>
         </Card></div>
       )}
+      <div className="section-gap"><Card>
+        <SectionTitle title="Journey" detail="Traceability evidence, not food-safety certification." />
+        <ol className="journey">
+          <li>
+            <span className="journey-marker" />
+            <div>
+              <strong>Crop batch</strong>
+              <p>{titleCase(batch.data.cropType)}, {titleCase(batch.data.status)}, {batch.data.availableToPromise.value} kg safe to promise</p>
+              <small>Evidence label: {titleCase(batch.data.provenance)}</small>
+            </div>
+          </li>
+          <li>
+            <span className="journey-marker" />
+            <div>
+              <strong>Farm</strong>
+              <p>{actor?.role === "FARMER" ? `${actor.name}, farm ${compactId(batch.data.farmId)}` : `Farm ${compactId(batch.data.farmId)}`}</p>
+              <small>Exact farm coordinates are never shown here.</small>
+            </div>
+          </li>
+          <li>
+            <span className="journey-marker" />
+            <div>
+              <strong>Recorded evidence</strong>
+              <p>{batch.data.latestObservationId ? `Latest crop update ${compactId(batch.data.latestObservationId)}` : "No crop update recorded yet"}</p>
+              <small>{prediction.data ? `Forecast recorded ${formatDate(prediction.data.generatedAt)}, expected harvest ${formatDate(prediction.data.harvestWindow.start, false)} to ${formatDate(prediction.data.harvestWindow.end, false)}` : "No forecast recorded yet"}. Verification: {titleCase(batch.data.verificationStatus ?? "UNVERIFIED")}.</small>
+            </div>
+          </li>
+          {!journey.data ? (
+            <li><span className="journey-marker" /><div><strong>Orders</strong><p>{journey.error ? "Order history could not be loaded." : "Loading order history..."}</p></div></li>
+          ) : !journey.data.length ? (
+            <li><span className="journey-marker" /><div><strong>Orders</strong><p>No buyer has committed to this crop batch yet.</p></div></li>
+          ) : journey.data.map(({ order, pickedUpAt, deliveredAt }) => {
+            const committed = order.allocation?.lines.find((line) => line.cropBatchId === cropBatchId)?.quantity.value;
+            const acceptance = order.deliveryAcceptance;
+            const line = (acceptance?.lineOutcomes ?? []).find((item) => item.cropBatchId === cropBatchId);
+            const rejectedKg = line ? line.rejectedQuantity.value : acceptance?.rejectedQuantity.value ?? 0;
+            return (
+              <li key={order.orderId}>
+                <span className="journey-marker" />
+                <div>
+                  <strong>Order {compactId(order.orderId)}</strong>
+                  <p>{committed ? `${committed} kg committed from this batch` : "Committed quantity not recorded"}, needed by {formatDate(order.neededBy)}</p>
+                  <small>{order.deliveryMission ? `Picked up ${formatDate(pickedUpAt)}, delivered ${formatDate(deliveredAt)}, transporter ${order.deliveryMission.transporterId ? compactId(order.deliveryMission.transporterId) : "not yet assigned"}` : "No delivery job created yet"}</small>
+                  {acceptance && (
+                    <div className="journey-outcome">
+                      <Badge>{acceptance.outcome}</Badge>
+                      <span>{line ? `${line.acceptedQuantity.value} kg accepted, ${line.rejectedQuantity.value} kg rejected from this batch` : `${acceptance.acceptedQuantity.value} kg accepted, ${acceptance.rejectedQuantity.value} kg rejected`}</span>
+                      {rejectedKg > 0 && <span>Reason: {decisionReasonLabel(line?.reasonCode ?? acceptance.reasonCode)}</span>}
+                      {rejectedKg > 0 && (line?.nextAction ?? acceptance.nextAction) && <span>Next step: {line?.nextAction ?? acceptance.nextAction}</span>}
+                    </div>
+                  )}
+                  <Link className="text-link" href={`/orders/${order.orderId}`}>View order</Link>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      </Card></div>
       {(message || intake.error || observation.error || refresh.error || listing.error) && <p className={(intake.error || observation.error || refresh.error || listing.error) ? "form-error" : "form-success"}>{message ?? intake.error?.message ?? observation.error?.message ?? refresh.error?.message ?? listing.error?.message}</p>}
     </>
   );

@@ -5,6 +5,7 @@ import { ArrowRight, CalendarDays, MapPin, Scale, Sprout, Truck } from "lucide-r
 import Link from "next/link";
 
 import { ApprovalList } from "@/components/approval-list";
+import { DecisionExplanation, decisionReasonLabel } from "@/components/decision-reason";
 import { DeviceUpdateList, useOutbox } from "@/components/offline";
 import { OrderList } from "@/components/order-list";
 import { useSession } from "@/components/providers";
@@ -19,6 +20,8 @@ export default function FarmerHome() {
   const missions = useQuery({ queryKey: ["missions"], queryFn: () => api.missions(), refetchInterval: 5_000 });
   const deviceUpdates = useOutbox();
 
+  const needsAction = (batches.data?.items ?? []).filter((batch) => batch.latestDecision);
+
   return (
     <>
       <div data-tour="farmer-home"><PageHeader eyebrow="My farm" title={`Welcome, ${actor?.name.split(" ")[0] ?? "farmer"}`} description="Share a simple crop update, see what can safely be sold, and respond to order requests." /></div>
@@ -29,6 +32,24 @@ export default function FarmerHome() {
             <Metric label="Safe to promise" value={`${batches.data.items.reduce((sum, batch) => sum + batch.availableToPromise.value, 0)} kg`} detail="Across your crops" icon={Scale} tone="blue" />
             <Metric label="Harvest ready" value={batches.data.items.filter((batch) => batch.status === "HARVEST_READY").length} detail="Ready for market" icon={CalendarDays} tone="amber" />
           </div>
+          {needsAction.length > 0 && (
+            <Card className="decision-card">
+              <SectionTitle title="What was wrong, and what to do next" detail={`${needsAction.length} crop ${needsAction.length === 1 ? "batch needs" : "batches need"} your attention`} />
+              <div className="decision-list">
+                {needsAction.map((batch) => (
+                  <Link className="decision-row" href={`/crops/${batch.cropBatchId}`} key={batch.cropBatchId}>
+                    <div>
+                      <Badge tone="high">{decisionReasonLabel(batch.latestDecision?.reasonCode)}</Badge>
+                      <h3>{titleCase(batch.cropType)}</h3>
+                      <p>{batch.latestDecision?.source === "DELIVERY" ? "A buyer did not accept part of this crop at delivery." : "A coordinator asked for changes to this crop update."}</p>
+                      {batch.latestDecision && <DecisionExplanation decision={batch.latestDecision} title={`Recorded ${formatDate(batch.latestDecision.decidedAt)}`} />}
+                    </div>
+                    <ArrowRight size={18} />
+                  </Link>
+                ))}
+              </div>
+            </Card>
+          )}
           <div className="dashboard-grid">
             <Card>
               <SectionTitle title="My crops" detail="Update at any time" />
