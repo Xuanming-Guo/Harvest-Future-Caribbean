@@ -357,6 +357,7 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .island-stage:focus-visible { outline: 5px solid #ffe173; outline-offset: -5px; }
 .island-stage.is-dragging { cursor: grabbing; }
 .world-pan-layer { position: absolute; inset: -1px; container-type: size; transform-origin: 50% 50%; transition: transform .32s cubic-bezier(.2,.8,.2,1); will-change: transform; }
+.island-stage.is-camera-moving .world-pan-layer { transition-duration: .68s; transition-timing-function: cubic-bezier(.16,.84,.24,1); }
 .island-stage.is-dragging .world-pan-layer { transition: none; }
 .world-scene-surface { position: absolute; top: 50%; left: 50%; width: max(100%, 150cqh); height: max(100%, 66.667cqw); overflow: hidden; transform: translate(-50%, -50%); }
 .island-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; user-select: none; }
@@ -364,7 +365,7 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .island-game-canvas { display: block; width: 100%; height: 100%; filter: drop-shadow(0 3px 2px rgba(49,53,27,.16)); }
 .route-start-label { position: absolute; z-index: 4; left: 90.2%; top: 84.8%; display: flex; align-items: center; gap: 5px; padding: 6px 8px; border: 2px solid rgba(107,63,27,.15); border-radius: 999px; color: #164f48; font-size: 10px; font-weight: 900; background: rgba(255,253,222,.92); box-shadow: 0 3px 0 rgba(94,52,22,.22); transform: translate(-50%, -50%); }
 .route-node { position: absolute; z-index: 5; display: grid; justify-items: center; min-width: 102px; padding: 0; border: 0; color: #173e34; text-align: center; background: transparent; cursor: pointer; transform: translate(-50%, -50%); }
-.route-node:focus-visible { outline: none; }
+.route-node:focus-visible { outline: 4px solid #fff4a8; outline-offset: 5px; border-radius: 50%; }
 .route-node-icon { position: relative; display: grid; width: 48px; height: 48px; place-items: center; border: 4px solid #fff7d7; border-radius: 50% 50% 46% 46%; color: white; background: radial-gradient(circle at 35% 27%, #57a874 0 10%, #287b4e 54%, #1a6241); box-shadow: 0 5px 0 #175438, 0 8px 14px rgba(14,64,49,.32); transition: transform .24s cubic-bezier(.2,.8,.2,1), box-shadow .24s ease; animation: route-marker-float 1.9s ease-in-out var(--marker-delay) infinite alternate; }
 .route-node-icon::after { content: ""; position: absolute; z-index: -1; bottom: -13px; left: 50%; width: 19px; height: 10px; border-radius: 50%; background: rgba(40,48,23,.34); filter: blur(1px); transform: translateX(-50%); }
 .route-node-dropoff .route-node-icon { color: #fff8d7; background: #e76a45; box-shadow: 0 5px 0 #a8402b, 0 8px 14px rgba(79,41,22,.3); }
@@ -372,6 +373,7 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .route-node > span:last-child b { display: grid; flex: 0 0 auto; width: 17px; height: 17px; place-items: center; border-radius: 50%; color: white; font-size: 9px; background: #2c7654; }
 .route-node:hover .route-node-icon, .route-node.is-selected .route-node-icon, .route-node:focus-visible .route-node-icon { transform: translateY(-4px) scale(1.07); box-shadow: 0 7px 0 #175438, 0 11px 16px rgba(14,64,49,.35); }
 .route-node.is-selected .route-node-icon { outline: 4px solid #ffd452; outline-offset: 3px; }
+.world-scene-surface:has(.island-game-renderer[data-renderer-ready="true"]) .route-node > span { opacity: 0; }
 @keyframes route-marker-float { from { translate: 0 0; } to { translate: 0 -5px; } }
 .journey-warning { position: absolute; z-index: 8; top: 18px; right: 18px; display: grid; width: 39px; height: 39px; place-items: center; border: 3px solid white; border-radius: 50%; color: white; background: #c94c3d; box-shadow: 0 5px 12px rgba(87,34,26,.3); }
 .world-map-hint { position: absolute; z-index: 10; left: 16px; bottom: 16px; display: flex; align-items: center; gap: 6px; padding: 7px 10px; border: 2px solid rgba(74,44,20,.14); border-radius: 999px; color: #32594e; font-size: 10px; font-weight: 900; background: rgba(255,251,220,.9); box-shadow: 0 3px 0 rgba(72,45,25,.18); pointer-events: none; }
@@ -407,6 +409,8 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .journey-controls .button, .journey-controls .button-secondary { width: 100%; justify-content: center; }
 .farm-progress-scene { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; padding: 24px; overflow: auto; color: #163f33; background: #79c8ca; cursor: default; animation: farm-camera-arrive .72s cubic-bezier(.16,.84,.24,1) both; transform-origin: 31% 57%; }
 @keyframes farm-camera-arrive { from { opacity: 0; filter: saturate(.75) blur(3px); transform: scale(1.13); } to { opacity: 1; filter: saturate(1) blur(0); transform: scale(1); } }
+.farm-progress-scene.is-leaving { pointer-events: none; animation: farm-camera-leave .43s cubic-bezier(.55,.08,.68,.53) both; }
+@keyframes farm-camera-leave { from { opacity: 1; filter: saturate(1) blur(0); transform: scale(1); } to { opacity: 0; filter: saturate(.72) blur(3px); transform: scale(1.12); } }
 .farm-scene-art { z-index: -2; object-fit: cover; pointer-events: none; user-select: none; }
 .farm-progress-scene::before { content: ""; position: absolute; z-index: -1; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(22,62,39,.11), transparent 40% 63%, rgba(24,65,43,.11)); }
 .farm-field-crops { position: absolute; z-index: 0; inset: 0; pointer-events: none; }

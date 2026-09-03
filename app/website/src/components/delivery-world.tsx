@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
-import { useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
 import { Badge, Card, EmptyState, SectionTitle } from "@/components/ui";
 import { IslandGameCanvas } from "@/components/island-game-canvas";
@@ -231,9 +231,9 @@ function FarmFieldCrops({ cargo }: { cargo: DeliveryCargo }) {
   );
 }
 
-function FarmProgressScene({ farmName, cargo, onBack }: { farmName: string; cargo: DeliveryCargo[]; onBack: () => void }) {
+function FarmProgressScene({ farmName, cargo, leaving, onBack }: { farmName: string; cargo: DeliveryCargo[]; leaving: boolean; onBack: () => void }) {
   return (
-    <div className="farm-progress-scene">
+    <div className={`farm-progress-scene ${leaving ? "is-leaving" : ""}`}>
       <Image className="farm-scene-art" src="/art/saint-lucia-farm.png" alt="" fill sizes="(max-width: 800px) 100vw, 70vw" priority />
       <FarmFieldCrops cargo={cargo[0]!} />
       <div className="farm-progress-header">
@@ -298,23 +298,116 @@ export function DeliveryJourney({
   const [zoomFarmId, setZoomFarmId] = useState<string | null>(null);
   const [mapView, setMapView] = useState({ x: 0, y: 0, zoom: 1 });
   const [detailsOpen, setDetailsOpen] = useState(detailsInitiallyOpen);
-  const drag = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
+  const [cameraBusy, setCameraBusy] = useState(false);
+  const [farmLeaving, setFarmLeaving] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const transitionTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const inertiaFrame = useRef<number | null>(null);
+  const gesture = useRef<{
+    pointers: Map<number, { x: number; y: number }>;
+    lastCenter: { x: number; y: number };
+    lastDistance?: number;
+    lastTime: number;
+    velocityX: number;
+    velocityY: number;
+  } | null>(null);
   const zoomCargo = zoomFarmId ? mission.cargo.filter((item) => item.farmId === zoomFarmId && item.cropStatus) : [];
   const zoomFarm = zoomCargo[0]?.farmName;
   const points = [routeStart, ...anchors];
   const gamePoints = points.map((point) => ({ x: point.x / 920, y: point.y / 560 }));
+  const gameMarkers = [
+    { kind: "DEPOT" as const, label: "Driver base", point: { x: routeStart.x / 920, y: routeStart.y / 560 }, sequence: 0 },
+    ...mission.stops.map((stop, index) => ({
+      kind: stop.kind,
+      label: stop.displayName,
+      point: { x: anchors[index]!.x / 920, y: anchors[index]!.y / 560 },
+      sequence: stop.sequence,
+    })),
+  ];
   const moving = mission.status === "IN_TRANSIT" && mission.currentStopSequence < mission.stops.length;
   const worldStyle = {
     transform: `translate3d(${mapView.x}px, ${mapView.y}px, 0) scale(${mapView.zoom})`,
   } as CSSProperties;
   const latestDelay = [...updates].reverse().find((update) => update.updateType === "DELAYED");
 
+  useEffect(() => () => {
+    transitionTimers.current.forEach(clearTimeout);
+    if (inertiaFrame.current !== null) cancelAnimationFrame(inertiaFrame.current);
+  }, []);
+
+  function scheduleTransition(callback: () => void, delay: number) {
+    const timer = setTimeout(callback, delay);
+    transitionTimers.current.push(timer);
+  }
+
+  function openFarm(stopSequence: number, farmId: string, anchor: { x: number; y: number }) {
+    setSelectedStop(stopSequence);
+    setDetailsOpen(false);
+    if (process.env.NODE_ENV === "test") {
+      setZoomFarmId(farmId);
+      return;
+    }
+    transitionTimers.current.forEach(clearTimeout);
+    transitionTimers.current = [];
+    setCameraBusy(true);
+    setMapView({
+      x: Math.max(-220, Math.min(220, (0.5 - anchor.x / 920) * 340)),
+      y: Math.max(-140, Math.min(140, (0.5 - anchor.y / 560) * 220)),
+      zoom: 1.48,
+    });
+    scheduleTransition(() => {
+      setZoomFarmId(farmId);
+      setCameraBusy(false);
+    }, 560);
+  }
+
+  function closeFarm() {
+    if (process.env.NODE_ENV === "test") {
+      setZoomFarmId(null);
+      setMapView({ x: 0, y: 0, zoom: 1 });
+      return;
+    }
+    setFarmLeaving(true);
+    scheduleTransition(() => {
+      setZoomFarmId(null);
+      setFarmLeaving(false);
+      setCameraBusy(true);
+      requestAnimationFrame(() => setMapView({ x: 0, y: 0, zoom: 1 }));
+      scheduleTransition(() => setCameraBusy(false), 680);
+    }, 430);
+  }
+
   function changeZoom(delta: number) {
-    setMapView((current) => ({ ...current, zoom: Math.min(1.8, Math.max(1, Number((current.zoom + delta).toFixed(1)))) }));
+    setMapView((current) => clampMapView(current.x, current.y, Number((current.zoom + delta).toFixed(1))));
   }
 
   function panBy(x: number, y: number) {
-    setMapView((current) => ({ ...current, x: Math.max(-220, Math.min(220, current.x + x)), y: Math.max(-140, Math.min(140, current.y + y)) }));
+    setMapView((current) => clampMapView(current.x + x, current.y + y, current.zoom));
+  }
+
+  function clampMapView(x: number, y: number, zoom: number) {
+    const boundedZoom = Math.min(1.8, Math.max(1, zoom));
+    const horizontalLimit = 220 + Math.max(0, boundedZoom - 1) * 180;
+    const verticalLimit = 140 + Math.max(0, boundedZoom - 1) * 130;
+    return {
+      x: Math.max(-horizontalLimit, Math.min(horizontalLimit, x)),
+      y: Math.max(-verticalLimit, Math.min(verticalLimit, y)),
+      zoom: boundedZoom,
+    };
+  }
+
+  function pointerCenter(pointers: Map<number, { x: number; y: number }>) {
+    const points = [...pointers.values()];
+    return {
+      x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+      y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+    };
+  }
+
+  function pointerDistance(pointers: Map<number, { x: number; y: number }>) {
+    const points = [...pointers.values()];
+    if (points.length < 2) return undefined;
+    return Math.hypot(points[0]!.x - points[1]!.x, points[0]!.y - points[1]!.y);
   }
 
   function onMapKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -327,21 +420,81 @@ export function DeliveryJourney({
 
   function onMapPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if ((event.target as HTMLElement).closest("button")) return;
-    drag.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: mapView.x, originY: mapView.y };
-    event.currentTarget.setPointerCapture(event.pointerId);
+    if (inertiaFrame.current !== null) {
+      cancelAnimationFrame(inertiaFrame.current);
+      inertiaFrame.current = null;
+    }
+    const point = { x: event.clientX, y: event.clientY };
+    if (!gesture.current) {
+      gesture.current = {
+        pointers: new Map([[event.pointerId, point]]),
+        lastCenter: point,
+        lastTime: event.timeStamp,
+        velocityX: 0,
+        velocityY: 0,
+      };
+    } else {
+      gesture.current.pointers.set(event.pointerId, point);
+      gesture.current.lastCenter = pointerCenter(gesture.current.pointers);
+      gesture.current.lastDistance = pointerDistance(gesture.current.pointers);
+      gesture.current.lastTime = event.timeStamp;
+    }
+    setDragging(true);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
   }
 
   function onMapPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!drag.current || drag.current.pointerId !== event.pointerId) return;
-    const nextX = drag.current.originX + event.clientX - drag.current.startX;
-    const nextY = drag.current.originY + event.clientY - drag.current.startY;
-    setMapView((current) => ({ ...current, x: Math.max(-220, Math.min(220, nextX)), y: Math.max(-140, Math.min(140, nextY)) }));
+    const currentGesture = gesture.current;
+    if (!currentGesture?.pointers.has(event.pointerId)) return;
+    currentGesture.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const center = pointerCenter(currentGesture.pointers);
+    const distance = pointerDistance(currentGesture.pointers);
+    const deltaX = center.x - currentGesture.lastCenter.x;
+    const deltaY = center.y - currentGesture.lastCenter.y;
+    const elapsed = Math.max(8, event.timeStamp - currentGesture.lastTime);
+
+    setMapView((current) => {
+      const zoomRatio = distance && currentGesture.lastDistance ? distance / currentGesture.lastDistance : 1;
+      const nextZoom = current.zoom * zoomRatio;
+      return clampMapView(current.x + deltaX, current.y + deltaY, nextZoom);
+    });
+
+    currentGesture.velocityX = deltaX / elapsed * 16;
+    currentGesture.velocityY = deltaY / elapsed * 16;
+    currentGesture.lastCenter = center;
+    currentGesture.lastDistance = distance;
+    currentGesture.lastTime = event.timeStamp;
   }
 
   function stopDragging(event: ReactPointerEvent<HTMLDivElement>) {
-    if (drag.current?.pointerId !== event.pointerId) return;
-    drag.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    const currentGesture = gesture.current;
+    if (!currentGesture?.pointers.has(event.pointerId)) return;
+    currentGesture.pointers.delete(event.pointerId);
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture?.(event.pointerId);
+
+    if (currentGesture.pointers.size) {
+      currentGesture.lastCenter = pointerCenter(currentGesture.pointers);
+      currentGesture.lastDistance = pointerDistance(currentGesture.pointers);
+      currentGesture.lastTime = event.timeStamp;
+      return;
+    }
+
+    gesture.current = null;
+    setDragging(false);
+    if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    let velocityX = currentGesture.velocityX;
+    let velocityY = currentGesture.velocityY;
+    const glide = () => {
+      velocityX *= 0.9;
+      velocityY *= 0.9;
+      if (Math.abs(velocityX) < 0.2 && Math.abs(velocityY) < 0.2) {
+        inertiaFrame.current = null;
+        return;
+      }
+      setMapView((current) => clampMapView(current.x + velocityX, current.y + velocityY, current.zoom));
+      inertiaFrame.current = requestAnimationFrame(glide);
+    };
+    if (Math.abs(velocityX) >= 0.2 || Math.abs(velocityY) >= 0.2) inertiaFrame.current = requestAnimationFrame(glide);
   }
 
   return (
@@ -352,8 +505,9 @@ export function DeliveryJourney({
       </div>
       <div className="journey-layout">
         <div
-          className={`island-stage ${drag.current ? "is-dragging" : ""}`}
+          className={`island-stage ${dragging ? "is-dragging" : ""} ${cameraBusy ? "is-camera-moving" : ""}`}
           tabIndex={zoomFarm ? -1 : 0}
+          aria-busy={cameraBusy}
           aria-label="Interactive Saint Lucia delivery map. Drag to move the island, or use the arrow keys."
           onKeyDown={onMapKeyDown}
           onPointerDown={onMapPointerDown}
@@ -362,7 +516,7 @@ export function DeliveryJourney({
           onPointerCancel={stopDragging}
         >
           {zoomFarm && zoomCargo.length ? (
-            <FarmProgressScene farmName={zoomFarm} cargo={zoomCargo} onBack={() => setZoomFarmId(null)} />
+            <FarmProgressScene farmName={zoomFarm} cargo={zoomCargo} leaving={farmLeaving} onBack={closeFarm} />
           ) : (
             <>
               <div className="world-pan-layer" style={worldStyle} data-zoom={mapView.zoom.toFixed(1)}>
@@ -371,10 +525,11 @@ export function DeliveryJourney({
                   <IslandGameCanvas
                     activeSegment={mission.status === "DELIVERED" ? points.length - 2 : mission.currentStopSequence}
                     delivered={mission.status === "DELIVERED"}
+                    markers={gameMarkers}
                     moving={moving}
                     points={gamePoints}
+                    selectedStop={selectedStop}
                   />
-                  <div className="route-start-label"><Route size={14} />Route start</div>
                   {mission.stops.map((stop, index) => {
                     const anchor = anchors[index]!;
                     const cargo = stop.farmId ? mission.cargo.filter((item) => item.farmId === stop.farmId && item.cropStatus) : [];
@@ -388,7 +543,7 @@ export function DeliveryJourney({
                         aria-pressed={selectedStop === stop.sequence}
                         onClick={() => {
                           setSelectedStop(stop.sequence);
-                          if (canZoom && stop.farmId) setZoomFarmId(stop.farmId);
+                          if (canZoom && stop.farmId) openFarm(stop.sequence, stop.farmId, anchor);
                         }}
                         key={`${stop.sequence}-${stop.displayName}`}
                       >
@@ -399,7 +554,7 @@ export function DeliveryJourney({
                   })}
                 </div>
               </div>
-              <div className="world-map-hint"><Move size={15} /><span>Drag to explore</span></div>
+              <div className="world-map-hint"><Move size={15} /><span>Illustrated island · drag to explore</span></div>
               <div className="world-map-controls" aria-label="Map controls">
                 <button type="button" onClick={() => changeZoom(.2)} aria-label="Zoom in"><Plus size={18} /></button>
                 <button type="button" onClick={() => changeZoom(-.2)} aria-label="Zoom out" disabled={mapView.zoom === 1}><Minus size={18} /></button>
@@ -432,7 +587,7 @@ export function DeliveryJourney({
                 <li className={`${complete ? "is-complete" : ""} ${current ? "is-current" : ""}`} key={stop.sequence}>
                   <button type="button" onClick={() => {
                     setSelectedStop(stop.sequence);
-                    if (cargo.length && stop.farmId) setZoomFarmId(stop.farmId);
+                    if (cargo.length && stop.farmId) openFarm(stop.sequence, stop.farmId, anchors[stop.sequence - 1]!);
                   }} aria-pressed={selectedStop === stop.sequence}>
                     <span>{complete ? <Check size={14} /> : stop.sequence}</span>
                     <span><strong>{stop.displayName}</strong><small>{titleCase(stop.kind)}{stop.quantity ? ` · ${stop.quantity.value} kg` : ""}</small></span>

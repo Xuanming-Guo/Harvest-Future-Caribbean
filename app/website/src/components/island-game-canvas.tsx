@@ -3,12 +3,20 @@
 import { useEffect, useRef, useState } from "react";
 
 export type IslandPoint = { x: number; y: number };
+export type IslandMarker = {
+  kind: "DEPOT" | "PICKUP" | "DROPOFF";
+  label: string;
+  point: IslandPoint;
+  sequence: number;
+};
 
 type IslandGameCanvasProps = {
   activeSegment: number;
   delivered: boolean;
+  markers: IslandMarker[];
   moving: boolean;
   points: IslandPoint[];
+  selectedStop: number;
 };
 
 type Curve = {
@@ -47,11 +55,17 @@ function curveDirection(curve: Curve, progress: number) {
   return { x: after.x - before.x, y: after.y - before.y };
 }
 
-export function IslandGameCanvas({ activeSegment, delivered, moving, points }: IslandGameCanvasProps) {
+export function IslandGameCanvas({ activeSegment, delivered, markers, moving, points, selectedStop }: IslandGameCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const selectedStopRef = useRef(selectedStop);
   const [reducedMotion, setReducedMotion] = useState(false);
   const pointKey = points.map((point) => `${point.x},${point.y}`).join(";");
+  const markerPayload = JSON.stringify(markers);
+
+  useEffect(() => {
+    selectedStopRef.current = selectedStop;
+  }, [selectedStop]);
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
@@ -71,7 +85,7 @@ export function IslandGameCanvas({ activeSegment, delivered, moving, points }: I
     let cleanup = () => undefined;
 
     void (async () => {
-      const { Application, Assets, Container, Graphics, Sprite } = await import("pixi.js");
+      const { Application, Assets, Container, Graphics, Sprite, Text } = await import("pixi.js");
       const app = new Application();
       await app.init({
         antialias: true,
@@ -96,9 +110,11 @@ export function IslandGameCanvas({ activeSegment, delivered, moving, points }: I
 
       const routeLayer = new Container();
       const ambientLayer = new Container();
+      const markerLayer = new Container();
       const dustLayer = new Container();
       const truckLayer = new Container();
-      app.stage.addChild(routeLayer, ambientLayer, dustLayer, truckLayer);
+      const celebrationLayer = new Container();
+      app.stage.addChild(routeLayer, ambientLayer, markerLayer, dustLayer, truckLayer, celebrationLayer);
 
       const routeGlow = new Graphics();
       const routeLine = new Graphics();
@@ -115,6 +131,53 @@ export function IslandGameCanvas({ activeSegment, delivered, moving, points }: I
         [0.91, 0.73], [0.94, 0.42], [0.82, 0.17], [0.63, 0.1], [0.37, 0.08],
       ];
 
+      const normalizedMarkers = JSON.parse(markerPayload) as IslandMarker[];
+      const worldMarkers = normalizedMarkers.map((marker) => {
+        const container = new Container();
+        const markerColor = marker.kind === "PICKUP" ? 0x55c982 : marker.kind === "DROPOFF" ? 0xff8262 : 0xffca52;
+        const groundGlow = new Graphics().ellipse(0, 6, 31, 18).fill({ color: markerColor, alpha: 0.15 });
+        const pulse = new Graphics().circle(0, 0, 25).stroke({ color: markerColor, width: 4, alpha: 0.8 });
+        const innerGlow = new Graphics().circle(0, 0, 17).fill({ color: 0xfff4be, alpha: 0.62 }).stroke({ color: markerColor, width: 3, alpha: 0.95 });
+        const symbol = new Graphics();
+        if (marker.kind === "PICKUP") {
+          symbol.moveTo(0, 9).lineTo(0, -7).stroke({ color: 0x236845, width: 3 });
+          symbol.ellipse(-6, -6, 7, 4).fill({ color: 0x2e8a5e });
+          symbol.ellipse(6, -1, 7, 4).fill({ color: 0x43a96f });
+        } else if (marker.kind === "DROPOFF") {
+          symbol.roundRect(-9, -8, 18, 18, 2).fill({ color: 0xd9563f });
+          symbol.poly([-12, -8, 0, -16, 12, -8]).fill({ color: 0x9d382d });
+          symbol.rect(-5, -3, 4, 4).fill({ color: 0xffe49a });
+          symbol.rect(3, -3, 4, 4).fill({ color: 0xffe49a });
+          symbol.rect(-2, 4, 5, 6).fill({ color: 0x7c4030 });
+        } else {
+          symbol.roundRect(-10, -7, 20, 17, 2).fill({ color: 0xf0a83c });
+          symbol.poly([-13, -7, 0, -16, 13, -7]).fill({ color: 0xb85c31 });
+          symbol.roundRect(-5, 1, 10, 9, 2).fill({ color: 0x4e7658 });
+        }
+        const label = new Text({
+          text: marker.label,
+          style: {
+            align: "center",
+            fill: 0x315140,
+            fontFamily: "Arial",
+            fontSize: 10,
+            fontWeight: "800",
+            wordWrap: true,
+            wordWrapWidth: 104,
+          },
+        });
+        label.anchor.set(0.5, 0);
+        label.position.set(0, 28);
+        const labelWidth = Math.min(118, Math.max(70, label.width + 18));
+        const labelBoard = new Graphics()
+          .roundRect(-labelWidth / 2, 24, labelWidth, label.height + 10, 7)
+          .fill({ color: 0xfff5c9, alpha: 0.96 })
+          .stroke({ color: 0xb98943, width: 2 });
+        container.addChild(groundGlow, pulse, innerGlow, symbol, labelBoard, label);
+        markerLayer.addChild(container);
+        return { container, groundGlow, label, labelBoard, marker, pulse, point: marker.point };
+      });
+
       const dust = Array.from({ length: 7 }, (_, index) => {
         const puff = new Graphics().circle(0, 0, 5 + index % 3 * 2).fill({ color: 0xf4dfac, alpha: 0.72 });
         dustLayer.addChild(puff);
@@ -125,6 +188,12 @@ export function IslandGameCanvas({ activeSegment, delivered, moving, points }: I
       const truck = new Sprite(truckTexture);
       truck.anchor.set(0.5, 0.67);
       truckLayer.addChild(truckShadow, truck);
+
+      const confetti = delivered ? Array.from({ length: 26 }, (_, index) => {
+        const piece = new Graphics().roundRect(-2, -4, 4, 8, 1).fill({ color: [0xffd64a, 0xf25b45, 0x5bc17b, 0x64c7dc][index % 4] });
+        celebrationLayer.addChild(piece);
+        return piece;
+      }) : [];
 
       const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
       const normalizedPoints = pointKey.split(";").map((value) => {
@@ -165,12 +234,15 @@ export function IslandGameCanvas({ activeSegment, delivered, moving, points }: I
             curve.end.y,
           );
         }
-        routeGlow.stroke({ color: 0x5c3b1f, width: Math.max(7, width * 0.009), alpha: 0.28 });
-        routeLine.stroke({ color: 0xfff3b0, width: Math.max(3, width * 0.004), alpha: 0.9 });
+        routeGlow.stroke({ color: 0x6f4825, width: Math.max(12, width * 0.014), alpha: 0.25 });
+        routeLine.stroke({ color: 0xf1cf86, width: Math.max(7, width * 0.008), alpha: 0.72 });
 
         shimmers.forEach((shimmer, index) => {
           const position = shimmerPositions[index]!;
           shimmer.position.set(position[0]! * width, position[1]! * height);
+        });
+        worldMarkers.forEach(({ container, point }) => {
+          container.position.set(point.x * width, point.y * height);
         });
       }
 
@@ -182,7 +254,7 @@ export function IslandGameCanvas({ activeSegment, delivered, moving, points }: I
           const point = curvePoint(curve, progress * step / 20);
           activeTrail.lineTo(point.x, point.y);
         }
-        activeTrail.stroke({ color: 0xffc63d, width: Math.max(8, width * 0.011), alpha: 0.74 });
+        activeTrail.stroke({ color: 0xffc63d, width: Math.max(9, width * 0.011), alpha: 0.82 });
       }
 
       rebuildScene();
@@ -217,6 +289,17 @@ export function IslandGameCanvas({ activeSegment, delivered, moving, points }: I
           shimmer.alpha = reducedMotion.matches ? 0.38 : 0.2 + (Math.sin(elapsed / 620 + index * 1.7) + 1) * 0.24;
           shimmer.scale.x = 0.78 + Math.sin(elapsed / 810 + index) * 0.24;
         });
+        worldMarkers.forEach(({ container, groundGlow, label, labelBoard, marker, pulse }, index) => {
+          const selected = marker.kind !== "DEPOT" && selectedStopRef.current === marker.sequence;
+          const markerScale = Math.max(0.66, Math.min(1.08, width / 900)) * (selected ? 1.08 : 1);
+          container.scale.set(markerScale);
+          container.y = marker.point.y * height + (reducedMotion.matches ? 0 : Math.sin(elapsed / 420 + index * 1.4) * 3);
+          groundGlow.alpha = 0.12 + (Math.sin(elapsed / 360 + index) + 1) * 0.08;
+          pulse.alpha = selected ? 0.42 + (Math.sin(elapsed / 230) + 1) * 0.2 : 0.16;
+          pulse.scale.set(selected ? 1 + (Math.sin(elapsed / 260) + 1) * 0.08 : 1);
+          label.alpha = selected ? 1 : 0;
+          labelBoard.alpha = selected ? 1 : 0;
+        });
 
         dust.forEach((puff, index) => {
           const phase = (elapsed / 760 + index / dust.length) % 1;
@@ -227,6 +310,20 @@ export function IslandGameCanvas({ activeSegment, delivered, moving, points }: I
           const behind = direction.x >= 0 ? -1 : 1;
           puff.position.set(point.x + behind * (truckWidth * 0.34 + phase * 31), point.y + 11 - phase * 19 + (index % 2 ? 5 : -3));
         });
+
+        if (delivered && confetti.length) {
+          const finish = normalizedPoints.at(-1)!;
+          confetti.forEach((piece, index) => {
+            const cycle = (elapsed / 1900 + index / confetti.length) % 1;
+            const angle = index * 2.399;
+            piece.position.set(
+              finish.x * width + Math.cos(angle) * (24 + cycle * 90),
+              finish.y * height - 54 + cycle * 128 + Math.sin(angle) * 18,
+            );
+            piece.alpha = Math.sin(cycle * Math.PI);
+            piece.rotation = angle + cycle * 7;
+          });
+        }
       };
       app.ticker.add(tick);
 
@@ -248,7 +345,7 @@ export function IslandGameCanvas({ activeSegment, delivered, moving, points }: I
       cancelled = true;
       cleanup();
     };
-  }, [activeSegment, delivered, moving, pointKey]);
+  }, [activeSegment, delivered, markerPayload, moving, pointKey]);
 
   return (
     <div
