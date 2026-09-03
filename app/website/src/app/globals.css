@@ -356,27 +356,23 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .island-stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; background: #2c9eab; cursor: grab; }
 .island-stage:focus-visible { outline: 5px solid #ffe173; outline-offset: -5px; }
 .island-stage.is-dragging { cursor: grabbing; }
-.world-pan-layer { position: absolute; inset: -1px; transform-origin: 50% 50%; transition: transform .18s ease-out; will-change: transform; }
+.world-pan-layer { position: absolute; inset: -1px; container-type: size; transform-origin: 50% 50%; transition: transform .32s cubic-bezier(.2,.8,.2,1); will-change: transform; }
 .island-stage.is-dragging .world-pan-layer { transition: none; }
-.island-art, .mission-route-line { position: absolute; inset: 0; width: 100%; height: 100%; }
-.island-art { object-fit: cover; pointer-events: none; user-select: none; }
-.mission-route-line { z-index: 2; pointer-events: none; }
-.mission-route-line path { fill: none; stroke: #fff7c2; stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 3 17; filter: drop-shadow(0 3px 1px rgba(51,72,34,.45)); }
-.route-start-label { position: absolute; z-index: 4; left: 86%; top: 84%; display: flex; align-items: center; gap: 5px; padding: 6px 8px; border: 2px solid rgba(107,63,27,.15); border-radius: 999px; color: #164f48; font-size: 10px; font-weight: 900; background: rgba(255,253,222,.92); box-shadow: 0 3px 0 rgba(94,52,22,.22); transform: translate(-50%, -50%); }
+.world-scene-surface { position: absolute; top: 50%; left: 50%; width: max(100%, 150cqh); height: max(100%, 66.667cqw); overflow: hidden; transform: translate(-50%, -50%); }
+.island-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; user-select: none; }
+.island-game-renderer { position: absolute; z-index: 3; inset: 0; pointer-events: none; }
+.island-game-canvas { display: block; width: 100%; height: 100%; filter: drop-shadow(0 3px 2px rgba(49,53,27,.16)); }
+.route-start-label { position: absolute; z-index: 4; left: 90.2%; top: 84.8%; display: flex; align-items: center; gap: 5px; padding: 6px 8px; border: 2px solid rgba(107,63,27,.15); border-radius: 999px; color: #164f48; font-size: 10px; font-weight: 900; background: rgba(255,253,222,.92); box-shadow: 0 3px 0 rgba(94,52,22,.22); transform: translate(-50%, -50%); }
 .route-node { position: absolute; z-index: 5; display: grid; justify-items: center; min-width: 102px; padding: 0; border: 0; color: #173e34; text-align: center; background: transparent; cursor: pointer; transform: translate(-50%, -50%); }
 .route-node:focus-visible { outline: none; }
-.route-node-icon { display: grid; width: 45px; height: 45px; place-items: center; border: 4px solid #fff7d7; border-radius: 50%; color: white; background: #287b4e; box-shadow: 0 5px 0 #175438, 0 8px 14px rgba(14,64,49,.32); transition: transform .16s ease, box-shadow .16s ease; }
+.route-node-icon { position: relative; display: grid; width: 48px; height: 48px; place-items: center; border: 4px solid #fff7d7; border-radius: 50% 50% 46% 46%; color: white; background: radial-gradient(circle at 35% 27%, #57a874 0 10%, #287b4e 54%, #1a6241); box-shadow: 0 5px 0 #175438, 0 8px 14px rgba(14,64,49,.32); transition: transform .24s cubic-bezier(.2,.8,.2,1), box-shadow .24s ease; animation: route-marker-float 1.9s ease-in-out var(--marker-delay) infinite alternate; }
+.route-node-icon::after { content: ""; position: absolute; z-index: -1; bottom: -13px; left: 50%; width: 19px; height: 10px; border-radius: 50%; background: rgba(40,48,23,.34); filter: blur(1px); transform: translateX(-50%); }
 .route-node-dropoff .route-node-icon { color: #fff8d7; background: #e76a45; box-shadow: 0 5px 0 #a8402b, 0 8px 14px rgba(79,41,22,.3); }
 .route-node > span:last-child { display: flex; align-items: center; gap: 4px; max-width: 120px; margin-top: 8px; padding: 5px 8px; border: 2px solid rgba(22,77,59,.16); border-radius: 8px; color: #244b3d; font-size: 10px; font-weight: 900; line-height: 1.15; background: rgba(255,251,224,.94); box-shadow: 0 3px 6px rgba(35,61,43,.16); }
 .route-node > span:last-child b { display: grid; flex: 0 0 auto; width: 17px; height: 17px; place-items: center; border-radius: 50%; color: white; font-size: 9px; background: #2c7654; }
 .route-node:hover .route-node-icon, .route-node.is-selected .route-node-icon, .route-node:focus-visible .route-node-icon { transform: translateY(-4px) scale(1.07); box-shadow: 0 7px 0 #175438, 0 11px 16px rgba(14,64,49,.35); }
 .route-node.is-selected .route-node-icon { outline: 4px solid #ffd452; outline-offset: 3px; }
-.journey-truck { position: absolute; z-index: 7; left: var(--truck-x); top: var(--truck-y); display: grid; width: 52px; height: 43px; place-items: center; border: 4px solid #fff2bb; border-radius: 15px 15px 11px 11px; color: white; background: #ef553f; box-shadow: 0 5px 0 #a52e28, 0 8px 16px rgba(43,48,26,.35); transform: translate(-50%, -50%); }
-.journey-truck::before, .journey-truck::after { content: ""; position: absolute; bottom: -8px; width: 10px; height: 10px; border: 3px solid #dce8d9; border-radius: 50%; background: #263a37; }
-.journey-truck::before { left: 5px; }
-.journey-truck::after { right: 5px; }
-.journey-truck.is-moving { animation: truck-idle .8s ease-in-out infinite alternate; }
-@keyframes truck-idle { from { transform: translate(-50%, -50%) rotate(-2deg); } to { transform: translate(-50%, calc(-50% - 4px)) rotate(2deg); } }
+@keyframes route-marker-float { from { translate: 0 0; } to { translate: 0 -5px; } }
 .journey-warning { position: absolute; z-index: 8; top: 18px; right: 18px; display: grid; width: 39px; height: 39px; place-items: center; border: 3px solid white; border-radius: 50%; color: white; background: #c94c3d; box-shadow: 0 5px 12px rgba(87,34,26,.3); }
 .world-map-hint { position: absolute; z-index: 10; left: 16px; bottom: 16px; display: flex; align-items: center; gap: 6px; padding: 7px 10px; border: 2px solid rgba(74,44,20,.14); border-radius: 999px; color: #32594e; font-size: 10px; font-weight: 900; background: rgba(255,251,220,.9); box-shadow: 0 3px 0 rgba(72,45,25,.18); pointer-events: none; }
 .world-map-controls { position: absolute; z-index: 12; top: 16px; left: 16px; display: grid; gap: 7px; }
@@ -409,14 +405,19 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .journey-stop-list small { margin-top: 2px; color: var(--muted); font-size: 9px; }
 .journey-controls { display: grid; gap: 9px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); }
 .journey-controls .button, .journey-controls .button-secondary { width: 100%; justify-content: center; }
-.farm-progress-scene { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; padding: 24px; overflow: auto; color: #163f33; background: #79c8ca; cursor: default; }
+.farm-progress-scene { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; padding: 24px; overflow: auto; color: #163f33; background: #79c8ca; cursor: default; animation: farm-camera-arrive .72s cubic-bezier(.16,.84,.24,1) both; transform-origin: 31% 57%; }
+@keyframes farm-camera-arrive { from { opacity: 0; filter: saturate(.75) blur(3px); transform: scale(1.13); } to { opacity: 1; filter: saturate(1) blur(0); transform: scale(1); } }
 .farm-scene-art { z-index: -2; object-fit: cover; pointer-events: none; user-select: none; }
 .farm-progress-scene::before { content: ""; position: absolute; z-index: -1; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(22,62,39,.11), transparent 40% 63%, rgba(24,65,43,.11)); }
 .farm-field-crops { position: absolute; z-index: 0; inset: 0; pointer-events: none; }
-.field-crop-sprite { position: absolute; display: grid; width: 36px; height: 40px; place-items: center; color: #287444; filter: drop-shadow(0 4px 1px rgba(66,54,29,.28)); transform: translate(-50%, -50%); }
-.field-crop-sprite i { position: absolute; bottom: 0; width: 23px; height: 8px; border-radius: 50%; background: rgba(76,48,29,.35); }
-.field-crop-sprite svg { position: relative; stroke-width: 3; }
-.field-crop-sprite b { position: relative; font-size: 27px; font-style: normal; }
+.field-crop-sprite { position: absolute; display: grid; width: clamp(52px, 7vw, 82px); height: clamp(52px, 7vw, 82px); place-items: center; color: #287444; filter: drop-shadow(0 5px 2px rgba(66,54,29,.3)); transform: translate(-50%, -73%); transform-origin: 50% 84%; animation: field-plant-sway 2.8s ease-in-out var(--plant-delay) infinite alternate; }
+.field-crop-sprite i { position: absolute; bottom: 7%; width: 45%; height: 10%; border-radius: 50%; background: rgba(76,48,29,.32); filter: blur(1px); }
+.field-crop-art { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: contain; }
+.field-crop-fallback { position: relative; z-index: 1; stroke-width: 3; }
+.farm-field-crops.is-growing .field-crop-art { opacity: .9; transform: scale(.72); transform-origin: 50% 85%; }
+.crop-ready-spark { position: absolute; z-index: 2; top: 3%; right: 3%; width: 9px; height: 9px; background: #fff7a4; clip-path: polygon(50% 0, 60% 37%, 100% 50%, 60% 63%, 50% 100%, 40% 63%, 0 50%, 40% 37%); filter: drop-shadow(0 0 4px #fff6a1); animation: crop-sparkle 1.45s ease-in-out var(--plant-delay) infinite; }
+@keyframes field-plant-sway { from { transform: translate(-50%, -73%) rotate(-1.4deg); } to { transform: translate(-50%, -76%) rotate(1.4deg); } }
+@keyframes crop-sparkle { 0%, 100% { opacity: .25; transform: scale(.55) rotate(0); } 48% { opacity: 1; transform: scale(1.25) rotate(90deg); } }
 .farm-field-crops.is-planned .field-crop-sprite { width: 12px; height: 12px; border: 3px solid #8d5a2d; border-radius: 50%; background: #f4d868; }
 .farm-field-crops.is-planned .field-crop-sprite > * { display: none; }
 .harvest-crates, .closed-field-sign { position: absolute; left: 53%; top: 67%; padding: 8px 11px; border: 3px solid #f9db90; border-radius: 10px; background: #d88936; box-shadow: 0 5px 0 #885025; transform: translate(-50%, -50%) rotate(-3deg); }
@@ -539,7 +540,6 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
   .route-node { min-width: 76px; }
   .route-node-icon { width: 39px; height: 39px; border-width: 3px; }
   .route-node > span:last-child { max-width: 88px; padding: 4px 5px; font-size: 8px; }
-  .journey-truck { width: 41px; height: 34px; }
   .journey-panel { max-height: 55%; padding: 13px; }
   .world-map-controls { top: 66px; left: 10px; }
   .world-map-controls button { width: 35px; height: 35px; }
@@ -555,5 +555,5 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .journey-truck.is-moving { animation: none !important; }
+  .farm-progress-scene, .field-crop-sprite, .crop-ready-spark, .route-node-icon { animation: none !important; }
 }

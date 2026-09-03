@@ -111,9 +111,8 @@ describe("delivery world", () => {
   it("shows state-driven truck motion and opens only order-linked farm progress", () => {
     const { container } = render(<DeliveryJourney mission={mission} />);
 
-    expect(container.querySelector(".journey-truck")).toHaveClass("is-moving");
-    expect(container.querySelector(".journey-truck")).toHaveAttribute("data-position", "mid-leg");
-    expect(container.querySelector(".journey-truck")).toHaveStyle({ "--truck-x": "28.31521739130435%" });
+    expect(container.querySelector(".island-game-renderer")).toHaveAttribute("data-position", "mid-leg");
+    expect(container.querySelector(".island-game-canvas")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Farm stop 1: Roseau Valley Farm/ }));
     expect(screen.getByText("Live farm view")).toBeInTheDocument();
     expect(screen.getByText("14 kg committed")).toBeInTheDocument();
@@ -166,11 +165,11 @@ describe("delivery world", () => {
 
     rerender(<DeliveryJourney mission={{ ...mission, status: "CANCELLED" }} />);
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
-    expect(container.querySelector(".journey-truck")).not.toHaveClass("is-moving");
+    expect(container.querySelector(".island-game-renderer")).toHaveAttribute("data-position", "at-stop");
 
     rerender(<DeliveryJourney mission={{ ...mission, status: "DELIVERED", currentStopSequence: 3 }} />);
     expect(screen.getByText("Delivered")).toBeInTheDocument();
-    expect(container.querySelector(".journey-truck")).not.toHaveClass("is-moving");
+    expect(container.querySelector(".island-game-renderer")).toHaveAttribute("data-position", "at-stop");
   });
 
   it("renders crop-specific art for every supported progress state and a generic crop", () => {

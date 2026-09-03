@@ -23,6 +23,7 @@ import Image from "next/image";
 import { useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
 import { Badge, Card, EmptyState, SectionTitle } from "@/components/ui";
+import { IslandGameCanvas } from "@/components/island-game-canvas";
 import { formatDate, titleCase } from "@/lib/format";
 
 export type DeliveryMissionView = ApiSchema<"DeliveryMissionView">;
@@ -209,13 +210,19 @@ const fieldPositions = [
 function FarmFieldCrops({ cargo }: { cargo: DeliveryCargo }) {
   const status = cargo.cropStatus ?? "PLANNED";
   const count = status === "GROWING" ? 8 : status === "HARVEST_READY" ? 12 : status === "PLANNED" ? 5 : 0;
-  const symbol = cargo.cropType === "CUCUMBER" ? "🥒" : cargo.cropType === "DASHEEN" ? "🌿" : "🌱";
+  const cropSprite = cargo.cropType === "CUCUMBER"
+    ? "/art/cucumber-game.webp"
+    : cargo.cropType === "DASHEEN" ? "/art/dasheen-game.webp" : undefined;
 
   return (
     <div className={`farm-field-crops is-${status.toLowerCase()}`} aria-hidden="true">
       {fieldPositions.slice(0, count).map(([left, top], index) => (
-        <span className="field-crop-sprite" style={{ left: `${left}%`, top: `${top}%` }} key={`${left}-${top}`}>
-          <i />{status === "HARVEST_READY" && index % 2 === 0 ? <b>{symbol}</b> : <Sprout size={22} />}
+        <span className="field-crop-sprite" style={{ left: `${left}%`, top: `${top}%`, "--plant-delay": `${index * -0.17}s` } as CSSProperties} key={`${left}-${top}`}>
+          <i />
+          {cropSprite && status !== "PLANNED"
+            ? <Image className="field-crop-art" src={cropSprite} alt="" width={96} height={96} />
+            : <Sprout className="field-crop-fallback" size={22} />}
+          {status === "HARVEST_READY" && <span className="crop-ready-spark" />}
         </span>
       ))}
       {status === "HARVESTED" && <span className="harvest-crates">📦 📦</span>}
@@ -295,18 +302,8 @@ export function DeliveryJourney({
   const zoomCargo = zoomFarmId ? mission.cargo.filter((item) => item.farmId === zoomFarmId && item.cropStatus) : [];
   const zoomFarm = zoomCargo[0]?.farmName;
   const points = [routeStart, ...anchors];
-  const routePath = points.map((point, index) => `${index ? "L" : "M"}${point.x} ${point.y}`).join(" ");
-  const currentIndex = Math.min(Math.max(mission.currentStopSequence - 1, 0), anchors.length - 1);
-  const from = mission.currentStopSequence === 0 ? routeStart : anchors[currentIndex] ?? routeStart;
-  const next = anchors[Math.min(mission.currentStopSequence, anchors.length - 1)] ?? from;
+  const gamePoints = points.map((point) => ({ x: point.x / 920, y: point.y / 560 }));
   const moving = mission.status === "IN_TRANSIT" && mission.currentStopSequence < mission.stops.length;
-  const truckPoint = moving
-    ? { x: (from.x + next.x) / 2, y: (from.y + next.y) / 2 }
-    : mission.status === "DELIVERED" ? anchors.at(-1) ?? from : from;
-  const truckStyle = {
-    "--truck-x": `${truckPoint.x / 9.2}%`,
-    "--truck-y": `${truckPoint.y / 5.6}%`,
-  } as CSSProperties;
   const worldStyle = {
     transform: `translate3d(${mapView.x}px, ${mapView.y}px, 0) scale(${mapView.zoom})`,
   } as CSSProperties;
@@ -369,32 +366,38 @@ export function DeliveryJourney({
           ) : (
             <>
               <div className="world-pan-layer" style={worldStyle} data-zoom={mapView.zoom.toFixed(1)}>
-                <IslandBackdrop />
-                <svg className="mission-route-line" viewBox="0 0 920 560" preserveAspectRatio="none" aria-hidden="true"><path d={routePath} /></svg>
-                <div className="route-start-label"><Route size={14} />Route start</div>
-                {mission.stops.map((stop, index) => {
-                  const anchor = anchors[index]!;
-                  const cargo = stop.farmId ? mission.cargo.filter((item) => item.farmId === stop.farmId && item.cropStatus) : [];
-                  const canZoom = stop.kind === "PICKUP" && cargo.length > 0;
-                  return (
-                    <button
-                      type="button"
-                      className={`route-node route-node-${stop.kind.toLowerCase()} ${selectedStop === stop.sequence ? "is-selected" : ""}`}
-                      style={{ left: `${anchor.x / 9.2}%`, top: `${anchor.y / 5.6}%` }}
-                      aria-label={`${stop.kind === "PICKUP" ? "Farm" : "Hotel"} stop ${stop.sequence}: ${stop.displayName}${canZoom ? ". Open crop progress" : ""}`}
-                      aria-pressed={selectedStop === stop.sequence}
-                      onClick={() => {
-                        setSelectedStop(stop.sequence);
-                        if (canZoom && stop.farmId) setZoomFarmId(stop.farmId);
-                      }}
-                      key={`${stop.sequence}-${stop.displayName}`}
-                    >
-                      <span className="route-node-icon">{stop.kind === "PICKUP" ? <Sprout size={18} /> : <Flag size={18} />}</span>
-                      <span><b>{stop.sequence}</b>{stop.displayName}</span>
-                    </button>
-                  );
-                })}
-                <span className={`journey-truck ${moving ? "is-moving" : ""}`} style={truckStyle} data-position={moving ? "mid-leg" : "at-stop"} aria-hidden="true"><Truck size={23} /></span>
+                <div className="world-scene-surface">
+                  <IslandBackdrop />
+                  <IslandGameCanvas
+                    activeSegment={mission.status === "DELIVERED" ? points.length - 2 : mission.currentStopSequence}
+                    delivered={mission.status === "DELIVERED"}
+                    moving={moving}
+                    points={gamePoints}
+                  />
+                  <div className="route-start-label"><Route size={14} />Route start</div>
+                  {mission.stops.map((stop, index) => {
+                    const anchor = anchors[index]!;
+                    const cargo = stop.farmId ? mission.cargo.filter((item) => item.farmId === stop.farmId && item.cropStatus) : [];
+                    const canZoom = stop.kind === "PICKUP" && cargo.length > 0;
+                    return (
+                      <button
+                        type="button"
+                        className={`route-node route-node-${stop.kind.toLowerCase()} ${selectedStop === stop.sequence ? "is-selected" : ""}`}
+                        style={{ left: `${anchor.x / 9.2}%`, top: `${anchor.y / 5.6}%`, "--marker-delay": `${index * -0.28}s` } as CSSProperties}
+                        aria-label={`${stop.kind === "PICKUP" ? "Farm" : "Hotel"} stop ${stop.sequence}: ${stop.displayName}${canZoom ? ". Open crop progress" : ""}`}
+                        aria-pressed={selectedStop === stop.sequence}
+                        onClick={() => {
+                          setSelectedStop(stop.sequence);
+                          if (canZoom && stop.farmId) setZoomFarmId(stop.farmId);
+                        }}
+                        key={`${stop.sequence}-${stop.displayName}`}
+                      >
+                        <span className="route-node-icon">{stop.kind === "PICKUP" ? <Sprout size={18} /> : <Flag size={18} />}</span>
+                        <span><b>{stop.sequence}</b>{stop.displayName}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
               <div className="world-map-hint"><Move size={15} /><span>Drag to explore</span></div>
               <div className="world-map-controls" aria-label="Map controls">
@@ -424,9 +427,13 @@ export function DeliveryJourney({
             {mission.stops.map((stop) => {
               const complete = mission.status === "DELIVERED" || stop.sequence < mission.currentStopSequence;
               const current = stop.sequence === mission.currentStopSequence;
+              const cargo = stop.farmId ? mission.cargo.filter((item) => item.farmId === stop.farmId && item.cropStatus) : [];
               return (
                 <li className={`${complete ? "is-complete" : ""} ${current ? "is-current" : ""}`} key={stop.sequence}>
-                  <button type="button" onClick={() => setSelectedStop(stop.sequence)} aria-pressed={selectedStop === stop.sequence}>
+                  <button type="button" onClick={() => {
+                    setSelectedStop(stop.sequence);
+                    if (cargo.length && stop.farmId) setZoomFarmId(stop.farmId);
+                  }} aria-pressed={selectedStop === stop.sequence}>
                     <span>{complete ? <Check size={14} /> : stop.sequence}</span>
                     <span><strong>{stop.displayName}</strong><small>{titleCase(stop.kind)}{stop.quantity ? ` · ${stop.quantity.value} kg` : ""}</small></span>
                   </button>
