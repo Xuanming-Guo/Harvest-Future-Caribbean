@@ -1058,6 +1058,9 @@ describe("payment terms and status (#74)", () => {
         acceptedQuantity: { value: acceptedKg, unit: "kg" },
         rejectedQuantity: { value: rejectedKg, unit: "kg" },
         lineOutcomes: [{ cropBatchId: anaBatchId, acceptedQuantity: { value: acceptedKg, unit: "kg" }, rejectedQuantity: { value: rejectedKg, unit: "kg" } }],
+        // Rejecting produce needs an actionable reason (#75), so a priced
+        // delivery that is short still tells the farmer what to do next.
+        ...(rejectedKg > 0 ? { reasonCode: "MATURITY_OR_QUALITY", nextAction: "Harvest one day later so the fruit reaches full size." } : {}),
       },
     });
     expect(acceptance.statusCode).toBe(201);
