@@ -155,6 +155,7 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
       const normalizedMarkers = JSON.parse(markerPayload) as IslandMarker[];
       const worldMarkers = normalizedMarkers.map((marker) => {
         const container = new Container();
+        const labelSide = marker.point.x < 0.42 ? "right" : marker.point.x > 0.58 ? "left" : "center";
         const markerColor = marker.kind === "PICKUP" ? 0x55c982 : marker.kind === "DROPOFF" ? 0xff8262 : 0xffca52;
         const groundGlow = new Graphics().ellipse(0, 6, 31, 18).fill({ color: markerColor, alpha: 0.15 });
         const pulse = new Graphics().circle(0, 0, 25).stroke({ color: markerColor, width: 4, alpha: 0.8 });
@@ -178,7 +179,7 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
         const label = new Text({
           text: marker.label,
           style: {
-            align: "center",
+            align: labelSide === "right" ? "left" : labelSide === "left" ? "right" : "center",
             fill: 0x315140,
             fontFamily: "Arial",
             fontSize: 10,
@@ -187,11 +188,13 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
             wordWrapWidth: 104,
           },
         });
-        label.anchor.set(0.5, 0);
-        label.position.set(0, 28);
         const labelWidth = Math.min(118, Math.max(70, label.width + 18));
+        const labelX = labelSide === "right" ? 48 : labelSide === "left" ? -48 : 0;
+        const boardX = labelSide === "right" ? 43 : labelSide === "left" ? -43 - labelWidth : -labelWidth / 2;
+        label.anchor.set(labelSide === "right" ? 0 : labelSide === "left" ? 1 : 0.5, 0);
+        label.position.set(labelX, 28);
         const labelBoard = new Graphics()
-          .roundRect(-labelWidth / 2, 24, labelWidth, label.height + 10, 7)
+          .roundRect(boardX, 24, labelWidth, label.height + 10, 7)
           .fill({ color: 0xfff5c9, alpha: 0.96 })
           .stroke({ color: 0xb98943, width: 2 });
         container.addChild(groundGlow, pulse, innerGlow, symbol, labelBoard, label);
