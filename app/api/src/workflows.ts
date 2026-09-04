@@ -30,9 +30,36 @@ function declineNote(reason: string | undefined, decisionReason?: DecisionReason
   return parts.join(" ");
 }
 
-/** Crop-batch statuses whose produce may be promised and listed. */
+/** Crop-batch statuses whose produce is pickable today. */
 export const READY_BATCH_STATUSES = new Set(["HARVEST_READY", "HARVESTED"]);
 export const isReadyStatus = (status: string) => READY_BATCH_STATUSES.has(status);
+
+/**
+ * Crop-batch statuses that may carry available-to-promise.
+ *
+ * A growing crop is included, because reserving a future harvest is the
+ * product. What a growing crop may not do is be promised for a date it cannot
+ * reach: that is what `promisableFrom` carries. A `PLANNED` batch has nothing
+ * in the ground yet and a `CLOSED` one is finished, so neither can be promised
+ * at all. `MATURING` is reported by growers and stored as `GROWING`.
+ */
+export const PROMISABLE_BATCH_STATUSES = new Set(["GROWING", "HARVEST_READY", "HARVESTED"]);
+export const isPromisableStatus = (status: string) => PROMISABLE_BATCH_STATUSES.has(status);
+
+/**
+ * Slack when comparing two kilogram figures for equality.
+ *
+ * Quantities travel out as JSON, come back as JSON, and are summed by the
+ * database; a figure Harvest itself published can return a fraction of a
+ * milligram larger than the one it is checked against. Every comparison that
+ * can reject a participant's own number allows for that.
+ */
+export const QUANTITY_TOLERANCE_KG = 0.0001;
+
+/** UTC midnight of the day an instant falls on, the granularity listing dates use. */
+export function startOfUtcDay(at: Date) {
+  return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate()));
+}
 
 /** Product crop-batch status implied by a reported observation stage. */
 export function batchStatusForStage(cropStage: string): string {
@@ -169,10 +196,34 @@ function haversineKm(a: GeoPoint, b: GeoPoint) {
   return 6_371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
+/**
+ * Average road speed and per-stop handling used to cost a collection.
+ *
+ * Synthetic and deliberately shared: matching decides whether a listing can
+ * reach an order in time using exactly the arithmetic that later builds the
+ * route, so an order is never accepted on a journey the router disagrees with.
+ */
+const ROUTE_SPEED_KMH = 30;
+const STOP_HANDLING_MINUTES = 15;
+
+/**
+ * Soonest a vehicle can be on the road once a commitment clears.
+ *
+ * A promise that assumes instant dispatch is a promise that arrives late, so
+ * matching allows for it before deciding that a listing can reach a deadline.
+ */
+const DISPATCH_LEAD_MINUTES = 60;
+
+/** Minutes to collect a load from one farm and deliver it to one buyer. */
+export function collectionMinutes(pickup: GeoPoint, dropoff: GeoPoint) {
+  return Math.ceil(haversineKm(pickup, dropoff) / ROUTE_SPEED_KMH * 60 + STOP_HANDLING_MINUTES);
+}
+
 async function buildDeliveryRoute(
   tx: Prisma.TransactionClient,
   lines: AllocationLineInput[],
   buyer: GeoPoint,
+  collectFrom: Date,
 ) {
   const batchRows = await tx.cropBatch.findMany({
     where: { id: { in: [...new Set(lines.map((line) => line.cropBatchId))] } },
@@ -219,8 +270,10 @@ async function buildDeliveryRoute(
     distanceKm += haversineKm(pickups[index - 1].location, pickups[index].location);
   }
   if (pickups.length) distanceKm += haversineKm(pickups[pickups.length - 1].location, buyer);
-  const durationMinutes = Math.ceil(distanceKm / 30 * 60 + pickups.length * 15);
-  const estimatedArrival = new Date(operationNow().getTime() + durationMinutes * 60_000);
+  const durationMinutes = Math.ceil(distanceKm / ROUTE_SPEED_KMH * 60 + pickups.length * STOP_HANDLING_MINUTES);
+  // The clock the mission actually runs on starts when the load is collectable,
+  // which for a forward promise is the harvest window rather than now.
+  const estimatedArrival = new Date(collectFrom.getTime() + durationMinutes * 60_000);
   const stops = [
     ...pickups.map((pickup, index) => ({
       sequence: index + 1,
@@ -311,11 +364,20 @@ export async function produceFixturePrediction(
       _sum: { quantity: true },
     });
     const committedQuantity = committed._sum.quantity ?? 0;
-    // Forecast evidence stays visible, but nothing is orderable until the
-    // farmer has reported the crop ready. Promising a growing crop was the
-    // first cause of empty delivery trips in #53.
+    // A growing crop can be promised, at the conservative q10 and never at the
+    // optimistic maximum, because reserving a future harvest is what buyers
+    // asked for. What it cannot do is be promised without a date: the earlier
+    // fix for empty delivery trips deleted the promise when the real defect
+    // was the missing date. `promisableFrom` is that date, and listing,
+    // matching and pickup all honour it.
     const current = await tx.cropBatch.findUniqueOrThrow({ where: { id: cropBatchId }, select: { status: true } });
-    const availableToPromise = isReadyStatus(current.status) ? Math.max(0, prediction.q10 - committedQuantity) : 0;
+    const promisable = isPromisableStatus(current.status);
+    const availableToPromise = promisable ? Math.max(0, prediction.q10 - committedQuantity) : 0;
+    // Produce already reported ready can change hands today. Everything else
+    // is dated from the start of the forecast harvest window.
+    const promisableFrom = promisable
+      ? (isReadyStatus(current.status) ? startOfUtcDay(operationNow()) : prediction.harvestStart)
+      : null;
     await tx.yieldPrediction.create({
       data: {
         id: prediction.predictionId,
@@ -341,6 +403,7 @@ export async function produceFixturePrediction(
       data: {
         latestPredictionId: prediction.predictionId,
         availableToPromise,
+        promisableFrom,
         provenance: Provenance.MODEL_PREDICTED,
       },
     });
@@ -359,6 +422,7 @@ export async function produceFixturePrediction(
         q10MarketableYield: kilograms(prediction.q10),
         committedQuantity: kilograms(committedQuantity),
         availableToPromise: kilograms(availableToPromise),
+        ...(promisableFrom ? { promisableFrom: promisableFrom.toISOString().slice(0, 10) } : {}),
       },
     });
     await tx.agentTrace.update({
@@ -373,9 +437,11 @@ export async function produceFixturePrediction(
         agentName: "Crop Intelligence Agent",
         toolName: config.modelAdapter === "http" ? "http-yield-model" : "fixture-yield-model",
         provenance: Provenance.MODEL_PREDICTED,
-        summary: isReadyStatus(current.status)
-          ? `Forecast q10 is ${prediction.q10} kg; ${committedQuantity} kg is committed, leaving ${availableToPromise} kg ATP.`
-          : `Forecast q10 is ${prediction.q10} kg, but the crop is ${current.status.toLowerCase().replaceAll("_", " ")} so ATP stays at 0 kg until it is reported harvest ready.`,
+        summary: !promisable
+          ? `Forecast q10 is ${prediction.q10} kg, but the crop is ${current.status.toLowerCase().replaceAll("_", " ")} so nothing can be promised from it.`
+          : isReadyStatus(current.status)
+            ? `Forecast q10 is ${prediction.q10} kg; ${committedQuantity} kg is committed, leaving ${availableToPromise} kg ATP available today.`
+            : `Forecast q10 is ${prediction.q10} kg; ${committedQuantity} kg is committed, leaving ${availableToPromise} kg promisable from ${promisableFrom!.toISOString().slice(0, 10)}.`,
         confidence: prediction.confidence,
         simulationRunId: batch.simulationRunId,
       },
@@ -410,6 +476,12 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
   const batches = await prisma.cropBatch.findMany({
     where: { id: { in: [...new Set(listings.map((listing) => listing.cropBatchId))] }, simulationRunId: order.simulationRunId },
   });
+  const farms = await prisma.farm.findMany({
+    where: { id: { in: [...new Set(batches.map((batch) => batch.farmId))] } },
+    select: { id: true, latitude: true, longitude: true },
+  });
+  const farmById = new Map(farms.map((farm) => [farm.id, farm]));
+  const batchById = new Map(batches.map((batch) => [batch.id, batch]));
   const remainingByBatch = new Map(batches.map((batch) => [batch.id, batch.availableToPromise]));
   // Supply already proposed to another order is held softly until that
   // approval resolves; otherwise re-matching several waiting orders against
@@ -432,15 +504,32 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
 
   let remaining = order.requestedQuantity;
   const lines: AllocationLineInput[] = [];
+  // Supply that exists but ripens too late to reach this buyer. Tracked rather
+  // than silently dropped: it is the difference between "nobody has any" and
+  // "the crop is in the ground and will not be ready in time", and the buyer
+  // can act on the second.
+  let notReadyInTimeKg = 0;
   for (const listing of listings) {
     if (remaining <= 0) break;
     const batchRemaining = remainingByBatch.get(listing.cropBatchId) ?? 0;
     const safe = Math.min(listing.quantity, batchRemaining, remaining);
-    if (safe > 0) {
-      lines.push({ cropBatchId: listing.cropBatchId, listingId: listing.id, quantity: safe });
-      remaining -= safe;
-      remainingByBatch.set(listing.cropBatchId, batchRemaining - safe);
+    if (safe <= 0) continue;
+    // A promise is only keepable if the produce can be collected and delivered
+    // by the deadline. A listing that opens the day before an order is due,
+    // two hours' drive away, cannot be part of one.
+    const batch = batchById.get(listing.cropBatchId);
+    const farm = batch ? farmById.get(batch.farmId) : undefined;
+    const collectableFrom = new Date(Math.max(listing.availableFrom.getTime(), operationNow().getTime()));
+    const leadMinutes = DISPATCH_LEAD_MINUTES + (farm
+      ? collectionMinutes({ latitude: farm.latitude, longitude: farm.longitude }, { latitude: order.latitude, longitude: order.longitude })
+      : STOP_HANDLING_MINUTES);
+    if (collectableFrom.getTime() + leadMinutes * 60_000 > order.neededBy.getTime()) {
+      notReadyInTimeKg += safe;
+      continue;
     }
+    lines.push({ cropBatchId: listing.cropBatchId, listingId: listing.id, quantity: safe });
+    remaining -= safe;
+    remainingByBatch.set(listing.cropBatchId, batchRemaining - safe);
   }
 
   // Stakeholder evidence (#53): a hotel that ordered 6 kg and can be offered 5
@@ -450,18 +539,24 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
   const covered = order.requestedQuantity - remaining;
   const coverageFraction = order.requestedQuantity > 0 ? covered / order.requestedQuantity : 0;
   const threshold = order.minimumAcceptableFraction * order.requestedQuantity;
-  const isPartial = remaining > 0.0001;
+  const isPartial = remaining > QUANTITY_TOLERANCE_KG;
 
-  if (covered + 0.0001 < threshold) {
+  if (covered + QUANTITY_TOLERANCE_KG < threshold) {
     const found = covered;
+    const cause = notReadyInTimeKg > QUANTITY_TOLERANCE_KG
+      ? "NOT_READY_IN_TIME"
+      : found > QUANTITY_TOLERANCE_KG ? "INSUFFICIENT_SUPPLY" : "NO_READY_SUPPLY";
+    const note = notReadyInTimeKg > QUANTITY_TOLERANCE_KG
+      ? `Found ${found} kg of ${order.requestedQuantity} kg that can be delivered in time; a further ${Number(notReadyInTimeKg.toFixed(2))} kg is offered but cannot be harvested and delivered by ${order.neededBy.toISOString().slice(0, 10)}.`
+      : `Found ${found} kg of ${order.requestedQuantity} kg of supply that can be delivered in time.`;
     await prisma.$transaction(async (tx) => {
       await tx.order.update({
         where: { id: orderId },
         data: {
           atRisk: false,
           lifecycleStatus: "REQUESTED",
-          outcomeCause: found > 0.0001 ? "INSUFFICIENT_SUPPLY" : "NO_READY_SUPPLY",
-          outcomeNote: `Found ${found} kg of ${order.requestedQuantity} kg of ready supply.`,
+          outcomeCause: cause,
+          outcomeNote: note,
         },
       });
       await tx.agentTrace.update({
@@ -476,7 +571,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
           agentName: "Market Balance Agent",
           toolName: "read-safe-supply",
           provenance: Provenance.INFERRED,
-          summary: `Found ${covered} kg of ${order.requestedQuantity} kg required, below the ${Math.round(order.minimumAcceptableFraction * 100)}% this buyer accepts. No partial commitment was proposed.`,
+          summary: `Found ${covered} kg of ${order.requestedQuantity} kg required, below the ${Math.round(order.minimumAcceptableFraction * 100)}% this buyer accepts. No partial commitment was proposed. ${note}`,
           simulationRunId: order.simulationRunId,
         },
       });
@@ -653,10 +748,10 @@ export async function approveAllocation(
       const listings = await tx.listing.findMany({ where: { id: { in: [...requiredByListing.keys()] } } });
       const batchById = new Map(batches.map((batch) => [batch.id, batch]));
       const listingById = new Map(listings.map((listing) => [listing.id, listing]));
-      const invalidSupply = [...requiredByBatch].some(([id, required]) => (batchById.get(id)?.availableToPromise ?? -1) + 0.0001 < required) ||
+      const invalidSupply = [...requiredByBatch].some(([id, required]) => (batchById.get(id)?.availableToPromise ?? -1) + QUANTITY_TOLERANCE_KG < required) ||
         [...requiredByListing].some(([id, required]) => {
           const listing = listingById.get(id);
-          return !listing || listing.status !== "ACTIVE" || listing.quantity + 0.0001 < required;
+          return !listing || listing.status !== "ACTIVE" || listing.quantity + QUANTITY_TOLERANCE_KG < required;
         });
       if (invalidSupply) {
         await tx.allocation.update({ where: { id: allocation.id }, data: { status: "STALE" } });
@@ -693,7 +788,7 @@ export async function approveAllocation(
       for (const [listingId, quantity] of requiredByListing) {
         const listing = listingById.get(listingId)!;
         const remainingQuantity = Math.max(0, listing.quantity - quantity);
-        await tx.listing.update({ where: { id: listingId }, data: { quantity: remainingQuantity, status: remainingQuantity > 0.0001 ? "ACTIVE" : "SOLD_OUT" } });
+        await tx.listing.update({ where: { id: listingId }, data: { quantity: remainingQuantity, status: remainingQuantity > QUANTITY_TOLERANCE_KG ? "ACTIVE" : "SOLD_OUT" } });
       }
       // Commit exactly what was approved. On a safe partial commitment that is
       // less than the request, and the mission, its acceptance arithmetic and
@@ -710,7 +805,14 @@ export async function approveAllocation(
         data: { lifecycleStatus: "COMMITTED", committedQuantity, paymentAmount: owed.amount, paymentCurrency: owed.currency },
       });
 
-      const route = await buildDeliveryRoute(tx, lines, { latitude: order.latitude, longitude: order.longitude });
+      // The whole load is collectable once the last of its listings opens. On a
+      // forward promise that is a date in the harvest window, and it is what
+      // the mission is scheduled and offered against.
+      const collectFrom = new Date(Math.max(
+        decidedAt.getTime(),
+        ...lines.map((line) => listingById.get(line.listingId)?.availableFrom.getTime() ?? 0),
+      ));
+      const route = await buildDeliveryRoute(tx, lines, { latitude: order.latitude, longitude: order.longitude }, collectFrom);
       const missionId = randomUUID();
       await tx.deliveryMission.create({
         data: {
@@ -719,6 +821,7 @@ export async function approveAllocation(
           status: "AVAILABLE",
           quantity: committedQuantity,
           deadline: order.neededBy,
+          collectFrom,
           stops: route.stops,
           estimatedDistanceKm: route.distanceKm,
           estimatedDurationMinutes: route.durationMinutes,
@@ -751,7 +854,7 @@ export async function approveAllocation(
         correlationId: allocationEvent.correlationId,
         provenance: Provenance.INFERRED,
         simulationRunId: order.simulationRunId,
-        payload: { missionId, orderId: order.id, status: "AVAILABLE", stops: route.stops, estimatedDistanceKm: route.distanceKm, estimatedDurationMinutes: route.durationMinutes, estimatedArrival: route.estimatedArrival.toISOString() },
+        payload: { missionId, orderId: order.id, status: "AVAILABLE", stops: route.stops, estimatedDistanceKm: route.distanceKm, estimatedDurationMinutes: route.durationMinutes, estimatedArrival: route.estimatedArrival.toISOString(), collectFrom: collectFrom.toISOString() },
       });
       return updatedApproval;
     },

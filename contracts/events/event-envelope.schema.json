@@ -278,7 +278,8 @@
         "cropBatchId": { "$ref": "../common.schema.json#/$defs/Uuid" },
         "q10MarketableYield": { "$ref": "../common.schema.json#/$defs/Quantity" },
         "committedQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
-        "availableToPromise": { "$ref": "../common.schema.json#/$defs/Quantity" }
+        "availableToPromise": { "$ref": "../common.schema.json#/$defs/Quantity" },
+        "promisableFrom": { "type": "string", "format": "date" }
       }
     },
     "ListingPublishedPayload": {
@@ -404,7 +405,8 @@
         },
         "estimatedDistanceKm": { "type": "number", "minimum": 0 },
         "estimatedDurationMinutes": { "type": "integer", "minimum": 0 },
-        "estimatedArrival": { "$ref": "../common.schema.json#/$defs/UtcDateTime" }
+        "estimatedArrival": { "$ref": "../common.schema.json#/$defs/UtcDateTime" },
+        "collectFrom": { "$ref": "../common.schema.json#/$defs/UtcDateTime" }
       }
     },
     "DeliveryUpdatePayload": {
@@ -676,7 +678,7 @@
       "causationId": "e0000000-0000-4000-8000-000000000001",
       "schemaVersion": "1.0",
       "provenance": "MODEL_PREDICTED",
-      "payload": {"predictionId": "12000000-0000-4000-8000-000000000001", "cropBatchId": "10000000-0000-4000-8000-000000000001", "q10MarketableYield": {"value": 420, "unit": "kg"}, "availableToPromise": {"value": 380, "unit": "kg"}}
+      "payload": {"predictionId": "12000000-0000-4000-8000-000000000001", "cropBatchId": "10000000-0000-4000-8000-000000000001", "q10MarketableYield": {"value": 420, "unit": "kg"}, "availableToPromise": {"value": 380, "unit": "kg"}, "promisableFrom": "2026-09-18"}
     },
     {
       "eventId": "e0000000-0000-4000-8000-000000000003",
@@ -781,7 +783,7 @@
       "causationId": "e0000000-0000-4000-8000-000000000007",
       "schemaVersion": "1.0",
       "provenance": "INFERRED",
-      "payload": {"missionId": "17000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "status": "AVAILABLE", "stops": [{"sequence": 1, "kind": "PICKUP", "farmId": "14000000-0000-4000-8000-000000000001", "cropBatchIds": ["10000000-0000-4000-8000-000000000001"], "quantity": {"value": 120, "unit": "kg"}, "location": {"latitude": 13.94, "longitude": -60.96}}, {"sequence": 2, "kind": "DROPOFF", "quantity": {"value": 120, "unit": "kg"}, "location": {"latitude": 13.91, "longitude": -60.98}}], "estimatedDistanceKm": 4.2, "estimatedDurationMinutes": 24, "estimatedArrival": "2026-08-12T13:54:00Z"}
+      "payload": {"missionId": "17000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "status": "AVAILABLE", "stops": [{"sequence": 1, "kind": "PICKUP", "farmId": "14000000-0000-4000-8000-000000000001", "cropBatchIds": ["10000000-0000-4000-8000-000000000001"], "quantity": {"value": 120, "unit": "kg"}, "location": {"latitude": 13.94, "longitude": -60.96}}, {"sequence": 2, "kind": "DROPOFF", "quantity": {"value": 120, "unit": "kg"}, "location": {"latitude": 13.91, "longitude": -60.98}}], "estimatedDistanceKm": 4.2, "estimatedDurationMinutes": 24, "estimatedArrival": "2026-08-12T13:54:00Z", "collectFrom": "2026-08-12T13:30:00Z"}
     },
     {
       "eventId": "e0000000-0000-4000-8000-000000000009",

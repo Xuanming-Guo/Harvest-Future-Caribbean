@@ -15,7 +15,7 @@ import { recordEvent } from "./events.js";
 import { assertObjectBody, decisionReasonKeys, httpError, idempotent, readDecisionReason, readLocation, readQuantity, requireDecisionReason, sendProblem, type DecisionReasonCode } from "./http.js";
 import { acceptedValue } from "./payments.js";
 import { registerSimulationRoutes } from "./simulation-routes.js";
-import { batchStatusForStage, isReadyStatus } from "./workflows.js";
+import { QUANTITY_TOLERANCE_KG, batchStatusForStage, isPromisableStatus, isReadyStatus, startOfUtcDay } from "./workflows.js";
 import {
   approvalDto,
   cropBatchDto,
@@ -563,12 +563,14 @@ export async function buildServer() {
       await tx.traceStep.create({ data: { traceId, recordedAt, kind: "INPUT", agentName: "Intake Agent", toolName: "confirm-human-observation", provenance, summary: `Human confirmed ${asString(body.cropStage, "cropStage")} observation${estimatedQuantity !== null ? ` with ${estimatedQuantity} kg estimate` : ""}.`, simulationRunId: actor.simulationRunId } });
       await tx.cropObservation.create({ data: { id: observationId, cropBatchId, actorId: actor.id, observedAt, recordedAt, cropStage: asString(body.cropStage, "cropStage"), notes: typeof body.notes === "string" ? body.notes : null, estimatedQuantity, provenance, traceId, simulationRunId: actor.simulationRunId } });
       // The reported stage drives the batch status, which gates ATP and
-      // listings. Leaving readiness withdraws any remaining active offer so a
-      // buyer cannot be matched to produce that is no longer there.
+      // listings. Two transitions withdraw any remaining active offer so a
+      // buyer cannot be matched to produce that is no longer there: a crop
+      // that had been reported ready and no longer is, and a crop that can no
+      // longer be promised at all.
       const previous = await tx.cropBatch.findUniqueOrThrow({ where: { id: cropBatchId }, select: { status: true } });
       const nextStatus = batchStatusForStage(asString(body.cropStage, "cropStage"));
       await tx.cropBatch.update({ where: { id: cropBatchId }, data: { latestObservationId: observationId, provenance, status: nextStatus } });
-      if (isReadyStatus(previous.status) && !isReadyStatus(nextStatus)) {
+      if (!isPromisableStatus(nextStatus) || (isReadyStatus(previous.status) && !isReadyStatus(nextStatus))) {
         await tx.listing.updateMany({ where: { cropBatchId, status: "ACTIVE", simulationRunId: actor.simulationRunId }, data: { status: "WITHDRAWN" } });
       }
       const intakeEvent = intake ? await tx.domainEvent.findFirst({ where: { eventType: "CROP_OBSERVATION_INTAKE_DRAFTED", entityId: intake.id }, orderBy: { occurredAt: "desc" } }) : null;
@@ -711,8 +713,19 @@ export async function buildServer() {
     if (!(await canAccessBatch(actor, cropBatchId))) throw httpError(404, "CROP_BATCH_NOT_FOUND", "Crop batch was not found.");
     const batch = await prisma.cropBatch.findUniqueOrThrow({ where: { id: cropBatchId } });
     const amount = readQuantity(body.quantity);
-    if (!isReadyStatus(batch.status)) throw httpError(422, "CROP_NOT_READY", "Only a crop reported harvest ready can be listed.");
-    if (amount > batch.availableToPromise) throw httpError(422, "ATP_EXCEEDED", "Listing quantity exceeds available-to-promise supply.");
+    const availableFrom = asDate(body.availableFrom, "availableFrom");
+    // A growing crop may be offered; the product is a reservation of a future
+    // harvest. What it may not be offered for is a date before the forecast
+    // window opens, which would be a promise the field cannot keep.
+    if (!isPromisableStatus(batch.status)) throw httpError(422, "CROP_NOT_READY", "This crop batch has nothing that can be promised.");
+    const promisableFrom = batch.promisableFrom ?? (isReadyStatus(batch.status) ? startOfUtcDay(operationNow()) : null);
+    if (promisableFrom && availableFrom < startOfUtcDay(promisableFrom)) {
+      throw httpError(422, "LISTING_BEFORE_HARVEST_WINDOW", "A listing cannot open before the crop's forecast harvest window.");
+    }
+    // The same kilogram tolerance the commitment path uses. A farmer offering
+    // exactly the figure Harvest just showed them must not be turned away
+    // because a stored double and a re-read one differ in their last bit.
+    if (amount > batch.availableToPromise + QUANTITY_TOLERANCE_KG) throw httpError(422, "ATP_EXCEEDED", "Listing quantity exceeds available-to-promise supply.");
     const money = body.unitPrice as JsonObject;
     if (!money || typeof money.amount !== "number" || typeof money.currency !== "string") throw httpError(400, "VALIDATION_FAILED", "unitPrice requires amount and currency.");
     const unitPrice = money.amount;
@@ -721,7 +734,7 @@ export async function buildServer() {
     const listingId = randomUUID();
     const traceId = randomUUID();
     const row = await prisma.$transaction(async (tx) => {
-      const listing = await tx.listing.create({ data: { id: listingId, cropBatchId, farmerId: farm.farmerId, cropType: batch.cropType, quantity: amount, unitPrice, currency, availableFrom: asDate(body.availableFrom, "availableFrom"), availableUntil: asDate(body.availableUntil, "availableUntil"), status: "ACTIVE", simulationRunId: actor.simulationRunId } });
+      const listing = await tx.listing.create({ data: { id: listingId, cropBatchId, farmerId: farm.farmerId, cropType: batch.cropType, quantity: amount, unitPrice, currency, availableFrom, availableUntil: asDate(body.availableUntil, "availableUntil"), status: "ACTIVE", simulationRunId: actor.simulationRunId } });
       await tx.agentTrace.create({ data: { id: traceId, subjectType: "CROP_BATCH", subjectId: cropBatchId, status: "COMPLETED", summary: "Published supply without exceeding available-to-promise.", simulationRunId: actor.simulationRunId } });
       await recordEvent(tx, { eventType: "LISTING_PUBLISHED", actorId: actor.id, entityId: listingId, traceId, provenance: batch.provenance, simulationRunId: actor.simulationRunId, payload: { listingId, cropBatchId, quantity: quantity(amount), availableFrom: listing.availableFrom.toISOString().slice(0, 10) } });
       return listing;

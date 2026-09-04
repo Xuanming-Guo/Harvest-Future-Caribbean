@@ -27,7 +27,7 @@ schema-validated envelope for every event type below.
 | `CROP_OBSERVATION_SUBMITTED` | A crop observation is stored | observation, crop batch, observation time, stage | Complete the actor's observation task; never alter hidden crop truth |
 | `VERIFICATION_TASK_CREATED` | An observation creates explicit coordinator work | task, crop batch, observation, `OPEN` status | Schedule the permitted coordinator's observable verification action |
 | `VERIFICATION_DECIDED` | A coordinator verifies an observation or requests changes | task, crop batch, observation, final status, optional note, and for `CHANGES_REQUESTED` the required `reasonCode` and `nextAction` | Complete the verification action; never alter hidden crop truth |
-| `FORECAST_PRODUCED` | A model response is validated and ATP is calculated | prediction, crop batch, q10 yield, ATP | Record the prediction for later predicted-versus-actual comparison |
+| `FORECAST_PRODUCED` | A model response is validated and ATP is calculated | prediction, crop batch, q10 yield, ATP, the date that ATP can be handed over | Record the prediction for later predicted-versus-actual comparison |
 | `LISTING_PUBLISHED` | Safely orderable supply is published | listing, batch, quantity, availability date | Make the listing discoverable during later buyer actions |
 | `LISTING_EXPIRED` | An active listing's `availableUntil` date has passed | listing, batch, availability end date | Stop offering the listing; no inventory or reservation changes |
 | `BUYER_DEMAND_CREATED` | Buyer demand is stored | demand, crop, quantity, deadline | Mark demand pending and schedule eligible actor reactions |
@@ -36,7 +36,7 @@ schema-validated envelope for every event type below.
 | `APPROVAL_DECIDED` | A person approves or rejects an allocation or recovery | approval, subject, decision, and for `REJECT` the required `reasonCode` and `nextAction` | Complete only that actor's approval task; never infer other approvals |
 | `ALLOCATION_INVALIDATED` | Final validation detects changed safe supply | allocation, order, `SUPPLY_CHANGED`, `STALE` | Cancel the proposal without creating partial reservations and leave demand open |
 | `ALLOCATION_APPROVED` | Final approval creates reservations and commitment | allocation, order, batch quantities | Schedule harvest/pickup obligations and reduce planned uncommitted supply only |
-| `DELIVERY_MISSION_CREATED` | A committed order receives a route | mission, order, status, quantity-bearing stops and route estimates | Add an available mission to transporter schedules |
+| `DELIVERY_MISSION_CREATED` | A committed order receives a route | mission, order, status, quantity-bearing stops, route estimates and the instant the load is collectable | Add an available mission to transporter schedules |
 | `DELIVERY_MISSION_ACCEPTED` | A transporter accepts a mission | mission, order, assignee, stops | Reserve the vehicle and schedule its pickup work |
 | `DELIVERY_UPDATE_POSTED` | Pickup, position, delay, arrival, or delivery is recorded | mission, update type, time, optional location/note | Advance vehicle position and dependent schedules |
 | `EXCEPTION_REPORTED` | An operational exception is stored | exception type, severity, affected entities | Expose/apply the observable disruption and pause affected future work where appropriate |

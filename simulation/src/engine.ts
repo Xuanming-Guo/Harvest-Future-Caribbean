@@ -197,6 +197,14 @@ export const UNMET_CAUSES = [
   'APPROVAL_REJECTED',
   /** Nothing reached the buyer in time: the delivery arrived late or never ran. */
   'MISSION_LATE',
+  /**
+   * The vehicle went, but the crop it was promised from had still not been
+   * reported ready when it left, so there was nothing to pick.
+   *
+   * Distinct from spoilage: nothing was lost, the promise was simply dated
+   * ahead of the field. This is the way a forward promise fails.
+   */
+  'NOT_READY_IN_TIME',
   /** The vehicle arrived, but the field no longer held what had been promised. */
   'SPOILED_BEFORE_PICKUP',
   /** The load arrived and part of it was refused at the gate. */
@@ -918,7 +926,10 @@ export class SimulationEngine {
       if (previousStage !== 'READY' && truth.stage === 'READY') newlyReadyCrops.add(batch.crop);
     }
 
-    if (newlyReadyCrops.size > 0) this.rematchWaitingDemand(newlyReadyCrops);
+    if (newlyReadyCrops.size > 0) {
+      this.rematchWaitingDemand(newlyReadyCrops);
+      this.collectReportedReadyMissions();
+    }
 
     const intervalDays = 2 + (1 - farm.diligence) * 12;
     const jitter = stream.float(0.6, 1.4);
@@ -1239,15 +1250,82 @@ export class SimulationEngine {
    * seen, which is the foresight the benchmark exists to rule out.
    */
   private reportedReadyAt(commitment: Commitment): SimulationInstant | null {
-    let latest: SimulationInstant | null = null;
     for (const allocation of commitment.allocations) {
       const batch = this.world.observed.batches.get(allocation.batchId);
       if (!batch || batch.lastReportedStage !== 'READY') return null;
-      const firstReady = batch.observations.find((observation) => observation.reportedStage === 'READY');
+    }
+    return this.firstReportedReadyAt(commitment);
+  }
+
+  /**
+   * When every allocated batch had first been reported ready, or null if one
+   * of them never was.
+   *
+   * Unlike `reportedReadyAt` this ignores what the batches report *now*, which
+   * is what a settled run needs: a batch that was picked reports HARVESTED
+   * afterwards, and asking whether it had been ready at pickup time is exactly
+   * the question `classifyDemand` has to answer.
+   */
+  private firstReportedReadyAt(commitment: Commitment): SimulationInstant | null {
+    let latest: SimulationInstant | null = null;
+    for (const allocation of commitment.allocations) {
+      const batch = this.world.observed.batches.get(allocation.batchId);
+      const firstReady = batch?.observations.find((observation) => observation.reportedStage === 'READY');
       if (!firstReady) return null;
       latest = latest === null ? firstReady.observedAt : Math.max(latest, firstReady.observedAt);
     }
     return latest;
+  }
+
+  /**
+   * Loading and unloading time for a route, one stop per pickup plus the drop.
+   *
+   * The same 25 minutes a stop that `planMission` allows, read off the route
+   * itself so a mission built by the Product API is costed the same way as one
+   * the engine planned.
+   */
+  private handlingMsForPath(stopCount: number): number {
+    return stopCount * 25 * MINUTE_MS;
+  }
+
+  /**
+   * Brings a planned pickup forward once every batch it collects is reported
+   * ready, and reschedules the run around the new departure.
+   *
+   * This is the forward-promise half of the rule `planMission` applies when a
+   * commitment is made against produce that is already ready. A promise made
+   * against a growing crop is planned to leave at the deadline, because on the
+   * day it was made nothing was collectable; the moment the grower reports the
+   * field ready, holding to that plan leaves promised produce spoiling for
+   * days. Readiness only ever moves a departure earlier, and it is the
+   * grower's report rather than the hidden `readyAt`, so it buys coordination
+   * and not foresight.
+   */
+  private collectReportedReadyMissions(): void {
+    const { collectOnReadiness, maxHoldMs } = this.policy.capabilities;
+    if (!collectOnReadiness) return;
+
+    for (const mission of [...this.world.observed.missions.values()].sort((left, right) =>
+      left.missionId.localeCompare(right.missionId))) {
+      if (mission.status !== 'PLANNED' || mission.plannedDepartureAt <= this.clock) continue;
+      const commitment = this.world.observed.commitments.get(mission.commitmentId);
+      if (!commitment || commitment.status !== 'APPROVED') continue;
+
+      const reportedReadyAt = this.reportedReadyAt(commitment);
+      if (reportedReadyAt === null) continue;
+      if (mission.plannedDepartureAt - reportedReadyAt <= maxHoldMs) continue;
+
+      const departAt = Math.max(this.clock + HOUR_MS, reportedReadyAt + this.handlingMsForPath(mission.path.length));
+      if (departAt >= mission.plannedDepartureAt) continue;
+
+      const journeyMs = mission.plannedArrivalAt - mission.plannedDepartureAt;
+      mission.plannedDepartureAt = departAt;
+      mission.plannedArrivalAt = departAt + journeyMs;
+      this.replaceMissionSchedule(mission, true);
+      // The earlier slot may sit inside a closure or breakdown that the later
+      // one avoided, so the world gets to push back on the new plan.
+      this.applyActiveDisruptionsToMission(mission);
+    }
   }
 
   private planMission(commitment: Commitment): void {
@@ -1282,7 +1360,7 @@ export class SimulationEngine {
 
     const travelMs = (distanceKm / vehicle.cruiseSpeedKmh) * HOUR_MS;
     // Load and unload time, one stop per pickup plus the drop.
-    const handlingMs = (pickupFarmIds.length + 1) * 25 * MINUTE_MS;
+    const handlingMs = this.handlingMsForPath(pickupFarmIds.length + 1);
 
     // Depart in time to arrive before the deadline, but not before now.
     const desiredArrival = demand.neededBy - HOUR_MS;
@@ -1509,8 +1587,30 @@ export class SimulationEngine {
       return { applied: false, reason: 'DUPLICATE', simulationMissionId: existingMissionId };
     }
 
-    const departure = Math.max(this.clock + MINUTE_MS, effect.plannedDepartureAt);
-    const arrival = Math.max(departure + MINUTE_MS, effect.plannedArrivalAt);
+    // When the vehicle actually leaves.
+    //
+    // The Product API offers a mission the moment its commitment is approved,
+    // which under forward promises can be days before the crop is pickable, so
+    // the accepting transporter's "now plus a minute" is not a departure time.
+    // The engine applies the same rule it applies to its own missions: leave
+    // once the growers have reported the whole load ready, never sooner than an
+    // hour from now, and never later than the last departure that still makes
+    // the buyer's deadline. If nobody reports it ready, the vehicle goes at
+    // that last moment anyway and collects whatever is truly in the field.
+    const journeyMs = Math.max(MINUTE_MS, effect.plannedArrivalAt - effect.plannedDepartureAt);
+    const earliestDeparture = Math.max(this.clock + MINUTE_MS, effect.plannedDepartureAt);
+    const demand = this.world.observed.demands.get(effect.demandId);
+    const deadlineDeparture = demand
+      ? Math.max(earliestDeparture, demand.neededBy - HOUR_MS - journeyMs)
+      : earliestDeparture;
+
+    const reportedReadyAt = this.policy.capabilities.collectOnReadiness ? this.reportedReadyAt(commitment) : null;
+    const promptDeparture = reportedReadyAt === null
+      ? deadlineDeparture
+      : Math.max(this.clock + HOUR_MS, reportedReadyAt + this.handlingMsForPath(effect.path.length));
+
+    const departure = Math.max(earliestDeparture, Math.min(deadlineDeparture, promptDeparture));
+    const arrival = departure + journeyMs;
     const mission: DeliveryMission = {
       missionId: this.ids.next(),
       commitmentId: commitment.commitmentId,
@@ -1690,7 +1790,13 @@ export class SimulationEngine {
     if (delivered.actualArrivalAt !== null && delivered.actualArrivalAt > demand.neededBy) return 'MISSION_LATE';
 
     const committedKg = commitment.allocations.reduce((total, allocation) => total + allocation.quantityKg, 0);
-    if (delivered.loadedKg + CAUSE_TOLERANCE_KG < committedKg) return 'SPOILED_BEFORE_PICKUP';
+    if (delivered.loadedKg + CAUSE_TOLERANCE_KG < committedKg) {
+      // A short load has two quite different explanations, and calling both of
+      // them spoilage would hide the one a forward promise can produce: the
+      // vehicle reached a field the growers had never reported ready.
+      const readyAt = this.firstReportedReadyAt(commitment);
+      return readyAt === null || readyAt > delivered.plannedDepartureAt ? 'NOT_READY_IN_TIME' : 'SPOILED_BEFORE_PICKUP';
+    }
     if (demand.acceptedKg + CAUSE_TOLERANCE_KG < delivered.loadedKg) return 'DELIVERY_REJECTED';
 
     // Promised, collected, delivered and accepted in full: the promise itself
