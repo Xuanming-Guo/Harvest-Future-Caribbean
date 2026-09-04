@@ -446,6 +446,36 @@ UUIDs and processing timestamps differ, but physical digest/metrics and the
 normalized role/tool/status action sequence are repeatable. Never compare raw
 replay JSON byte-for-byte because run-scoped UUIDs are intentionally new.
 
+### Reproducibility depends on the run's own event order, never on a UUID
+
+Repeat the check with several seeds, not just `42`. Seed `51` used to produce a
+different digest and frame count on almost every run (#83) while `42` held.
+
+The cause was ordering, not the engine. A connected participant works through
+the approvals, verification tasks and delivery missions the Product API reports
+as waiting, and the connected loop sorted each of those queues by the Product
+identifier of its record. Every Product identifier is a `randomUUID()`, so the
+queue order was drawn fresh in each run. It only mattered when two items were
+waiting at once and processing one changed what happened to the other, which is
+why some seeds looked stable: with seed `51`, two delivery missions became
+available in the same agent cycle and competed for the same vehicles, so the
+mission offered first was carried and the other was sometimes left behind.
+Whichever supply and missions that produced then changed the physical world,
+and with it the digest and the number of frames.
+
+The connected loop now orders every such queue by the position at which the
+record first appeared in that run's own domain-event stream, which follows from
+the seed rather than from a random draw. When adding a participant behaviour,
+order its work the same way (`byArrival` in `app/api/src/simulation-agents.ts`)
+and never sort by a `cropBatchId`, `orderId`, `missionId`, `approvalId` or
+`taskId`. The same rule applies to any Product API query the connected loop
+depends on: give it a total order over stable columns, because a tie broken by
+insertion order is not stable between runs either.
+
+`app/api/tests/api.integration.test.ts` runs seeds `42`, `51`, `99` and `123`
+three times each and compares the digest, the frame count, the closing outcome
+summary, the engine metrics and the normalized action sequence.
+
 ## 9. Verify baseline isolation
 
 Create the same request with `policy = "BASELINE"` and a new key. Its scene has

@@ -119,6 +119,7 @@ interface ApprovalDto {
 
 interface VehicleDto {
   vehicleId: string;
+  label: string;
   status: string;
   capacity?: QuantityDto;
 }
@@ -653,6 +654,12 @@ interface ProductMissionBinding {
 
 /** Converts ordered Product API events into validated future engine effects. */
 class ProductEventProjector {
+  /**
+   * Position at which each Product record first appeared in this run's own
+   * domain-event stream, and the counter that hands those positions out.
+   */
+  private readonly arrivalOrder = new Map<string, number>();
+  private lastArrival = 0;
   private readonly productBatchToSimulation = new Map<string, string>();
   private readonly productOrderToDemand = new Map<string, string>();
   private readonly buyerByOrder = new Map<string, string>();
@@ -689,8 +696,25 @@ class ProductEventProjector {
     return this.buyerByOrder.get(orderId);
   }
 
+  /**
+   * Rank used to order the work a participant has waiting (#83).
+   *
+   * Every Product identifier is a `randomUUID()`, so sorting pending approvals,
+   * verification tasks, missions or orders by their identifier orders them
+   * differently in every run and the same seed stops reproducing. The position
+   * at which a record first entered the run's ordered event stream depends only
+   * on the seed, because the sequence of participant tool calls does.
+   */
+  arrivalOf(entityId: string) {
+    return this.arrivalOrder.get(entityId) ?? Number.MAX_SAFE_INTEGER;
+  }
+
   consume(events: DomainEvent[]) {
     for (const event of events) {
+      if (!this.arrivalOrder.has(event.entityId)) {
+        this.lastArrival += 1;
+        this.arrivalOrder.set(event.entityId, this.lastArrival);
+      }
       const effect = this.project(event);
       const result = this.engine.applyProductEffect(effect);
       if (effect.type === "MISSION_ACCEPTED" && result.simulationMissionId) {
@@ -826,6 +850,16 @@ class ProductEventProjector {
   }
 }
 
+/**
+ * Comparator that puts Product records in the order this run first observed
+ * them. Use it wherever a participant works through a queue: ordering by a
+ * random Product identifier would decide the run's outcome by chance.
+ */
+function byArrival<T>(projector: ProductEventProjector, key: (item: T) => string) {
+  return (left: T, right: T) => projector.arrivalOf(key(left)) - projector.arrivalOf(key(right)) ||
+    key(left).localeCompare(key(right));
+}
+
 function participantBySimulationId(participants: ProductParticipant[], id: string) {
   return participants.find((participant) => participant.simulationActorId === id);
 }
@@ -852,7 +886,7 @@ async function verifyEvidence(
   projector: ProductEventProjector,
 ) {
   const page = await tools.query<Page<VerificationTaskDto>>(coordinator, "/v1/verification-tasks?status=OPEN&limit=100");
-  for (const task of [...page.items].sort((a, b) => a.taskId.localeCompare(b.taskId))) {
+  for (const task of [...page.items].sort(byArrival(projector, (item) => item.taskId))) {
     recordResult(await tools.verifyObservation(coordinator, at, task.taskId), actions, projector);
   }
 }
@@ -868,7 +902,10 @@ async function decideApprovals(
   const ordered = participants.filter((item) => item.role !== "TRANSPORTER").sort((a, b) => roleOrder[a.role] - roleOrder[b.role] || a.simulationActorId.localeCompare(b.simulationActorId));
   for (const participant of ordered) {
     const page = await tools.query<Page<ApprovalDto>>(participant, "/v1/approvals?status=PENDING&limit=100");
-    for (const approval of [...page.items].sort((a, b) => a.approvalId.localeCompare(b.approvalId))) {
+    // An approval is created inside the transaction that proposes its subject
+    // and never carries an event of its own, so the subject's arrival is what
+    // orders the decisions. One participant is asked once per subject.
+    for (const approval of [...page.items].sort(byArrival(projector, (item) => item.subjectId))) {
       recordResult(
         await tools.decideApproval(participant, at, approval.approvalId, `Approved the ${approval.subjectType.toLowerCase()} proposal.`),
         actions,
@@ -890,12 +927,15 @@ async function acceptAvailableMissions(
     .sort((a, b) => a.simulationActorId.localeCompare(b.simulationActorId));
   if (!transporters.length) return;
   const missions = await tools.query<Page<MissionDto>>(transporters[0] as ProductParticipant, "/v1/delivery-missions?status=AVAILABLE&limit=100");
-  for (const mission of [...missions.items].filter((item) => item.status === "AVAILABLE").sort((a, b) => a.orderId.localeCompare(b.orderId))) {
+  // Missions compete for the same vehicles, so which one is offered first
+  // decides which is carried at all. That order has to be the run's own, not
+  // the order of two random mission identifiers.
+  for (const mission of [...missions.items].filter((item) => item.status === "AVAILABLE").sort(byArrival(projector, (item) => item.missionId))) {
     for (const transporter of transporters) {
       const vehicles = await tools.query<Page<VehicleDto>>(transporter, "/v1/me/vehicles?limit=100");
       const vehicle = vehicles.items
         .filter((item) => item.status === "AVAILABLE" && (item.capacity?.value ?? Number.MAX_SAFE_INTEGER) >= mission.quantity.value)
-        .sort((a, b) => (a.capacity?.value ?? Number.MAX_SAFE_INTEGER) - (b.capacity?.value ?? Number.MAX_SAFE_INTEGER) || a.vehicleId.localeCompare(b.vehicleId))[0];
+        .sort((a, b) => (a.capacity?.value ?? Number.MAX_SAFE_INTEGER) - (b.capacity?.value ?? Number.MAX_SAFE_INTEGER) || a.label.localeCompare(b.label))[0];
       if (!vehicle) continue;
       const result = await tools.acceptMission(transporter, at, mission.missionId, vehicle.vehicleId, mission.quantity.value);
       recordResult(result, actions, projector);
@@ -1111,7 +1151,7 @@ async function processMissionArrival(
   const orderOwner = buyerProductId ? participantByProductId(participants, buyerProductId) : undefined;
   if (!orderOwner) return;
   const allocation = projector.allocationForOrder(binding.orderId);
-  const lineOutcomes = [...allocation.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([cropBatchId, committed]) => {
+  const lineOutcomes = [...allocation.entries()].sort(byArrival(projector, ([cropBatchId]) => cropBatchId)).map(([cropBatchId, committed]) => {
     const accepted = Math.min(committed, binding.pickedByProductBatch.get(cropBatchId) ?? 0);
     const rejected = Math.max(0, committed - accepted);
     return {
@@ -1146,8 +1186,8 @@ async function processMissionArrival(
 
 /**
  * Records paying every delivered order whose synthetic waiting period has
- * elapsed, in sorted order ID order so the run stays deterministic. Harvest
- * tracks payment; it does not move money, and neither does this.
+ * elapsed, in the order the run placed those orders so it stays deterministic.
+ * Harvest tracks payment; it does not move money, and neither does this.
  */
 async function processDuePayments(
   tools: ProductTools,
@@ -1159,7 +1199,7 @@ async function processDuePayments(
 ) {
   const due = [...pending.values()]
     .filter((item) => frame.atMs >= item.payableFromMs)
-    .sort((left, right) => left.orderId.localeCompare(right.orderId));
+    .sort(byArrival(projector, (item) => item.orderId));
   for (const item of due) {
     pending.delete(item.orderId);
     const buyer = participantByProductId(participants, item.buyerProductId);

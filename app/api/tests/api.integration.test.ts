@@ -1455,3 +1455,101 @@ describe("per-run harvest estimation (#51)", () => {
     expect(await prisma.yieldPrediction.count({ where: { simulationRunId: baseline.json().runId } })).toBe(0);
   }, 180_000);
 });
+
+/**
+ * Reproducibility is a product non-negotiable: an identical scenario, scope,
+ * policy, seed and estimation mode must produce identical normalised results.
+ * Connected runs used to hold only for some seeds (#83), because the
+ * participants worked through their pending approvals, verification tasks and
+ * available missions in Product identifier order and every Product identifier
+ * is a random UUID. These seeds are checked three times each rather than twice
+ * so a run that agrees with one neighbour by chance still fails.
+ */
+describe("connected run reproducibility (#83)", () => {
+  const RUNS_PER_SEED = 3;
+  const REPRODUCIBILITY_TIMEOUT_MS = 300_000;
+
+  interface FrameSnapshot {
+    activeListings: number;
+    openDemands: number;
+    ordersByStatus: Record<string, number>;
+    orderOutcomes: Record<string, unknown>;
+    deliveryAcceptedKg: number;
+    approvedCommitmentCount: number;
+    completedMissionCount: number;
+    paymentOverdueCount?: number;
+    activeMissionIds: string[];
+    openExceptionIds: string[];
+  }
+
+  interface SavedFrame {
+    eventType: string;
+    at: string;
+    agentActions?: Array<{ at: string; role: string; simulationActorId: string; toolName: string; status: string }>;
+    operationsSnapshot?: FrameSnapshot;
+  }
+
+  /**
+   * Everything about a run that the seed alone must decide. Identifiers are
+   * left out because they are new in every run by design; counts stand in for
+   * the two snapshot fields that carry them.
+   */
+  async function fingerprint(seed: number, attempt: number) {
+    const created = await server.inject({
+      method: "POST",
+      url: "/v1/simulation-runs",
+      headers: mutationHeaders("operations-demo", `reproducibility-${seed}-${attempt}`),
+      payload: {
+        scenarioId: "saint-lucia-demo-v1",
+        policy: "HARVEST",
+        seed,
+        decisionMode: "DETERMINISTIC",
+        scope: { mode: "SELECTED", islandIds: ["saint-lucia"] },
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const stored = await prisma.simulationRun.findUniqueOrThrow({ where: { id: created.json().runId as string } });
+    const frames = (stored.frames as unknown as SavedFrame[]) ?? [];
+    const closing = frames.at(-1)?.operationsSnapshot;
+    return {
+      digest: stored.determinismDigest,
+      frameCount: stored.frameCount,
+      metrics: stored.metrics,
+      outcomeSummary: closing ? {
+        activeListings: closing.activeListings,
+        openDemands: closing.openDemands,
+        ordersByStatus: closing.ordersByStatus,
+        orderOutcomes: closing.orderOutcomes,
+        deliveryAcceptedKg: closing.deliveryAcceptedKg,
+        approvedCommitmentCount: closing.approvedCommitmentCount,
+        completedMissionCount: closing.completedMissionCount,
+        paymentOverdueCount: closing.paymentOverdueCount,
+        activeMissions: closing.activeMissionIds.length,
+        openExceptions: closing.openExceptionIds.length,
+      } : null,
+      toolSequence: frames.flatMap((frame, index) => (frame.agentActions ?? []).map((action) =>
+        [index, frame.eventType, action.at, action.role, action.simulationActorId, action.toolName, action.status].join("|"))),
+    };
+  }
+
+  it.each([42, 51, 99, 123])(
+    "produces an identical world, frame count, outcome summary and action sequence for seed %i",
+    async (seed) => {
+      const attempts: Array<Awaited<ReturnType<typeof fingerprint>>> = [];
+      for (let attempt = 1; attempt <= RUNS_PER_SEED; attempt += 1) attempts.push(await fingerprint(seed, attempt));
+      const [first, ...repeats] = attempts;
+      expect(first.digest).toEqual(expect.any(String));
+      expect(first.frameCount).toBeGreaterThan(20);
+      expect(first.outcomeSummary).not.toBeNull();
+      expect(first.toolSequence.length).toBeGreaterThan(0);
+      for (const repeat of repeats) {
+        expect(repeat.digest).toBe(first.digest);
+        expect(repeat.frameCount).toBe(first.frameCount);
+        expect(repeat.outcomeSummary).toEqual(first.outcomeSummary);
+        expect(repeat.metrics).toEqual(first.metrics);
+        expect(repeat.toolSequence).toEqual(first.toolSequence);
+      }
+    },
+    REPRODUCIBILITY_TIMEOUT_MS,
+  );
+});
