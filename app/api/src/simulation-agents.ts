@@ -83,6 +83,11 @@ interface OrderDto {
   neededBy: string;
 }
 
+interface PaymentConfirmationDto {
+  orderId: string;
+  payment: { status: string; paidAt?: string; daysOutstanding?: number };
+}
+
 interface ApprovalDto {
   approvalId: string;
   subjectType: "ALLOCATION" | "RECOVERY";
@@ -93,6 +98,7 @@ interface ApprovalDto {
 
 interface VehicleDto {
   vehicleId: string;
+  label: string;
   status: string;
   capacity?: QuantityDto;
 }
@@ -164,6 +170,25 @@ const productStage = (stage: ControlRoomBatch["lastReportedStage"]) => {
  * This is an API bootstrap operation, not a simulation database write: the
  * engine supplies only its safe scene/first frame and never receives Prisma.
  */
+/**
+ * Payment terms a synthetic hotel buyer agrees to, and the simulated days it
+ * then actually waits before recording payment. Both are
+ * stakeholder-calibrated and scaled to the 21-day scenario: hotels quote short
+ * terms and pay in one to two months, so 7 against 10 preserves "paid late" at
+ * demonstration scale. A delivered order therefore falls due on day 7, reads
+ * as overdue from day 8, and is settled on day 10 unless the run window closes
+ * first. Real buyers keep the Product API's 14-day default; only the synthetic
+ * participants use these.
+ */
+export const SIMULATED_PAYMENT_TERMS_DAYS = 7;
+export const PAYMENT_BEHAVIOUR_DAYS = 10;
+
+interface PendingPayment {
+  orderId: string;
+  buyerProductId: string;
+  payableFromMs: number;
+}
+
 async function bootstrapParticipants(runId: string, scene: ControlRoomScene, firstFrame: ControlRoomFrame) {
   const participants: ProductParticipant[] = [];
   const batchIds = new Map<string, string>();
@@ -540,11 +565,10 @@ class ProductTools {
   placeOrder(participant: ProductParticipant, at: string, payload: JsonObject, summary: string) {
     return this.mutate<OrderDto>(participant, at, "place_order", "/v1/orders", payload, summary);
   }
-  decideApproval(participant: ProductParticipant, at: string, approvalId: string, summary: string) {
-    return this.mutate<ApprovalDto>(participant, at, "decide_approval", `/v1/approvals/${approvalId}/decisions`, {
-      decision: "APPROVE",
-      reason: "Synthetic participant approved this feasible run-scoped proposal.",
-    }, summary);
+  decideApproval(participant: ProductParticipant, at: string, approvalId: string, summary: string, decision: "APPROVE" | "REJECT" = "APPROVE") {
+    return this.mutate<ApprovalDto>(participant, at, "decide_approval", `/v1/approvals/${approvalId}/decisions`, decision === "APPROVE"
+      ? { decision, reason: "Synthetic participant approved this feasible run-scoped proposal." }
+      : { decision, reason: "Synthetic participant declined this proposal.", ...SYNTHETIC_REJECTION_REASON }, summary);
   }
   acceptMission(participant: ProductParticipant, at: string, missionId: string, vehicleId: string, quantityKg: number) {
     return this.mutate<MissionDto>(participant, at, "accept_delivery_mission", `/v1/delivery-missions/${missionId}/acceptance`, {
@@ -564,16 +588,30 @@ class ProductTools {
       provenance: "SYNTHETIC",
     }, "Reported an observable disruption affecting an active delivery.");
   }
-  verifyObservation(participant: ProductParticipant, at: string, taskId: string) {
-    return this.mutate<VerificationTaskDto>(participant, at, "verify_observation", `/v1/verification-tasks/${taskId}/decisions`, {
-      decision: "VERIFY",
-      note: "Synthetic coordinator verified the observable simulation update.",
-    }, "Verified the newly visible crop observation.");
+  verifyObservation(participant: ProductParticipant, at: string, taskId: string, decision: "VERIFY" | "REQUEST_CHANGES" = "VERIFY") {
+    return this.mutate<VerificationTaskDto>(participant, at, "verify_observation", `/v1/verification-tasks/${taskId}/decisions`, decision === "VERIFY"
+      ? { decision, note: "Synthetic coordinator verified the observable simulation update." }
+      : { decision, note: "Synthetic coordinator could not confirm the observable simulation update.", ...SYNTHETIC_REJECTION_REASON },
+      decision === "VERIFY" ? "Verified the newly visible crop observation." : "Requested changes to the newly visible crop observation.");
   }
   acceptDelivery(participant: ProductParticipant, at: string, missionId: string, payload: JsonObject, acceptedKg: number) {
     return this.mutate<JsonObject>(participant, at, "record_delivery_acceptance", `/v1/deliveries/${missionId}/acceptance`, payload, `Recorded ${acceptedKg.toFixed(2)} kg as physically accepted.`);
   }
+  confirmPayment(participant: ProductParticipant, at: string, orderId: string, reference: string, daysAfterDelivery: number) {
+    return this.mutate<PaymentConfirmationDto>(participant, at, "confirm_payment", `/v1/orders/${orderId}/payment-confirmations`, {
+      reference,
+    }, `Recorded paying this delivered order ${daysAfterDelivery} simulated days after accepting it. Harvest tracks the payment; it does not move money.`);
+  }
 }
+
+/**
+ * Deterministic explanation attached to every synthetic rejection so connected
+ * runs satisfy the same actionable-reason rule the website enforces.
+ */
+const SYNTHETIC_REJECTION_REASON = {
+  reasonCode: "MATURITY_OR_QUALITY",
+  nextAction: "Re-check ripeness before the next pickup and record an updated observation.",
+} as const;
 
 interface ProductMissionBinding {
   missionId: string;
@@ -589,6 +627,12 @@ interface ProductMissionBinding {
 
 /** Converts ordered Product API events into validated future engine effects. */
 class ProductEventProjector {
+  /**
+   * Position at which each Product record first appeared in this run's own
+   * domain-event stream, and the counter that hands those positions out.
+   */
+  private readonly arrivalOrder = new Map<string, number>();
+  private lastArrival = 0;
   private readonly productBatchToSimulation = new Map<string, string>();
   private readonly productOrderToDemand = new Map<string, string>();
   private readonly buyerByOrder = new Map<string, string>();
@@ -625,8 +669,25 @@ class ProductEventProjector {
     return this.buyerByOrder.get(orderId);
   }
 
+  /**
+   * Rank used to order the work a participant has waiting (#83).
+   *
+   * Every Product identifier is a `randomUUID()`, so sorting pending approvals,
+   * verification tasks, missions or orders by their identifier orders them
+   * differently in every run and the same seed stops reproducing. The position
+   * at which a record first entered the run's ordered event stream depends only
+   * on the seed, because the sequence of participant tool calls does.
+   */
+  arrivalOf(entityId: string) {
+    return this.arrivalOrder.get(entityId) ?? Number.MAX_SAFE_INTEGER;
+  }
+
   consume(events: DomainEvent[]) {
     for (const event of events) {
+      if (!this.arrivalOrder.has(event.entityId)) {
+        this.lastArrival += 1;
+        this.arrivalOrder.set(event.entityId, this.lastArrival);
+      }
       const effect = this.project(event);
       const result = this.engine.applyProductEffect(effect);
       if (effect.type === "MISSION_ACCEPTED" && result.simulationMissionId) {
@@ -762,6 +823,16 @@ class ProductEventProjector {
   }
 }
 
+/**
+ * Comparator that puts Product records in the order this run first observed
+ * them. Use it wherever a participant works through a queue: ordering by a
+ * random Product identifier would decide the run's outcome by chance.
+ */
+function byArrival<T>(projector: ProductEventProjector, key: (item: T) => string) {
+  return (left: T, right: T) => projector.arrivalOf(key(left)) - projector.arrivalOf(key(right)) ||
+    key(left).localeCompare(key(right));
+}
+
 function participantBySimulationId(participants: ProductParticipant[], id: string) {
   return participants.find((participant) => participant.simulationActorId === id);
 }
@@ -788,7 +859,7 @@ async function verifyEvidence(
   projector: ProductEventProjector,
 ) {
   const page = await tools.query<Page<VerificationTaskDto>>(coordinator, "/v1/verification-tasks?status=OPEN&limit=100");
-  for (const task of [...page.items].sort((a, b) => a.taskId.localeCompare(b.taskId))) {
+  for (const task of [...page.items].sort(byArrival(projector, (item) => item.taskId))) {
     recordResult(await tools.verifyObservation(coordinator, at, task.taskId), actions, projector);
   }
 }
@@ -804,7 +875,10 @@ async function decideApprovals(
   const ordered = participants.filter((item) => item.role !== "TRANSPORTER").sort((a, b) => roleOrder[a.role] - roleOrder[b.role] || a.simulationActorId.localeCompare(b.simulationActorId));
   for (const participant of ordered) {
     const page = await tools.query<Page<ApprovalDto>>(participant, "/v1/approvals?status=PENDING&limit=100");
-    for (const approval of [...page.items].sort((a, b) => a.approvalId.localeCompare(b.approvalId))) {
+    // An approval is created inside the transaction that proposes its subject
+    // and never carries an event of its own, so the subject's arrival is what
+    // orders the decisions. One participant is asked once per subject.
+    for (const approval of [...page.items].sort(byArrival(projector, (item) => item.subjectId))) {
       recordResult(
         await tools.decideApproval(participant, at, approval.approvalId, `Approved the ${approval.subjectType.toLowerCase()} proposal.`),
         actions,
@@ -826,12 +900,15 @@ async function acceptAvailableMissions(
     .sort((a, b) => a.simulationActorId.localeCompare(b.simulationActorId));
   if (!transporters.length) return;
   const missions = await tools.query<Page<MissionDto>>(transporters[0] as ProductParticipant, "/v1/delivery-missions?status=AVAILABLE&limit=100");
-  for (const mission of [...missions.items].filter((item) => item.status === "AVAILABLE").sort((a, b) => a.orderId.localeCompare(b.orderId))) {
+  // Missions compete for the same vehicles, so which one is offered first
+  // decides which is carried at all. That order has to be the run's own, not
+  // the order of two random mission identifiers.
+  for (const mission of [...missions.items].filter((item) => item.status === "AVAILABLE").sort(byArrival(projector, (item) => item.missionId))) {
     for (const transporter of transporters) {
       const vehicles = await tools.query<Page<VehicleDto>>(transporter, "/v1/me/vehicles?limit=100");
       const vehicle = vehicles.items
         .filter((item) => item.status === "AVAILABLE" && (item.capacity?.value ?? Number.MAX_SAFE_INTEGER) >= mission.quantity.value)
-        .sort((a, b) => (a.capacity?.value ?? Number.MAX_SAFE_INTEGER) - (b.capacity?.value ?? Number.MAX_SAFE_INTEGER) || a.vehicleId.localeCompare(b.vehicleId))[0];
+        .sort((a, b) => (a.capacity?.value ?? Number.MAX_SAFE_INTEGER) - (b.capacity?.value ?? Number.MAX_SAFE_INTEGER) || a.label.localeCompare(b.label))[0];
       if (!vehicle) continue;
       const result = await tools.acceptMission(transporter, at, mission.missionId, vehicle.vehicleId, mission.quantity.value);
       recordResult(result, actions, projector);
@@ -871,7 +948,11 @@ async function processObservationFrame(
       tools.query<CropBatchDto>(farmer, `/v1/crop-batches/${cropBatchId}`),
       tools.query<Page<ListingDto>>(farmer, "/v1/listings?limit=100"),
     ]);
-    if (!listings.items.some((item) => item.cropBatchId === cropBatchId && item.status === "ACTIVE") && productBatch.availableToPromise.value > 0) {
+    // Only observably ready produce is offered. ATP is already zero for a
+    // growing batch, but the stage check keeps the participant's intent
+    // honest even if a forecast path ever leaks supply early.
+    const readyToList = productBatch.status === "HARVEST_READY" || productBatch.status === "HARVESTED";
+    if (readyToList && !listings.items.some((item) => item.cropBatchId === cropBatchId && item.status === "ACTIVE") && productBatch.availableToPromise.value > 0) {
       recordResult(await tools.publishListing(farmer, frame.at, {
         cropBatchId,
         quantity: kilograms(productBatch.availableToPromise.value),
@@ -891,6 +972,7 @@ async function processDemandFrame(
   demanded: Set<string>,
   actions: SimulationAgentAction[],
   projector: ProductEventProjector,
+  acceptanceThresholds: Map<string, number>,
 ) {
   for (const demand of [...frame.demands].sort((a, b) => a.demandId.localeCompare(b.demandId))) {
     if (demanded.has(demand.demandId)) continue;
@@ -909,12 +991,18 @@ async function processDemandFrame(
       maxUnitPrice: { amount: 8, currency: "XCD" },
     }, `Recorded demand for ${demand.quantityKg.toFixed(2)} kg of ${demand.crop}.`), actions, projector);
 
+    // The buyer persona already carries the share of an order it treats as
+    // fulfilled; the Product order states the same number so matching can
+    // safely offer a partial commitment this buyer would actually accept.
+    const minimumAcceptableFraction = acceptanceThresholds.get(demand.buyerId) ?? 0.8;
     const order = await tools.placeOrder(buyer, frame.at, {
       cropType: demand.crop,
       requestedQuantity: kilograms(demand.quantityKg),
       neededBy: new Date(demand.neededBy).toISOString(),
       deliveryLocation,
-    }, `Placed an order for ${demand.quantityKg.toFixed(2)} kg of ${demand.crop}.`);
+      minimumAcceptableFraction,
+      paymentTermsDays: SIMULATED_PAYMENT_TERMS_DAYS,
+    }, `Placed an order for ${demand.quantityKg.toFixed(2)} kg of ${demand.crop}, accepting at least ${Math.round(minimumAcceptableFraction * 100)}% on ${SIMULATED_PAYMENT_TERMS_DAYS}-day payment terms.`);
     actions.push(order.action);
     if (order.ok) projector.bindOrder(order.data.orderId, demand.demandId, buyer.actor.id);
     projector.consume(order.events);
@@ -1007,6 +1095,7 @@ async function processMissionArrival(
   previous: ControlRoomFrame | undefined,
   actions: SimulationAgentAction[],
   projector: ProductEventProjector,
+  pendingPayments: Map<string, PendingPayment>,
 ) {
   const changedMission = frame.missions.find((mission) => mission.status === "COMPLETED" && !previous?.missions.some((old) => old.missionId === mission.missionId && old.status === "COMPLETED"));
   if (!changedMission) return;
@@ -1035,24 +1124,65 @@ async function processMissionArrival(
   const orderOwner = buyerProductId ? participantByProductId(participants, buyerProductId) : undefined;
   if (!orderOwner) return;
   const allocation = projector.allocationForOrder(binding.orderId);
-  const lineOutcomes = [...allocation.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([cropBatchId, committed]) => {
+  const lineOutcomes = [...allocation.entries()].sort(byArrival(projector, ([cropBatchId]) => cropBatchId)).map(([cropBatchId, committed]) => {
     const accepted = Math.min(committed, binding.pickedByProductBatch.get(cropBatchId) ?? 0);
+    const rejected = Math.max(0, committed - accepted);
     return {
       cropBatchId,
       acceptedQuantity: kilograms(accepted),
-      rejectedQuantity: kilograms(Math.max(0, committed - accepted)),
+      rejectedQuantity: kilograms(rejected),
+      ...(rejected > 0 ? SYNTHETIC_REJECTION_REASON : {}),
     };
   });
   const acceptedKg = Number(lineOutcomes.reduce((sum, line) => sum + line.acceptedQuantity.value, 0).toFixed(2));
   const rejectedKg = Number(lineOutcomes.reduce((sum, line) => sum + line.rejectedQuantity.value, 0).toFixed(2));
   const outcome = acceptedKg <= 0 ? "REJECTED" : rejectedKg <= 0 ? "ACCEPTED" : "PARTIALLY_ACCEPTED";
-  recordResult(await tools.acceptDelivery(orderOwner, frame.at, binding.missionId, {
+  const accepted = await tools.acceptDelivery(orderOwner, frame.at, binding.missionId, {
     outcome,
     acceptedQuantity: kilograms(acceptedKg),
     rejectedQuantity: kilograms(rejectedKg),
     lineOutcomes,
     note: "Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected.",
-  }, acceptedKg), actions, projector);
+    ...(rejectedKg > 0 ? SYNTHETIC_REJECTION_REASON : {}),
+  }, acceptedKg);
+  recordResult(accepted, actions, projector);
+  // A rejected delivery leaves nothing to pay for; every other outcome starts
+  // the buyer's own payment clock from the moment it accepted the produce.
+  if (accepted.ok && outcome !== "REJECTED") {
+    pendingPayments.set(binding.orderId, {
+      orderId: binding.orderId,
+      buyerProductId: orderOwner.actor.id,
+      payableFromMs: frame.atMs + PAYMENT_BEHAVIOUR_DAYS * 24 * 60 * 60 * 1_000,
+    });
+  }
+}
+
+/**
+ * Records paying every delivered order whose synthetic waiting period has
+ * elapsed, in the order the run placed those orders so it stays deterministic.
+ * Harvest tracks payment; it does not move money, and neither does this.
+ */
+async function processDuePayments(
+  tools: ProductTools,
+  participants: ProductParticipant[],
+  frame: ControlRoomFrame,
+  pending: Map<string, PendingPayment>,
+  actions: SimulationAgentAction[],
+  projector: ProductEventProjector,
+) {
+  const due = [...pending.values()]
+    .filter((item) => frame.atMs >= item.payableFromMs)
+    .sort(byArrival(projector, (item) => item.orderId));
+  for (const item of due) {
+    pending.delete(item.orderId);
+    const buyer = participantByProductId(participants, item.buyerProductId);
+    if (!buyer) continue;
+    recordResult(
+      await tools.confirmPayment(buyer, frame.at, item.orderId, `SIM-${item.orderId.slice(0, 8).toUpperCase()}`, PAYMENT_BEHAVIOUR_DAYS),
+      actions,
+      projector,
+    );
+  }
 }
 
 /** Runs the physical engine and Product API participants as one interleaved cycle. */
@@ -1083,7 +1213,11 @@ export async function runConnectedHarvest(
 
   const observed = new Set<string>();
   const demanded = new Set<string>();
+  const acceptanceThresholds = new Map(
+    engine.controlRoomScene.buyers.map((buyer) => [buyer.buyerId, buyer.minimumAcceptableFraction] as const),
+  );
   const handledDisruptionImpacts = new Set<string>();
+  const pendingPayments = new Map<string, PendingPayment>();
   const allActions: SimulationAgentAction[] = [];
   let previousFrame: ControlRoomFrame | undefined = firstFrame;
   let latestSnapshot = await operationsSnapshot(tools, observer, new Date(engine.currentTime).toISOString());
@@ -1098,12 +1232,13 @@ export async function runConnectedHarvest(
       if (frame.eventType === "FARMER_OBSERVATION") {
         await processObservationFrame(tools, participants, batchIds, frame, observed, actions, projector, coordinator);
       } else if (frame.eventType === "BUYER_DEMAND") {
-        await processDemandFrame(tools, participants, frame, demanded, actions, projector);
+        await processDemandFrame(tools, participants, frame, demanded, actions, projector, acceptanceThresholds);
       } else if (frame.eventType === "MISSION_DEPART") {
         await processMissionDeparture(tools, participants, frame, previousFrame, actions, projector);
       } else if (frame.eventType === "MISSION_ARRIVE") {
-        await processMissionArrival(tools, participants, frame, previousFrame, actions, projector);
+        await processMissionArrival(tools, participants, frame, previousFrame, actions, projector, pendingPayments);
       }
+      await processDuePayments(tools, participants, frame, pendingPayments, actions, projector);
       await processDisruptionImpacts(
         tools,
         participants,

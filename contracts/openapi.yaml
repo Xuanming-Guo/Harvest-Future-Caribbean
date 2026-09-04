@@ -154,6 +154,43 @@ paths:
                 availableToPromise: {value: 380, unit: kg}
                 provenance: MODEL_PREDICTED
         default: {$ref: '#/components/responses/Problem'}
+  /v1/crop-standards:
+    get:
+      tags: [Crop]
+      operationId: listCropStandards
+      summary: List published crop standards and the caller's own drafts
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+        - name: cropType
+          in: query
+          required: true
+          schema: {type: string, minLength: 1}
+      responses:
+        '200':
+          description: Versioned crop standards for the requested crop.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CropStandardPage'}
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      tags: [Crop]
+      operationId: createCropStandard
+      summary: Create a new publisher-specific crop standard version
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CropStandardCreate'}
+      responses:
+        '201':
+          description: A new immutable standard version was created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CropStandard'}
+        default: {$ref: '#/components/responses/Problem'}
   /v1/crop-batches/{cropBatchId}/forecast-requests:
     post:
       tags: [Crop]
@@ -362,6 +399,10 @@ paths:
         - name: atRisk
           in: query
           schema: {type: boolean}
+        - name: cropBatchId
+          in: query
+          description: Return only orders whose latest allocation commits this crop batch.
+          schema: {type: string, format: uuid}
       responses:
         '200':
           description: Orders visible to the caller.
@@ -385,6 +426,8 @@ paths:
               requestedQuantity: {value: 120, unit: kg}
               neededBy: '2026-08-12T14:00:00Z'
               deliveryLocation: {latitude: 13.9094, longitude: -60.9789}
+              minimumAcceptableFraction: 0.8
+              paymentTermsDays: 14
               listingIds: [16161616-1616-4616-8616-161616161616]
       responses:
         '201':
@@ -397,7 +440,10 @@ paths:
                 buyerId: 19191919-1919-4919-8919-191919191919
                 cropType: TOMATO
                 requestedQuantity: {value: 120, unit: kg}
+                committedQuantity: {value: 0, unit: kg}
                 acceptedQuantity: {value: 0, unit: kg}
+                minimumAcceptableFraction: 0.8
+                paymentTermsDays: 14
                 neededBy: '2026-08-12T14:00:00Z'
                 lifecycleStatus: REQUESTED
                 atRisk: false
@@ -422,13 +468,57 @@ paths:
                 buyerId: 19191919-1919-4919-8919-191919191919
                 cropType: TOMATO
                 requestedQuantity: {value: 120, unit: kg}
+                committedQuantity: {value: 120, unit: kg}
                 acceptedQuantity: {value: 120, unit: kg}
+                minimumAcceptableFraction: 0.8
+                paymentTermsDays: 14
                 neededBy: '2026-08-12T14:00:00Z'
                 lifecycleStatus: FULFILLED
                 atRisk: false
                 approvalSummary: {required: 3, approved: 3, pending: 0, rejected: 0}
+                payment:
+                  status: OVERDUE
+                  amount: {amount: 780, currency: XCD}
+                  dueAt: '2026-08-26T13:45:00Z'
+                  daysOutstanding: 31
                 createdAt: '2026-08-01T10:15:00Z'
                 updatedAt: '2026-08-12T13:45:00Z'
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/orders/{orderId}/payment-confirmations:
+    post:
+      tags: [Orders]
+      operationId: confirmOrderPayment
+      summary: Record that the buyer paid this order outside Harvest
+      description: >-
+        Harvest tracks payment terms and status. It never moves money, holds
+        funds, or verifies a transfer. This operation records the buyer's own
+        statement that the order was settled, so the farmer can see it stop
+        counting against what is owed.
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PaymentConfirmationCreate'}
+            example:
+              reference: Bank transfer 2026-08-24
+      responses:
+        '201':
+          description: Settlement evidence stored and `PAYMENT_CONFIRMED` emitted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentConfirmation'}
+              example:
+                orderId: 20202020-2020-4020-8020-202020202020
+                payment:
+                  status: PAID
+                  amount: {amount: 780, currency: XCD}
+                  dueAt: '2026-08-26T13:45:00Z'
+                  paidAt: '2026-08-24T09:30:00Z'
+                  reference: Bank transfer 2026-08-24
+                  daysOutstanding: 11
         default: {$ref: '#/components/responses/Problem'}
   /v1/approvals:
     get:
@@ -469,7 +559,10 @@ paths:
               reason: Quantity and collection window confirmed.
       responses:
         '200':
-          description: Decision recorded; approved allocation/recovery emits its corresponding event.
+          description: >-
+            Decision recorded; approved allocation/recovery emits its
+            corresponding event. `REJECT` without `reasonCode` and `nextAction`
+            fails with `422 DECISION_REASON_REQUIRED`.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Approval'}
@@ -680,7 +773,10 @@ paths:
             schema: {$ref: '#/components/schemas/VerificationDecision'}
       responses:
         '200':
-          description: Final verification decision recorded.
+          description: >-
+            Final verification decision recorded. `REQUEST_CHANGES` without
+            `reasonCode` and `nextAction` fails with
+            `422 DECISION_REASON_REQUIRED`.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/VerificationTask'}
@@ -777,7 +873,10 @@ paths:
               note: Produce received in good condition.
       responses:
         '201':
-          description: Outcome stored; delivery/order outcome events emitted atomically.
+          description: >-
+            Outcome stored; delivery/order outcome events emitted atomically.
+            Any rejected quantity without `reasonCode` and `nextAction` fails
+            with `422 DECISION_REASON_REQUIRED`.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/DeliveryAcceptance'}
@@ -815,10 +914,11 @@ paths:
                 activeListings: 4
                 openDemands: 2
                 ordersByStatus: {REQUESTED: 1, COMMITTED: 2, IN_DELIVERY: 1, FULFILLED: 8}
-                orderOutcomes: {total: 12, fulfilled: 8, partiallyFulfilled: 0, unfulfilled: 1, pending: 3}
+                orderOutcomes: {total: 12, fulfilled: 8, partiallyFulfilled: 0, unfulfilled: 1, pending: 3, causes: {INSUFFICIENT_SUPPLY: 1}}
                 deliveryAcceptedKg: 840
                 approvedCommitmentCount: 9
                 completedMissionCount: 8
+                paymentOverdueCount: 2
                 activeMissionIds: [23232323-2323-4323-8323-232323232323]
                 openExceptionIds: []
         default: {$ref: '#/components/responses/Problem'}
@@ -1300,12 +1400,123 @@ components:
         availableToPromise: {$ref: './common.schema.json#/$defs/Quantity'}
         provenance: {$ref: './common.schema.json#/$defs/Provenance'}
         verificationStatus: {$ref: '#/components/schemas/VerificationStatus'}
+        latestDecision: {$ref: '#/components/schemas/BatchDecisionExplanation'}
+    BatchDecisionExplanation:
+      description: >-
+        Latest actionable rejection affecting this batch: a coordinator
+        REQUEST_CHANGES decision or a rejected delivery line. Present only when
+        such a decision exists. Traceability evidence, not food-safety
+        certification.
+      type: object
+      additionalProperties: false
+      required: [source, decidedAt]
+      properties:
+        source: {enum: [VERIFICATION, DELIVERY]}
+        reasonCode: {$ref: '#/components/schemas/DecisionReasonCode'}
+        nextAction: {$ref: '#/components/schemas/DecisionNextAction'}
+        note: {type: string, maxLength: 1000}
+        decidedAt: {type: string, format: date-time}
     CropBatchPage:
       type: object
       additionalProperties: false
       required: [items, pageInfo]
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/CropBatch'}}
+        pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
+    CropStandardSource:
+      type: object
+      additionalProperties: false
+      required: [title, url, licence, retrievedAt]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 300}
+        url: {type: string, format: uri, minLength: 1, maxLength: 2000}
+        licence: {type: string, minLength: 1, maxLength: 300}
+        retrievedAt: {type: string, format: date}
+    CropStandardChecklistItem:
+      type: object
+      additionalProperties: false
+      required: [key, requirement]
+      properties:
+        key: {enum: [VARIETY, SIZE_AND_GRADE, MATURITY_AND_APPEARANCE, PERMITTED_DEFECTS, CLEANING, PACKAGING]}
+        requirement: {type: string, minLength: 1, maxLength: 2000}
+    CropStandardImage:
+      type: object
+      additionalProperties: false
+      required: [url, licence, attribution, alt, acceptable]
+      properties:
+        url: {type: string, format: uri, minLength: 1, maxLength: 2000}
+        licence: {type: string, minLength: 1, maxLength: 300}
+        attribution: {type: string, minLength: 1, maxLength: 500}
+        alt: {type: string, minLength: 1, maxLength: 500}
+        acceptable: {type: boolean}
+    CropStandardGuidanceSource:
+      type: object
+      additionalProperties: false
+      required: [title, url, retrievedAt]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 300}
+        url: {type: string, format: uri, minLength: 1, maxLength: 2000}
+        retrievedAt: {type: string, format: date}
+    CropStandardGuidanceItem:
+      type: object
+      additionalProperties: false
+      required: [topic, text, source]
+      properties:
+        topic: {enum: [HARVEST_WINDOW, PEST_AND_DISEASE_SIGNS, GOOD_AGRICULTURAL_PRACTICE, HARVEST_READINESS, SORTING_GRADING_CLEANING_STORAGE]}
+        text: {type: string, minLength: 1, maxLength: 4000}
+        source: {$ref: '#/components/schemas/CropStandardGuidanceSource'}
+    CropStandardCreate:
+      type: object
+      additionalProperties: false
+      required: [cropType, status, reviewedAt, geography, source, checklist, images, guidance]
+      properties:
+        cropType: {type: string, minLength: 1, maxLength: 100}
+        status: {enum: [DRAFT, PUBLISHED]}
+        reviewedAt: {type: string, format: date-time}
+        geography: {type: string, minLength: 1, maxLength: 300}
+        source: {$ref: '#/components/schemas/CropStandardSource'}
+        checklist:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/CropStandardChecklistItem'}
+        images:
+          type: array
+          items: {$ref: '#/components/schemas/CropStandardImage'}
+        guidance:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/CropStandardGuidanceItem'}
+    CropStandard:
+      type: object
+      additionalProperties: false
+      required: [standardId, cropType, publisherActorId, publisherName, version, status, reviewedAt, geography, source, checklist, images, guidance]
+      properties:
+        standardId: {type: string, format: uuid}
+        cropType: {type: string, minLength: 1, maxLength: 100}
+        publisherActorId: {type: string, format: uuid}
+        publisherName: {type: string, minLength: 1, maxLength: 300}
+        version: {type: integer, minimum: 1}
+        status: {enum: [DRAFT, PUBLISHED]}
+        reviewedAt: {type: string, format: date-time}
+        geography: {type: string, minLength: 1, maxLength: 300}
+        source: {$ref: '#/components/schemas/CropStandardSource'}
+        checklist:
+          type: array
+          items: {$ref: '#/components/schemas/CropStandardChecklistItem'}
+        images:
+          type: array
+          items: {$ref: '#/components/schemas/CropStandardImage'}
+        guidance:
+          type: array
+          items: {$ref: '#/components/schemas/CropStandardGuidanceItem'}
+    CropStandardPage:
+      type: object
+      additionalProperties: false
+      required: [items, pageInfo]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/CropStandard'}}
         pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
     ForecastRequest:
       type: object
@@ -1462,6 +1673,29 @@ components:
         requestedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
         neededBy: {type: string, format: date-time}
         deliveryLocation: {$ref: './common.schema.json#/$defs/GeoPoint'}
+        minimumAcceptableFraction:
+          description: >-
+            The smallest share of `requestedQuantity` this buyer will accept as
+            a commitment. Matching may propose a partial allocation at or above
+            this share instead of leaving the order waiting for complete cover.
+            Optional; the Product API applies 0.8 when it is omitted. That
+            default is stakeholder-calibrated from hotel buyer feedback that
+            hotels routinely take part of an order and source the remainder
+            elsewhere.
+          type: number
+          minimum: 0.5
+          maximum: 1
+        paymentTermsDays:
+          description: >-
+            Days after the delivery is accepted that the buyer has to pay.
+            Optional; the Product API applies 14 when it is omitted. That
+            default is stakeholder-calibrated from farmer feedback that hotels
+            currently take one, two, or more months to pay, which is what
+            limits farm cash flow. Harvest records the term and the resulting
+            status only; it never moves money.
+          type: integer
+          minimum: 0
+          maximum: 90
         listingIds:
           type: array
           uniqueItems: true
@@ -1469,13 +1703,34 @@ components:
     Order:
       type: object
       additionalProperties: false
-      required: [orderId, buyerId, cropType, requestedQuantity, acceptedQuantity, neededBy, lifecycleStatus, atRisk, createdAt, updatedAt]
+      required: [orderId, buyerId, cropType, requestedQuantity, committedQuantity, acceptedQuantity, minimumAcceptableFraction, paymentTermsDays, neededBy, lifecycleStatus, atRisk, createdAt, updatedAt]
       properties:
         orderId: {type: string, format: uuid}
         buyerId: {type: string, format: uuid}
         cropType: {type: string}
         requestedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        committedQuantity:
+          description: >-
+            Quantity actually reserved at approval. Zero until an allocation is
+            approved, and below `requestedQuantity` on a safe partial
+            commitment.
+          $ref: './common.schema.json#/$defs/Quantity'
         acceptedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        minimumAcceptableFraction:
+          description: Buyer's accepted share of `requestedQuantity` for this order.
+          type: number
+          minimum: 0.5
+          maximum: 1
+        paymentTermsDays:
+          description: Agreed days from delivery acceptance to payment for this order.
+          type: integer
+          minimum: 0
+          maximum: 90
+        payment:
+          description: >-
+            Present once the order is committed and priced. Absent before then,
+            because nothing is owed until supply is reserved.
+          $ref: '#/components/schemas/OrderPayment'
         neededBy: {type: string, format: date-time}
         lifecycleStatus: {$ref: '#/components/schemas/OrderStatus'}
         atRisk: {type: boolean}
@@ -1483,12 +1738,66 @@ components:
           type: array
           uniqueItems: true
           items: {type: string, format: uuid}
+        cropStandardId: {type: string, format: uuid}
         traceId: {type: string, format: uuid}
         allocation: {$ref: '#/components/schemas/AllocationSummary'}
+        outcomeCause: {$ref: '#/components/schemas/OrderOutcomeCause'}
+        outcomeNote: {type: string, maxLength: 300}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
     OrderStatus:
       enum: [REQUESTED, ALLOCATION_PROPOSED, AWAITING_APPROVAL, COMMITTED, IN_DELIVERY, FULFILLED, PARTIALLY_FULFILLED, REJECTED, CANCELLED]
+    OrderOutcomeCause:
+      description: >-
+        The latest recorded reason an order is not (yet) fulfilled. Written at
+        each matching, approval, and delivery decision so an unfulfilled order
+        always carries one explainable cause; absent on fulfilled orders.
+      enum: [NO_READY_SUPPLY, INSUFFICIENT_SUPPLY, SUPPLY_CHANGED, APPROVAL_REJECTED, APPROVAL_TIMEOUT, MISSION_LATE, DELIVERY_REJECTED, CANCELLED, HORIZON_TRUNCATED]
+    PaymentStatus:
+      description: >-
+        Derived at read time from the delivery acceptance time plus the order's
+        `paymentTermsDays`, except `PAID`, which is recorded by the buyer or a
+        coordinator. `NOT_DUE` covers an order that has not been delivered yet
+        as well as one still inside its term; `DUE` is the day the term expires;
+        `OVERDUE` is any later day. Harvest observes these states, it does not
+        move, hold, or verify money.
+      enum: [NOT_DUE, DUE, OVERDUE, PAID]
+    OrderPayment:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: {$ref: '#/components/schemas/PaymentStatus'}
+        amount:
+          description: >-
+            Committed line quantity multiplied by that line's listing price,
+            recomputed on the accepted quantities once delivery is recorded.
+          $ref: './common.schema.json#/$defs/Money'
+        dueAt:
+          description: Delivery acceptance time plus `paymentTermsDays`; absent until the delivery outcome is recorded.
+          type: string
+          format: date-time
+        paidAt: {type: string, format: date-time}
+        reference: {type: string, maxLength: 120}
+        daysOutstanding:
+          description: Whole days from delivery acceptance to payment, or to now while unpaid.
+          type: integer
+          minimum: 0
+    PaymentConfirmationCreate:
+      type: object
+      additionalProperties: false
+      properties:
+        reference:
+          description: The buyer's own reference for the transfer it made outside Harvest.
+          type: string
+          maxLength: 120
+    PaymentConfirmation:
+      type: object
+      additionalProperties: false
+      required: [orderId, payment]
+      properties:
+        orderId: {type: string, format: uuid}
+        payment: {$ref: '#/components/schemas/OrderPayment'}
     OrderPage:
       type: object
       additionalProperties: false
@@ -1517,12 +1826,17 @@ components:
             deliveryMission: {$ref: '#/components/schemas/DeliveryMissionView'}
             deliveryAcceptance: {$ref: '#/components/schemas/DeliveryAcceptance'}
     ApprovalDecision:
+      description: >-
+        REJECT must carry reasonCode and nextAction so the affected participant
+        receives an actionable explanation.
       type: object
       additionalProperties: false
       required: [decision]
       properties:
         decision: {enum: [APPROVE, REJECT]}
         reason: {type: string, maxLength: 1000}
+        reasonCode: {$ref: '#/components/schemas/DecisionReasonCode'}
+        nextAction: {$ref: '#/components/schemas/DecisionNextAction'}
     Approval:
       type: object
       additionalProperties: false
@@ -1537,6 +1851,8 @@ components:
         decidedBy: {type: string, format: uuid}
         decidedAt: {type: string, format: date-time}
         reason: {type: string, maxLength: 1000}
+        reasonCode: {$ref: '#/components/schemas/DecisionReasonCode'}
+        nextAction: {$ref: '#/components/schemas/DecisionNextAction'}
         context: {$ref: '#/components/schemas/ApprovalContext'}
     ApprovalContext:
       type: object
@@ -1548,9 +1864,24 @@ components:
         orderId: {type: string, format: uuid}
         cropType: {type: string}
         quantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        coverage: {$ref: '#/components/schemas/AllocationCoverage'}
+        estimatedPrice: {$ref: './common.schema.json#/$defs/Money'}
         neededBy: {type: string, format: date-time}
         exceptionId: {type: string, format: uuid}
         recoveryAction: {enum: [REALLOCATE, REROUTE, RESCHEDULE, SUBSTITUTE, CANCEL]}
+    AllocationCoverage:
+      description: >-
+        How much of the buyer's requested quantity this proposal commits.
+        A partial proposal is only offered at or above the order's
+        `minimumAcceptableFraction`.
+      type: object
+      additionalProperties: false
+      required: [requestedQuantity, proposedQuantity, coverageFraction, partial]
+      properties:
+        requestedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        proposedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        coverageFraction: {type: number, minimum: 0, maximum: 1}
+        partial: {type: boolean}
     AllocationSummary:
       type: object
       additionalProperties: false
@@ -1713,6 +2044,17 @@ components:
         pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
     VerificationStatus:
       enum: [OPEN, VERIFIED, CHANGES_REQUESTED, UNVERIFIED]
+    DecisionReasonCode:
+      description: >-
+        Structured reason a participant rejected produce, requested changes, or
+        declined an approval. It records an operational quality judgement for
+        traceability; it is not a food-safety certification.
+      enum: [QUANTITY_MISMATCH, MATURITY_OR_QUALITY, DAMAGE, CLEANLINESS, SIZE_OR_GRADE, MISSING_INFORMATION, OTHER]
+    DecisionNextAction:
+      description: Plain-language action the affected farmer should take next.
+      type: string
+      minLength: 1
+      maxLength: 300
     VerificationTask:
       type: object
       additionalProperties: false
@@ -1730,6 +2072,8 @@ components:
         resolvedBy: {type: string, format: uuid}
         resolvedAt: {type: string, format: date-time}
         note: {type: string, maxLength: 1000}
+        reasonCode: {$ref: '#/components/schemas/DecisionReasonCode'}
+        nextAction: {$ref: '#/components/schemas/DecisionNextAction'}
     VerificationTaskPage:
       type: object
       additionalProperties: false
@@ -1738,12 +2082,17 @@ components:
         items: {type: array, items: {$ref: '#/components/schemas/VerificationTask'}}
         pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
     VerificationDecision:
+      description: >-
+        REQUEST_CHANGES must carry reasonCode and nextAction so the farmer is
+        told what was wrong and what to do next.
       type: object
       additionalProperties: false
       required: [decision]
       properties:
         decision: {enum: [VERIFY, REQUEST_CHANGES]}
         note: {type: string, maxLength: 1000}
+        reasonCode: {$ref: '#/components/schemas/DecisionReasonCode'}
+        nextAction: {$ref: '#/components/schemas/DecisionNextAction'}
     ExceptionCreate:
       type: object
       additionalProperties: false
@@ -1793,6 +2142,9 @@ components:
         items: {type: array, items: {$ref: '#/components/schemas/OperationalException'}}
         pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
     DeliveryAcceptanceCreate:
+      description: >-
+        Any rejected quantity must carry reasonCode and nextAction, either on
+        the acceptance itself or on every rejected line.
       type: object
       additionalProperties: false
       required: [outcome, acceptedQuantity, rejectedQuantity, lineOutcomes]
@@ -1801,6 +2153,8 @@ components:
         acceptedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
         rejectedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
         note: {type: string, maxLength: 1000}
+        reasonCode: {$ref: '#/components/schemas/DecisionReasonCode'}
+        nextAction: {$ref: '#/components/schemas/DecisionNextAction'}
         lineOutcomes:
           type: array
           minItems: 1
@@ -1816,6 +2170,8 @@ components:
         acceptedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
         rejectedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
         note: {type: string, maxLength: 1000}
+        reasonCode: {$ref: '#/components/schemas/DecisionReasonCode'}
+        nextAction: {$ref: '#/components/schemas/DecisionNextAction'}
         acceptedBy: {type: string, format: uuid}
         acceptedAt: {type: string, format: date-time}
         lineOutcomes:
@@ -1830,6 +2186,8 @@ components:
         cropBatchId: {type: string, format: uuid}
         acceptedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
         rejectedQuantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        reasonCode: {$ref: '#/components/schemas/DecisionReasonCode'}
+        nextAction: {$ref: '#/components/schemas/DecisionNextAction'}
     OperationsSnapshot:
       type: object
       additionalProperties: false
@@ -1844,6 +2202,13 @@ components:
         deliveryAcceptedKg: {type: number, minimum: 0}
         approvedCommitmentCount: {type: integer, minimum: 0}
         completedMissionCount: {type: integer, minimum: 0}
+        paymentOverdueCount:
+          description: >-
+            Visible delivered orders whose payment term has expired and that
+            carry no recorded payment. Additive, so a saved projection from
+            before payment tracking existed still validates without it.
+          type: integer
+          minimum: 0
         activeMissionIds: {type: array, items: {type: string, format: uuid}}
         openExceptionIds: {type: array, items: {type: string, format: uuid}}
     OrderOutcomeSummary:
@@ -1856,6 +2221,12 @@ components:
         partiallyFulfilled: {type: integer, minimum: 0}
         unfulfilled: {type: integer, minimum: 0}
         pending: {type: integer, minimum: 0}
+        causes:
+          description: >-
+            One cause per unfulfilled or partially fulfilled order, so the
+            counts here sum to those two totals.
+          type: object
+          additionalProperties: {type: integer, minimum: 0}
     TraceStep:
       type: object
       additionalProperties: false
@@ -2146,6 +2517,13 @@ components:
         deliveryAcceptedKg: {type: number, minimum: 0}
         approvedCommitmentCount: {type: integer, minimum: 0}
         completedMissionCount: {type: integer, minimum: 0}
+        paymentOverdueCount:
+          description: >-
+            Visible delivered orders whose payment term has expired and that
+            carry no recorded payment. Additive, so a saved projection from
+            before payment tracking existed still validates without it.
+          type: integer
+          minimum: 0
         activeMissionIds: {type: array, items: {type: string, format: uuid}}
         openExceptionIds: {type: array, items: {type: string, format: uuid}}
     ReferencePlace:

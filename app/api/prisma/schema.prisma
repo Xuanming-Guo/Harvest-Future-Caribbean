@@ -151,6 +151,25 @@ model FarmPermission {
   @@map("farm_permissions")
 }
 
+model CropStandard {
+  id               String   @id @db.Uuid
+  cropType         String   @map("crop_type")
+  publisherActorId String   @map("publisher_actor_id") @db.Uuid
+  version          Int
+  status           String
+  reviewedAt       DateTime @map("reviewed_at") @db.Timestamptz(3)
+  geography        String
+  source           Json
+  checklist        Json
+  images           Json
+  guidance         Json
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([publisherActorId, cropType, version])
+  @@index([cropType, status, createdAt])
+  @@map("crop_standards")
+}
+
 model CropBatch {
   id                    String     @id @db.Uuid
   farmId                String     @map("farm_id") @db.Uuid
@@ -223,6 +242,8 @@ model VerificationTask {
   resolvedBy  String?  @map("resolved_by") @db.Uuid
   resolvedAt  DateTime? @map("resolved_at") @db.Timestamptz(3)
   note        String?
+  reasonCode  String?  @map("reason_code")
+  nextAction  String?  @map("next_action")
   simulationRunId String? @map("simulation_run_id") @db.Uuid
 
   @@index([farmId, status])
@@ -292,7 +313,21 @@ model Order {
   buyerId            String   @map("buyer_id") @db.Uuid
   cropType           String   @map("crop_type")
   requestedQuantity  Float    @map("requested_quantity")
+  committedQuantity  Float    @default(0) @map("committed_quantity")
   acceptedQuantity   Float    @default(0) @map("accepted_quantity")
+  /// Smallest share of requestedQuantity this buyer accepts as a commitment.
+  minimumAcceptableFraction Float @default(0.8) @map("minimum_acceptable_fraction")
+  /// Days after delivery acceptance the buyer has to pay. Harvest tracks the
+  /// term and the resulting status; it never moves money.
+  paymentTermsDays   Int      @default(14) @map("payment_terms_days")
+  /// Value of the committed lines at their listing price, recomputed on the
+  /// accepted quantities once the delivery outcome is recorded.
+  paymentAmount      Float?   @map("payment_amount")
+  paymentCurrency    String?  @map("payment_currency")
+  /// Set only when a buyer or coordinator records that payment was made
+  /// outside Harvest. Payment status is otherwise derived at read time.
+  paidAt             DateTime? @map("paid_at") @db.Timestamptz(3)
+  paymentReference   String?  @map("payment_reference")
   neededBy           DateTime @map("needed_by") @db.Timestamptz(3)
   latitude           Float
   longitude          Float
@@ -300,6 +335,9 @@ model Order {
   lifecycleStatus    String   @map("lifecycle_status")
   atRisk             Boolean  @default(false) @map("at_risk")
   activeExceptionIds Json     @map("active_exception_ids")
+  cropStandardId     String?  @map("crop_standard_id") @db.Uuid
+  outcomeCause       String?  @map("outcome_cause")
+  outcomeNote        String?  @map("outcome_note")
   traceId            String?  @map("trace_id") @db.Uuid
   simulationRunId    String?  @map("simulation_run_id") @db.Uuid
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -351,6 +389,8 @@ model Approval {
   decidedBy   String?   @map("decided_by") @db.Uuid
   decidedAt   DateTime? @map("decided_at") @db.Timestamptz(3)
   reason      String?
+  reasonCode  String?   @map("reason_code")
+  nextAction  String?   @map("next_action")
   simulationRunId String? @map("simulation_run_id") @db.Uuid
 
   @@map("approvals")
@@ -413,6 +453,8 @@ model DeliveryAcceptance {
   acceptedQuantity Float    @map("accepted_quantity")
   rejectedQuantity Float    @map("rejected_quantity")
   note             String?
+  reasonCode       String?  @map("reason_code")
+  nextAction       String?  @map("next_action")
   acceptedBy       String   @map("accepted_by") @db.Uuid
   acceptedAt       DateTime @map("accepted_at") @db.Timestamptz(3)
   lineOutcomes     Json     @map("line_outcomes")

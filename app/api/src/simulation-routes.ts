@@ -99,6 +99,20 @@ function readPolicy(value: unknown): PolicyName {
   return value;
 }
 
+const DAY_MS = 86_400_000;
+
+/**
+ * The run row records when a completed run ended, but a run still executing
+ * has no stored horizon, and the connected snapshot is taken while the row is
+ * still `CREATING`. The scenario recipe is the authority in both cases: its
+ * start instant and duration are fixed, deterministic inputs of the run.
+ */
+function scenarioHorizonEnd(scenarioId: string, endedAt: Date | null): Date | undefined {
+  const scenario = SCENARIOS[scenarioId];
+  if (scenario) return new Date(new Date(scenario.startsAtIso).getTime() + scenario.durationDays * DAY_MS);
+  return endedAt ?? undefined;
+}
+
 function readScenario(value: unknown) {
   const scenarioId = asString(value, "scenarioId");
   const scenario = SCENARIOS[scenarioId];
@@ -378,7 +392,7 @@ async function requireRunExists(runId: string | null) {
   if (!runId) return null;
   const run = await prisma.simulationRun.findUnique({
     where: { id: runId },
-    select: { id: true, status: true, endedAt: true },
+    select: { id: true, scenarioId: true, status: true, endedAt: true },
   });
   if (!run) {
     throw httpError(404, "SIMULATION_RUN_NOT_FOUND", "Simulation run was not found.");
@@ -751,6 +765,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
       asOf: selectedRun?.status === "COMPLETED" && selectedRun.endedAt
         ? selectedRun.endedAt
         : operationNow(),
+      ...(selectedRun ? { horizonEndsAt: scenarioHorizonEnd(selectedRun.scenarioId, selectedRun.endedAt) } : {}),
       listingWhere,
       demandWhere,
       orderWhere,

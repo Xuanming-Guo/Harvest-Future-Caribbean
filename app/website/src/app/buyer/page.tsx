@@ -1,7 +1,7 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowRight, ClipboardList, ShoppingBasket, Truck } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, ArrowRight, BadgeCheck, ClipboardList, ShoppingBasket, Truck } from "lucide-react";
 import Link from "next/link";
 
 import { ApprovalList } from "@/components/approval-list";
@@ -10,13 +10,20 @@ import { useSession } from "@/components/providers";
 import { Badge, Card, EmptyState, Metric, PageHeader, SectionTitle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatDate, titleCase } from "@/lib/format";
+import { formatMoney, isAwaitingPayment, PAYMENT_STATUS_LABELS } from "@/lib/payments";
 
 export default function BuyerHome() {
   const { actor } = useSession();
-  const orders = useQuery({ queryKey: ["orders"], queryFn: api.orders, refetchInterval: 5_000 });
+  const queryClient = useQueryClient();
+  const orders = useQuery({ queryKey: ["orders"], queryFn: () => api.orders(), refetchInterval: 5_000 });
   const demands = useQuery({ queryKey: ["demands"], queryFn: api.demands, refetchInterval: 15_000 });
   const missions = useQuery({ queryKey: ["missions"], queryFn: () => api.missions(), refetchInterval: 5_000 });
   const orderItems = orders.data?.items ?? [];
+  const payable = orderItems.filter((item) => isAwaitingPayment(item.payment));
+  const confirmPayment = useMutation({
+    mutationFn: (orderId: string) => api.confirmPayment(orderId),
+    onSuccess: () => void queryClient.invalidateQueries(),
+  });
 
   return (
     <>
@@ -31,6 +38,26 @@ export default function BuyerHome() {
         <OrderList limit={5} />
         <ApprovalList compact />
       </div>
+      <Card className="section-gap" data-tour="buyer-payments">
+        <SectionTitle title="Payments due" detail={`${payable.length} awaiting your confirmation`} />
+        <p className="payment-disclaimer">Harvest tracks payment; it does not move money. Pay the farmer the way you already do, then confirm it here so they can see it settled.</p>
+        {!payable.length ? <EmptyState title="Nothing outstanding" detail="Accepted deliveries you still owe for will appear here with their due date." /> : (
+          <div className="payment-list">{payable.map((order) => (
+            <div className="payment-row" key={order.orderId}>
+              <div>
+                <strong>{titleCase(order.cropType)} · {order.acceptedQuantity.value} kg accepted</strong>
+                <small>Agreed {order.paymentTermsDays}-day terms · due {formatDate(order.payment?.dueAt, false)} · {order.payment?.daysOutstanding ?? 0} days since delivery</small>
+              </div>
+              <span className="payment-amount">{order.payment?.amount ? formatMoney(order.payment.amount.amount, order.payment.amount.currency) : "-"}</span>
+              <div className="inline-actions">
+                <Badge tone={order.payment ? order.payment.status.toLowerCase().replaceAll("_", "-") : undefined}>{order.payment ? PAYMENT_STATUS_LABELS[order.payment.status] : "-"}</Badge>
+                <button className="button" type="button" data-tour="buyer-payment-confirm" disabled={confirmPayment.isPending} onClick={() => confirmPayment.mutate(order.orderId)}><BadgeCheck size={16} />Confirm payment</button>
+              </div>
+            </div>
+          ))}</div>
+        )}
+        {confirmPayment.error && <p className="form-error">{confirmPayment.error.message}</p>}
+      </Card>
       <Card className="section-gap">
         <SectionTitle title="Demand history" detail={`${demands.data?.items.length ?? 0} requests`} />
         {!demands.data?.items.length ? <EmptyState title="No demand recorded" detail="Save a requirement from the marketplace to start sourcing." /> : (

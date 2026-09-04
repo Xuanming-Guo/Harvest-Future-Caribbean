@@ -7,6 +7,7 @@ import { useParams } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
 import { DeliveryJourney, VehiclePicker } from "@/components/delivery-world";
+import { OfflineHint, useOnlineStatus } from "@/components/offline";
 import { useSession } from "@/components/providers";
 import { Badge, Card, ErrorState, LoadingState, PageHeader, SectionTitle } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -15,6 +16,7 @@ import { formatDate, titleCase } from "@/lib/format";
 export default function MissionDetailPage() {
   const { missionId } = useParams<{ missionId: string }>();
   const { actor } = useSession();
+  const online = useOnlineStatus();
   const queryClient = useQueryClient();
   const [delayNote, setDelayNote] = useState("");
   const [vehicleId, setVehicleId] = useState("");
@@ -73,17 +75,18 @@ export default function MissionDetailPage() {
         <>
           <VehiclePicker vehicles={vehicles.data?.items ?? []} value={vehicleId} onChange={setVehicleId} />
           <div className="mission-action-row">
-            <button className="button" disabled={accept.isPending || !vehicleId} onClick={() => accept.mutate()}><Check size={17} />Accept delivery</button>
+            <button className="button" disabled={accept.isPending || !vehicleId} aria-disabled={!online || undefined} onClick={() => { if (online) accept.mutate(); }}><Check size={17} />Accept delivery</button>
           </div>
         </>
       )}
       {(mayArrive || mayConfirmPickup || mayDeliver) && (
-        <div className="mission-action-row">
-          {mayArrive && <button className="button" disabled={update.isPending} onClick={() => update.mutate("ARRIVED")}><MapPin size={17} />Arrived at next stop</button>}
-          {mayConfirmPickup && <button className="button" disabled={update.isPending} onClick={() => update.mutate("PICKED_UP")}><PackageCheck size={17} />Confirm pickup</button>}
-          {mayDeliver && <button className="button button-secondary" disabled={update.isPending} onClick={() => update.mutate("DELIVERED")}><Check size={17} />Mark delivered</button>}
+        <div className="mission-action-row" data-tour="mission-progress">
+          {mayArrive && <button className="button" disabled={update.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) update.mutate("ARRIVED"); }}><MapPin size={17} />Arrived at next stop</button>}
+          {mayConfirmPickup && <button className="button" disabled={update.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) update.mutate("PICKED_UP"); }}><PackageCheck size={17} />Confirm pickup</button>}
+          {mayDeliver && <button className="button button-secondary" disabled={update.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) update.mutate("DELIVERED"); }}><Check size={17} />Mark delivered</button>}
         </div>
       )}
+      {!online && <OfflineHint>Delivery progress is only recorded live, so it is never queued. Reconnect to report it.</OfflineHint>}
       {mission.data.status === "DELIVERED" && <p className="form-success">Every stop is complete. The hotel can now record the delivery outcome.</p>}
       {mission.data.status === "CANCELLED" && <p className="form-error">This route was cancelled. No further updates can be recorded.</p>}
     </>
@@ -98,7 +101,7 @@ export default function MissionDetailPage() {
         description={"Due " + formatDate(mission.data.deadline) + " · " + mission.data.routeRegion}
         actions={<Badge tone={mission.data.atRisk ? "high" : undefined}>{mission.data.atRisk ? "At risk" : mission.data.status}</Badge>}
       />
-      <div className="mission-detail-grid">
+      <div className="mission-detail-grid" data-tour="mission-detail">
         <DeliveryJourney
           mission={mission.data}
           updates={updates.data?.items}
@@ -126,10 +129,11 @@ export default function MissionDetailPage() {
       {isTransporter && !["AVAILABLE", "DELIVERED", "CANCELLED"].includes(mission.data.status) && (
         <Card className="section-gap">
           <SectionTitle title="Report a delay or problem" detail="The coordinator and hotel will be notified" />
-          <form className="form-inline" onSubmit={(event: FormEvent) => { event.preventDefault(); delay.mutate(); }}>
+          <form className="form-inline" onSubmit={(event: FormEvent) => { event.preventDefault(); if (online) delay.mutate(); }}>
             <div className="field"><label htmlFor="delay">What happened?</label><input id="delay" required minLength={3} value={delayNote} onChange={(event) => setDelayNote(event.target.value)} placeholder="For example: road closure near Castries" /></div>
-            <button className="button button-danger" disabled={delay.isPending}><AlertTriangle size={17} />Report problem</button>
+            <button className="button button-danger" data-tour="mission-report-problem" disabled={delay.isPending} aria-disabled={!online || undefined}><AlertTriangle size={17} />Report problem</button>
           </form>
+          {!online && <OfflineHint>A coordinator has to see this straight away, so it is never queued. Reconnect to report it.</OfflineHint>}
         </Card>
       )}
       {(message || mutationError) && <p className={mutationError ? "form-error" : "form-success"}>{message ?? mutationError?.message}</p>}

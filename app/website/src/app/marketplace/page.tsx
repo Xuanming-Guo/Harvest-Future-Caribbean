@@ -5,20 +5,26 @@ import { Check, Leaf, Plus, ShoppingCart } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
+import { OfflineHint, useOnlineStatus } from "@/components/offline";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, PageHeader, SectionTitle } from "@/components/ui";
 import { useSession } from "@/components/providers";
 import { api } from "@/lib/api";
 import { dateTimeInputOffset, formatDate, formatPercent, titleCase } from "@/lib/format";
 
+/** Buyer-facing acceptance thresholds; the contract allows 0.5 to 1. */
+const ACCEPTANCE_OPTIONS = [0.8, 0.9, 1] as const;
+
 export default function MarketplacePage() {
   const router = useRouter();
   const { actor } = useSession();
+  const online = useOnlineStatus();
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<string[]>([]);
   const [cropType, setCropType] = useState("CUCUMBER");
   const [quantity, setQuantity] = useState(12);
   const [neededBy, setNeededBy] = useState(() => dateTimeInputOffset(4));
   const [maxPrice, setMaxPrice] = useState(8);
+  const [minimumAcceptableFraction, setMinimumAcceptableFraction] = useState(0.8);
   const [message, setMessage] = useState<string | null>(null);
   const listings = useQuery({ queryKey: ["listings", cropType], queryFn: () => api.listings(cropType), refetchInterval: 15_000 });
   const focusedListingId = selected.at(-1);
@@ -45,6 +51,7 @@ export default function MarketplacePage() {
       requestedQuantity: { value: quantity, unit: "kg" },
       neededBy: new Date(neededBy).toISOString(),
       deliveryLocation: actor.deliveryLocation,
+      minimumAcceptableFraction,
       listingIds: selected,
       });
     },
@@ -90,15 +97,34 @@ export default function MarketplacePage() {
         </div>
         <Card className="sticky-card" data-tour="marketplace-requirement">
           <SectionTitle title="Your requirement" detail={`${actor?.name ?? "Buyer"} · ${actor?.serviceZone ?? "Delivery zone not set"}`} />
-          <form className="form-grid" onSubmit={(event: FormEvent) => { event.preventDefault(); order.mutate(); }}>
+          <form className="form-grid" onSubmit={(event: FormEvent) => { event.preventDefault(); if (online) order.mutate(); }}>
             <div className="field"><label>Crop</label><input value={cropType} onChange={(event) => setCropType(event.target.value.toUpperCase())} /></div>
             <div className="field"><label>Quantity (kg)</label><input type="number" min="0.1" step="0.1" value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} /></div>
             <div className="field field-full"><label>Needed by</label><input type="datetime-local" value={neededBy} onChange={(event) => setNeededBy(event.target.value)} /></div>
             <div className="field"><label>Maximum EC$ / kg</label><input type="number" min="0" step="0.25" value={maxPrice} onChange={(event) => setMaxPrice(Number(event.target.value))} /></div>
             <div className="field"><label>Selected supply</label><input value={`${selectedSupply} kg`} disabled /></div>
+            <div className="field field-full">
+              <span className="field-label" id="minimum-acceptable-label">Minimum I&apos;d accept</span>
+              <div className="segmented" role="radiogroup" aria-labelledby="minimum-acceptable-label">
+                {ACCEPTANCE_OPTIONS.map((option) => (
+                  <button
+                    type="button"
+                    key={option}
+                    role="radio"
+                    aria-checked={minimumAcceptableFraction === option}
+                    className={`button-quiet segmented-option ${minimumAcceptableFraction === option ? "selected" : ""}`}
+                    onClick={() => setMinimumAcceptableFraction(option)}
+                  >
+                    <span className="badge">{Math.round(option * 100)}%</span>
+                  </button>
+                ))}
+              </div>
+              <small className="field-hint">Hotels often take part of an order and source the rest elsewhere.</small>
+            </div>
             <div className="field-full order-summary"><span>Requested <strong>{quantity} kg</strong></span><span>Selected <strong>{selectedSupply} kg</strong></span></div>
-            <button type="button" className="button button-secondary" disabled={demand.isPending} onClick={() => demand.mutate()}><Plus size={16} />{demand.isPending ? "Saving..." : "Save as demand"}</button>
-            <button className="button" disabled={order.isPending || !selected.length || !actor?.deliveryLocation}><ShoppingCart size={16} />{order.isPending ? "Placing order..." : "Place order"}</button>
+            {!online && <div className="field-full"><OfflineHint>An order reserves supply from other farms, so it is never queued. Reconnect to send it.</OfflineHint></div>}
+            <button type="button" className="button button-secondary" data-tour="marketplace-demand-save" disabled={demand.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) demand.mutate(); }}><Plus size={16} />{demand.isPending ? "Saving..." : "Save as demand"}</button>
+            <button className="button" data-tour="marketplace-order-submit" aria-disabled={!online || undefined} disabled={order.isPending || !selected.length || !actor?.deliveryLocation}><ShoppingCart size={16} />{order.isPending ? "Placing order..." : "Place order"}</button>
           </form>
           {(message || demand.error || order.error) && <p className={(demand.error || order.error) ? "form-error" : "form-success"}>{message ?? demand.error?.message ?? order.error?.message}</p>}
         </Card>

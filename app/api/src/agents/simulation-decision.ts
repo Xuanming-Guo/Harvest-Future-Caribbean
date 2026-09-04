@@ -4,7 +4,7 @@ import { completeStructured, readLlmConfiguration } from "./structured-client.js
 
 const toolsByRole: Record<SimulationParticipant["role"], string[]> = {
   FARMER: ["submit_crop_observation", "publish_listing", "decide_approval"],
-  BUYER: ["create_buyer_demand", "place_order", "decide_approval", "record_delivery_acceptance"],
+  BUYER: ["create_buyer_demand", "place_order", "decide_approval", "record_delivery_acceptance", "confirm_payment"],
   TRANSPORTER: ["accept_delivery_mission", "report_mission_progress", "report_exception"],
   COORDINATOR: ["verify_observation", "decide_approval"],
 };

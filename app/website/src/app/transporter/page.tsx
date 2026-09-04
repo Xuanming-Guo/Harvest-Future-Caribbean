@@ -6,11 +6,13 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { DeliveryBoard, DeliveryJourney, VehiclePicker } from "@/components/delivery-world";
+import { OfflineHint, useOnlineStatus } from "@/components/offline";
 import { Card, EmptyState, ErrorState, LoadingState } from "@/components/ui";
 import { api } from "@/lib/api";
 
 export default function TransporterHome() {
   const queryClient = useQueryClient();
+  const online = useOnlineStatus();
   const [vehicleId, setVehicleId] = useState("");
   const [selectedMissionId, setSelectedMissionId] = useState<string>();
   const missions = useQuery({ queryKey: ["missions"], queryFn: () => api.missions(), refetchInterval: 5_000 });
@@ -81,9 +83,16 @@ export default function TransporterHome() {
                     <h3>Ready to claim this route?</h3>
                     <p>{vehicleId ? "Harvest will check the selected vehicle’s capacity." : "Choose a vehicle above before accepting."}</p>
                   </div>
-                  <button className="button" disabled={accept.isPending || !vehicleId} onClick={() => accept.mutate(selected.missionId)}>
+                  <button
+                    className="button"
+                    data-tour="transporter-accept-job"
+                    disabled={accept.isPending || !vehicleId}
+                    aria-disabled={!online || undefined}
+                    onClick={() => { if (online) accept.mutate(selected.missionId); }}
+                  >
                     <Truck size={17} />Accept delivery
                   </button>
+                  {!online && <OfflineHint>Accepting a job commits you to a delivery, so it is never queued. Reconnect to accept.</OfflineHint>}
                 </>
               ) : (
                 <>

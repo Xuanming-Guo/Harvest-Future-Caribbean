@@ -14,7 +14,11 @@ npm run sim -- --decisions                   # print the decision trace
 ```
 
 No database and no services: the engine is self-contained and a full
-twenty-one-day run takes a few milliseconds.
+twenty-one-day run takes a few milliseconds. Each line ends with a `causes=`
+histogram naming why every demand that missed its deadline missed it.
+
+Recorded paired-seed comparisons live in
+[`benchmarks/`](benchmarks/README.md).
 
 ## How it is put together
 
@@ -29,6 +33,7 @@ twenty-one-day run takes a few milliseconds.
 | `src/scenario/` | Scenario recipes; `saint-lucia-demo-v1` is the hero |
 | `src/policy/` | `baseline` and `harvest` coordination policies |
 | `src/engine.ts` | Clock, handlers, validation, metrics |
+| `benchmarks/` | Recorded paired-seed runs and the comparison they support |
 
 `SimulationEngine` also exposes `start`, `advanceTo`, `applyProductEffect`,
 `checkpoint` and `finish` for connected saved runs. Normal `run()` delegates to
@@ -75,32 +80,101 @@ unchanged when it does not intersect relevant activity.
 
 ## Honest status of the baseline-versus-Harvest comparison
 
-**On the current scenario the Harvest policy does not outperform the
-fragmented baseline.** Mean fulfilment across ten paired seeds is roughly 9.7%
-for Harvest against 9.8% for the baseline, and Harvest wastes slightly more.
+**On the current scenario the Harvest policy outperforms the fragmented
+baseline, after issue #53 fixed three coordination defects and one measurement
+defect.** Across the same ten paired seeds, mean fulfilment is 47.7% for Harvest
+against 11.7% for the baseline. Harvest wins eight of the ten seeds and ties two;
+it loses none. Before any of the fixes it was 11.0% against 8.7%, losing on five
+seeds and carried on the mean by one.
 
-This is recorded rather than tuned away. Issue #4 owns the machinery that makes
-an honest comparison possible — identical worlds, isolated policy hooks,
-reproducible seeds. Issue #11 owns the comparison itself, and adjusting
-constants here until the favoured policy wins would fabricate the very result
-that issue exists to measure.
+The per-seed table, the supporting waste and substitution figures, and the
+unmet-demand histogram are in [`benchmarks/README.md`](benchmarks/README.md).
+Every number is synthetic simulation output, not deployed impact.
 
-Two causes have been identified so far, both worth addressing in #11:
+The three coordination defects were:
 
-1. **Observation latency dominates.** Growers report every two to fourteen
-   days; buyers want an answer within three to seven. Harvest will only promise
-   against a batch reported ready, so it routinely misses the window. It can
-   now ask a grower to go and look (`requestObservation`), which recovered a
-   large part of the gap, but the six-to-forty-two-hour response time still
-   costs it orders the baseline wins by guessing.
-2. **Just-in-time pickup maximises spoilage.** Missions are scheduled to arrive
-   shortly before the deadline, while a ready cucumber crop is losing six to
-   fourteen percent a day. Committing early and collecting late is worse than
-   not committing at all. Picking on readiness rather than on the delivery
-   deadline is the obvious fix and belongs with the logistics work.
+1. **Just-in-time pickup maximised spoilage.** Missions were scheduled to arrive
+   shortly before the delivery deadline while a ready cucumber crop was losing
+   six to fourteen percent a day, so Harvest committed early, collected late,
+   and wasted slightly *more* than the baseline it was supposed to beat. Once
+   every allocated batch has been *reported* ready, collection is now brought
+   forward, capped by `MAX_READY_HOLD_MS` in the Harvest policy. The delivery
+   deadline remains the upper bound and the readiness figure is the grower's
+   report, never the hidden `readyAt`, so this buys coordination and not
+   foresight.
+2. **Matching ran once and never again.** Planning fired only from the order
+   that triggered it, plus a few replans while the policy chased observations.
+   A batch reported ready on day nine was invisible to an order placed on day
+   eight that nobody could fill at the time, so the order waited out its
+   deadline beside supply that existed. A bounded sweep now re-plans waiting
+   demand for that crop when new ready supply is reported, oldest deadline
+   first, at most three times per demand.
+3. **Stale evidence was never rechecked.** Harvest asked a grower to go and look
+   only when it had no ready candidate at all. A five-day-old READY report is
+   the least trustworthy evidence in the set, and it was exactly what the policy
+   was promising against. That trigger now covers stale READY reports too.
 
-Neither is a defect in the engine; both are policy and scheduling questions the
-benchmark issue should answer with repeated seeds and reported distributions.
+The first two are coordination levers rather than physics, so they are declared
+per policy in `PolicyCapabilities` and the fragmented baseline does not get
+them: nobody there holds the whole picture, so nobody notices a crop was
+reported ready this morning or revisits an order that could not be filled. That
+is a modelling choice, and it is the one most worth arguing with.
+
+The fourth defect is not a policy lever at all. It was in the measurement:
+
+4. **The run raised orders it could never settle.** `onBuyerDemand` drew a
+   deadline three to seven days out regardless of how much of the twenty-one-day
+   window was left, and `schedule` drops any event past the horizon, so an order
+   whose deadline plus the twelve-hour substitution grace fell outside the
+   window never received its own `DEMAND_DEADLINE`. It sat PENDING until the
+   final sweep and was then scored short. That counted the length of the run as
+   a coordination failure. A buyer now simply does not raise such an order. The
+   deadline is withheld rather than pulled back inside the window, because
+   clamping it would keep the order and turn it into an artificially urgent one.
+   `HORIZON_TRUNCATED` is consequently zero on all ten benchmark seeds, asserted
+   in `tests/fulfilment.test.ts`; the classification stays in the engine as a
+   guard so that a scenario or an injected effect producing such an order cannot
+   have it silently recorded as a late delivery instead.
+
+**That fourth fix changed the world, and the baseline changed with it.** The
+first three were policy and scheduling logic and left every baseline digest
+bit-for-bit identical, which is what let the earlier comparison be read as a
+clean policy delta. Demand generation is not policy, so this one moves both
+arms: 29 of the 114 orders across the ten seeds are no longer raised, and every
+baseline digest is different. The pairing still holds — both policies face the
+identical reduced order book from the same seeded streams in the same order —
+but the guarantee is now "the same world for both arms", not "the same world as
+before".
+
+It is not a free win for Harvest either. Of the 29 withheld orders, twenty were
+scored failures the coordinator never had a chance at, and nine were orders
+Harvest had actually delivered in full before the run ended. Removing them costs
+Harvest nine successes, raises its waste from 1,759 kg to 1,813 kg because the
+produce those orders would have absorbed now spoils unpicked, and turns two
+seeds that Harvest was winning into ties. The baseline's physical outcome is
+untouched: its waste, accepted kilograms, deliveries and fully met orders are
+identical per seed, and only its fulfilment denominator moved.
+
+What is still unresolved, from the cause histogram:
+
+- **`INSUFFICIENT_SUPPLY` is now Harvest's largest bucket**, at 18 against the
+  baseline's 10. That is the expected shape of the trade — orders Harvest
+  previously never attempted now land as partial deliveries — but it is the
+  biggest remaining category and it has not been attacked.
+- **`APPROVAL_REJECTED` at 7.** The approval gate re-checks a promise against
+  evidence that decayed after the proposal, and now has more commitments to
+  decline. Whether that gate is calibrated or merely strict is open.
+- **`NO_READY_SUPPLY` at 15.** Orders nothing could be promised against at all.
+  This is the part a better yield forecast, not better coordination, would move.
+
+Issue #4 owns the machinery that makes an honest comparison possible —
+identical worlds, isolated policy hooks, reproducible seeds. Issue #11 owns the
+comparison itself. Adjusting scenario constants until the favoured policy wins
+would fabricate the very result those issues exist to measure. No scenario
+constant has been touched: supply sizes, order sizes, readiness windows,
+spoilage rates and observation intervals are all unchanged, and the deadline
+draw is still three to seven days. The one world change is which orders get
+raised at all, and it is stated above together with what it cost each arm.
 
 ## Control-room outcome boundary
 

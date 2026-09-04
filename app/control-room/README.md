@@ -34,7 +34,8 @@ and handles play, pause, speed, rewind, scrub and reset locally:
 - injecting a disruption creates a new derived run and preserves the source;
 - Harvest agent actions and adapter provenance appear in purple in the feed;
 - selecting a purple action opens its role, tool, status, approval class and
-  safe trace/event references in the Inspector;
+  safe trace/event references in the Inspector, and offers **Preview in
+  Harvest**;
 - a mapped participant can be opened in the normal website, read-only.
 
 The scenario selector is populated by `GET /v1/simulation-scenarios`. It opens
@@ -69,6 +70,60 @@ The issue #29 backend can be tested independently using
 Harvest runs contain run-scoped participant actors, crops, marketplace work,
 orders, approvals, missions, events and safe traces. Baseline runs remain
 engine-only and deliberately do not create those Product API records.
+
+## Preview in Harvest
+
+Selecting a saved agent action and pressing **Preview in Harvest** opens a
+closable panel containing the real participant website, framed on the same
+15-minute read-only session as **Open participant website**. The website then
+scrolls to the control a person would use for that tool, rings it, and captions
+what was recorded: participant, simulation time, entity, action, and outcome.
+`Escape` or **Close** dismisses it.
+
+It is a reenactment, not automation, and the panel says so. Agents call typed
+Product API tools; they never drive a browser, so there are no input events to
+replay. What is replayed is the *description* of a saved action, drawn over the
+live interface.
+
+Three separate things stop a preview from changing anything. The overlay is
+inert (`pointer-events: none`), the framed workspace is already inside a
+disabled fieldset because the session is read-only, and the Product API refuses
+every write from a replay session. The outermost of the three is the API's.
+
+The panel is capped short of the bottom of the window so the transport row stays
+uncovered: playback keeps running, or stays paused, exactly as it was.
+
+### What crosses into the frame
+
+The frame gets one `postMessage` after it asks for one, containing exactly
+`tool`, `entityIds`, `summary`, `status`, `simulationTime`, `participantName`,
+`role` and the `actionId` that matches the `?preview=` flag in its URL. The
+payload is built by naming those fields one at a time in
+`src/lib/action-preview.ts`, never by spreading a recorded action, so a private
+field added to `SimulationAgentAction` later cannot ride along. Trace,
+correlation and causation ids stay in the Inspector. No chain of thought, no
+hidden simulation truth, and nothing belonging to another participant.
+
+Both ends check `event.origin` and ignore anything from elsewhere.
+
+### Mapping a tool to a control
+
+`app/website/src/lib/action-preview.ts` maps every `ProductTools` tool to a
+route and an ordered chain of `data-tour` targets, reusing the attribute the
+first-session tutorial already puts on those controls. The chain falls back from
+the control, to the section that owns it, to the page: a saved run is a finished
+world, so the approval that was decided is decided and its live button has
+usually gone. Highlighting the section that owned a spent control is honest;
+drawing a fake live button would not be.
+
+A tool with no visual equivalent captions "No visual mapping for this action yet"
+and shows the recorded detail instead of opening an unrelated page.
+`app/website/tests/action-preview-map.test.ts` reads the tool list out of
+`app/api/src/simulation-agents.ts` and fails on a tool nobody mapped or a
+`data-tour` target no page renders any more.
+
+Motion is one pulsing ring and a pointer; under `prefers-reduced-motion` the
+pointer is dropped and the ring becomes a static highlight.
 
 ## Event injection
 
@@ -107,13 +162,17 @@ CesiumJS renders a real terrain globe. Moving between regions flies out to
 globe scale, rotates the earth, and descends into the destination, which is
 what `flyToRegion` in `src/components/globe/camera.ts` sequences.
 
-**No Cesium ion token is required.** The default imagery is Esri's World
-Imagery — real satellite photography, no account and no credential. Imagery
-falls back in order: ion (only if `NEXT_PUBLIC_CESIUM_ION_TOKEN` is set) →
-Esri satellite → OpenStreetMap. Each step is guarded, because a demo that
-shows a blank blue sphere when a third-party tile service is having a bad
-morning is worse than one that quietly falls back to a map. The token is
-strictly an upgrade, never a dependency.
+**No Cesium ion token is required.** The default imagery is OpenStreetMap's
+standard tile layer — ODbL data, no account and no credential, matching the
+licence posture of the reference places. Imagery falls back in order: ion
+(only if `NEXT_PUBLIC_CESIUM_ION_TOKEN` is set) → OpenStreetMap → Esri World
+Imagery. Each step is guarded, because a demo that shows a blank blue sphere
+when a third-party tile service is having a bad morning is worse than one that
+quietly falls back. The token is strictly an upgrade, never a dependency.
+
+OpenStreetMap's public tile server permits light demo traffic only. A hosted
+deployment should point `OSM_TILE_URL` in `CesiumGlobe.tsx` at a dedicated
+tile provider before opening the control room to more than a demo audience.
 
 Sun lighting, ground and sky atmosphere, and distance fog are enabled: they are
 what separate a textured sphere from something that reads as photographed from
@@ -199,7 +258,7 @@ a long debugging detour once already.
 
 ## Evidence status
 
-Everything operational on screen is **synthetic**. Satellite imagery and the
+Everything operational on screen is **synthetic**. Map tiles and the
 named OpenStreetMap reference places are public geographic context, but every
 farm, buyer, order, yield and delivery is invented. Selecting a reference shows
 its source, licence, retrieval metadata and the explicit statement that it is

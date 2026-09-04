@@ -1,5 +1,13 @@
 import { createHarvestClient, newIdempotencyKey, type ApiSchema } from "@harvest/shared";
 
+export type DecisionReasonCode = ApiSchema<"DecisionReasonCode">;
+
+/** Structured explanation the API requires with every rejection. */
+export interface DecisionReason {
+  reasonCode: DecisionReasonCode;
+  nextAction: string;
+}
+
 export const productApiUrl =
   process.env.NEXT_PUBLIC_PRODUCT_API_URL ?? "http://localhost:3001";
 
@@ -167,15 +175,18 @@ export const api = {
   async cropBatch(cropBatchId: string) {
     return unwrap(await client.GET("/v1/crop-batches/{cropBatchId}", { params: { path: { cropBatchId } } }));
   },
+  async cropStandards(cropType: string) {
+    return unwrap(await client.GET("/v1/crop-standards", { params: { query: { cropType, limit: 100 } } }));
+  },
   async createObservationIntake(body: ApiSchema<"CropObservationIntakeCreate">) {
     return unwrap(await client.POST("/v1/crop-observation-intakes", {
       params: { header: { "Idempotency-Key": newIdempotencyKey("intake") } },
       body,
     }));
   },
-  async submitObservation(body: ApiSchema<"CropObservationCreate">) {
+  async submitObservation(body: ApiSchema<"CropObservationCreate">, idempotencyKey = newIdempotencyKey("observation")) {
     return unwrap(await client.POST("/v1/crop-observations", {
-      params: { header: { "Idempotency-Key": newIdempotencyKey("observation") } },
+      params: { header: { "Idempotency-Key": idempotencyKey } },
       body,
     }));
   },
@@ -197,9 +208,9 @@ export const api = {
   async marketOpportunities(cropType?: string) {
     return unwrap(await client.GET("/v1/market-opportunities", { params: { query: { cropType } } }));
   },
-  async createListing(body: ApiSchema<"ListingCreate">) {
+  async createListing(body: ApiSchema<"ListingCreate">, idempotencyKey = newIdempotencyKey("listing")) {
     return unwrap(await client.POST("/v1/listings", {
-      params: { header: { "Idempotency-Key": newIdempotencyKey("listing") } },
+      params: { header: { "Idempotency-Key": idempotencyKey } },
       body,
     }));
   },
@@ -212,11 +223,18 @@ export const api = {
       body,
     }));
   },
-  async orders() {
-    return unwrap(await client.GET("/v1/orders"));
+  async orders(cropBatchId?: string) {
+    return unwrap(await client.GET("/v1/orders", { params: { query: { cropBatchId } } }));
   },
   async order(orderId: string) {
     return unwrap(await client.GET("/v1/orders/{orderId}", { params: { path: { orderId } } }));
+  },
+  /** Harvest records that the buyer paid outside Harvest. It never moves money. */
+  async confirmPayment(orderId: string, reference?: string) {
+    return unwrap(await client.POST("/v1/orders/{orderId}/payment-confirmations", {
+      params: { path: { orderId }, header: { "Idempotency-Key": newIdempotencyKey("payment") } },
+      body: reference ? { reference } : {},
+    }));
   },
   async agentTrace(traceId: string) {
     return unwrap(await client.GET("/v1/agent-traces/{traceId}", { params: { path: { traceId } } }));
@@ -230,10 +248,16 @@ export const api = {
   async approvals(status?: "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED") {
     return unwrap(await client.GET("/v1/approvals", { params: { query: { status } } }));
   },
-  async decideApproval(approvalId: string, decision: "APPROVE" | "REJECT", reason?: string) {
+  async decideApproval(
+    approvalId: string,
+    decision: "APPROVE" | "REJECT",
+    reason?: string,
+    reasonCode?: DecisionReasonCode,
+    nextAction?: string,
+  ) {
     return unwrap(await client.POST("/v1/approvals/{approvalId}/decisions", {
       params: { path: { approvalId }, header: { "Idempotency-Key": newIdempotencyKey("approval") } },
-      body: { decision, reason },
+      body: { decision, reason, reasonCode, nextAction },
     }));
   },
   async missions(status?: "AVAILABLE" | "ASSIGNED" | "PICKUP_IN_PROGRESS" | "IN_TRANSIT" | "DELIVERED" | "CANCELLED") {
@@ -292,6 +316,8 @@ export const api = {
     outcome: "ACCEPTED" | "PARTIALLY_ACCEPTED" | "REJECTED",
     lineOutcomes: ApiSchema<"DeliveryLineOutcome">[],
     note?: string,
+    reasonCode?: DecisionReasonCode,
+    nextAction?: string,
   ) {
     return unwrap(await client.POST("/v1/deliveries/{deliveryId}/acceptance", {
       params: { path: { deliveryId }, header: { "Idempotency-Key": newIdempotencyKey("receipt") } },
@@ -301,6 +327,8 @@ export const api = {
         rejectedQuantity: { value: rejectedQuantity, unit: "kg" },
         lineOutcomes,
         note,
+        reasonCode,
+        nextAction,
       },
     }));
   },

@@ -123,30 +123,34 @@ $run | Select-Object runId, status, policy, decisionMode,
   decisionAdapter, frameCount, decisionCount, metrics
 ```
 
-Expected stable engine values for seed `42`:
+Expected engine values for seed `42`, re-recorded from a real run after the
+horizon clamp and payment tracking. These move whenever the engine or the Product API changes, so
+the connected-run test checks determinism, outcome arithmetic, and the cause
+vocabulary rather than pinning these counts; this document is where the counts
+themselves are kept:
 
 ```text
 status            COMPLETED
 policy            HARVEST
 decisionMode      DETERMINISTIC
 decisionAdapter   deterministic
-frameCount        130
-eventsProcessed    82
-totalDemandedKg   2956
-totalAcceptedKg    359
+frameCount        119
+eventsProcessed    76
+totalDemandedKg   2183
+totalAcceptedKg   1000.63
 ```
 
 `metrics.productActions` must also exist with positive attempted, succeeded and
 domain-event counts. For the deterministic seed-`42` run, expect:
 
 ```text
-attempted             154
-succeeded             154
+attempted             125
+succeeded             125
 rejected                0
-domainEventsCreated   242
-activeListings          7
-openDemands             11
-totalOrders             11
+domainEventsCreated   201
+activeListings          5
+openDemands              8
+totalOrders              8
 activeMissions           0
 openExceptions           0
 ```
@@ -155,19 +159,103 @@ The final Product API outcome summary is separate from the physical engine
 metrics above. For deterministic seed `42`, expect:
 
 ```text
-total orders              11
-fulfilled                  2
-partially fulfilled        0
-unfulfilled                8
-pending                    1
-approved commitments       8
-completed missions         8
+total orders               8
+fulfilled                  3
+partially fulfilled        1
+unfulfilled                4
+pending                    0
+approved commitments       5
+completed missions         5
+overdue payments           0
 ```
 
-`deliveryAcceptedKg` is the sum of the eight immutable delivery acceptances,
+`paymentOverdueCount` is `0` in that closing snapshot, but it is not `0`
+throughout the run. Synthetic buyers order on 7-day terms and pay on their
+tenth simulated day, so every settled order is paid three days late and shows
+as overdue in between. Across the saved timeline:
+
+```text
+frames with an overdue payment    19 of 119
+highest overdue count in a frame   2
+delivered orders                   5
+paid inside the run window         2
+```
+
+The two paid orders were accepted 12.7 and 11.6 days before the run ended, far
+enough ahead for their tenth day to arrive. The remaining three were accepted
+6.7 days or less before the end, so they are still inside their term when the
+window closes; that, and not prompt payment, is why the final count is `0`.
+Scrub the control room back into the middle of the run to see the overdue
+count rise and fall. Harvest tracks these payments; it moves no money.
+
+`orderOutcomes.causes` explains every unfulfilled or partially fulfilled
+order. For seed `42`:
+
+```text
+DELIVERY_REJECTED          1
+INSUFFICIENT_SUPPLY        2
+NO_READY_SUPPLY            2
+```
+
+`HORIZON_TRUNCATED` no longer appears. The engine used to raise orders whose
+deadline fell after the 21-day scenario horizon, and the run window closed
+before they could be observed either way; a buyer now withholds such an order
+instead of raising one it cannot settle. The classification stays in the
+Product API as a guard, so a scenario or an injected effect that does produce
+such an order still gets it named rather than recorded as an operational
+failure.
+
+### Where the seed-42 numbers came from
+
+Every figure above is read from a real run, never edited by hand. The five
+columns show what each change to the fulfilment path moved:
+
+| Value | Before the #53 fixes | After readiness/expiry/re-match | After safe partial commitment | After the horizon clamp | After payment tracking |
+|---|---|---|---|---|---|
+| `frameCount` | 130 | 119 | 127 | 117 | 119 |
+| `eventsProcessed` | 82 | 76 | 80 | 76 | 76 |
+| `productActions.attempted` | 154 | 140 | 151 | 123 | 125 |
+| `productActions.domainEventsCreated` | 242 | 222 | 238 | 199 | 201 |
+| `activeListings` | 7 | 3 | 3 | 5 | 5 |
+| total orders | 11 | 11 | 11 | 8 | 8 |
+| fulfilled | 2 | 3 | 4 | 3 | 3 |
+| partially fulfilled | 0 | 2 | 2 | 1 | 1 |
+| unfulfilled | 8 | 5 | 5 | 4 | 4 |
+| pending | 1 | 1 | 0 | 0 | 0 |
+| approved commitments | 8 | 5 | 7 | 5 | 5 |
+| completed missions | 8 | 5 | 7 | 5 | 5 |
+| `deliveryAcceptedKg` | 359 | 1387.75 | 1545.13 | 1000.63 | 1000.63 |
+| overdue payments at run end | n/a | n/a | n/a | n/a | 0 |
+| frames showing an overdue payment | n/a | n/a | n/a | n/a | 19 |
+
+The first column is the pre-#53 baseline this document recorded before the
+readiness fixes, when unready crop was still listable, so eight commitments
+were approved but only 359 kg survived to delivery. The second column is the
+readiness, expiry, and re-match fixes. The third adds safe partial commitment:
+two more orders reach a commitment they would previously have waited out, and
+the horizon-truncated order carries a cause instead of sitting in `pending`.
+
+The fourth column is the horizon clamp, and it is the only one of the five
+that changes the world rather than how the world is handled. Three of the eleven
+orders are no longer raised at all, because their deadline fell outside the
+run window, so every downstream count drops with them: fewer orders means less
+demand, fewer commitments, fewer missions, and less delivered weight. Read the
+column as a smaller order book, not as a regression. The rate is what survives
+the comparison, and it holds: 4 of 11 fully met before, 3 of 8 after, with one
+partial on each side. `activeListings` rises because supply that would have
+been committed to a withheld order stays on the marketplace instead.
+
+The last column adds payment tracking on top of that smaller order book: two
+synthetic buyers record paying a delivered order, which is two more product
+actions, two more domain events, and two more agent-cycle checkpoint frames.
+No physical outcome moves, because recording a payment mutates no world state,
+and giving the synthetic buyers 7-day terms changes none of these totals
+either: it changes only which payment status those same orders report.
+
+`deliveryAcceptedKg` is the sum of the five immutable delivery acceptances,
 not the engine's `totalAcceptedKg`. The control room uses this Product API
 quantity for its Harvest **Delivered** card. For seed `42`, both values are
-`359 kg` because the engine applies the Product API delivery acceptances back
+`1000.63 kg` because the engine applies the Product API delivery acceptances back
 to physical state as each mission arrives.
 
 The `runId` is a fresh UUID. All evidence is explicitly labelled synthetic and
@@ -216,7 +304,7 @@ $agentFrames = @($timeline.frames | Where-Object {
 Expected:
 
 ```text
-Frames             130
+Frames             119
 Farms              5
 Buyers             3
 Transporters       2
@@ -355,6 +443,36 @@ Use a new idempotency key to create another seed-42 run. Run IDs, Product API
 UUIDs and processing timestamps differ, but physical digest/metrics and the
 normalized role/tool/status action sequence are repeatable. Never compare raw
 replay JSON byte-for-byte because run-scoped UUIDs are intentionally new.
+
+### Reproducibility depends on the run's own event order, never on a UUID
+
+Repeat the check with several seeds, not just `42`. Seed `51` used to produce a
+different digest and frame count on almost every run (#83) while `42` held.
+
+The cause was ordering, not the engine. A connected participant works through
+the approvals, verification tasks and delivery missions the Product API reports
+as waiting, and the connected loop sorted each of those queues by the Product
+identifier of its record. Every Product identifier is a `randomUUID()`, so the
+queue order was drawn fresh in each run. It only mattered when two items were
+waiting at once and processing one changed what happened to the other, which is
+why some seeds looked stable: with seed `51`, two delivery missions became
+available in the same agent cycle and competed for the same vehicles, so the
+mission offered first was carried and the other was sometimes left behind.
+Whichever supply and missions that produced then changed the physical world,
+and with it the digest and the number of frames.
+
+The connected loop now orders every such queue by the position at which the
+record first appeared in that run's own domain-event stream, which follows from
+the seed rather than from a random draw. When adding a participant behaviour,
+order its work the same way (`byArrival` in `app/api/src/simulation-agents.ts`)
+and never sort by a `cropBatchId`, `orderId`, `missionId`, `approvalId` or
+`taskId`. The same rule applies to any Product API query the connected loop
+depends on: give it a total order over stable columns, because a tie broken by
+insertion order is not stable between runs either.
+
+`app/api/tests/api.integration.test.ts` runs seeds `42`, `51`, `99` and `123`
+three times each and compares the digest, the frame count, the closing outcome
+summary, the engine metrics and the normalized action sequence.
 
 ## 9. Verify baseline isolation
 

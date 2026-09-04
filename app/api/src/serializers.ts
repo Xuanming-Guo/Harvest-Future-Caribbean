@@ -4,6 +4,7 @@ import type {
   BuyerDemand,
   CropBatch,
   CropObservationIntake,
+  CropStandard,
   DeliveryAcceptance,
   DeliveryMission,
   DeliveryUpdate,
@@ -16,10 +17,62 @@ import type {
   YieldPrediction,
 } from "@prisma/client";
 
+import { derivePaymentStatus, PAYMENT_DAY_MS, type PaymentStatus } from "./payments.js";
+
 export const quantity = (value: number) => ({ value, unit: "kg" as const });
 export const dateOnly = (value: Date) => value.toISOString().slice(0, 10);
 
-export function cropBatchDto(row: CropBatch, verificationStatus = "UNVERIFIED") {
+const DAY_MS = PAYMENT_DAY_MS;
+
+export interface OrderPaymentDto {
+  status: PaymentStatus;
+  amount?: { amount: number; currency: string };
+  dueAt?: string;
+  paidAt?: string;
+  reference?: string;
+  daysOutstanding?: number;
+}
+
+/**
+ * Payment status is derived on every read rather than stored, so no scheduled
+ * job can leave a farmer looking at a stale "not due" while the term has in
+ * fact expired. Only `paidAt` is recorded, and only because a buyer stating it
+ * paid is an observation Harvest cannot infer. Harvest tracks payment; it does
+ * not move money.
+ */
+export function orderPaymentDto(
+  order: Pick<Order, "lifecycleStatus" | "paymentTermsDays" | "paymentAmount" | "paymentCurrency" | "paidAt" | "paymentReference">,
+  acceptedAt: Date | null,
+  now: Date,
+): OrderPaymentDto | undefined {
+  // Nothing is owed until a commitment prices the order, and a cancelled
+  // commitment releases the obligation with it.
+  if (order.paymentAmount === null || order.lifecycleStatus === "CANCELLED") return undefined;
+  const dueAt = acceptedAt ? new Date(acceptedAt.getTime() + order.paymentTermsDays * DAY_MS) : null;
+  const settledAt = order.paidAt ?? now;
+  const status = derivePaymentStatus(order, acceptedAt, now);
+  return {
+    status,
+    amount: { amount: order.paymentAmount, currency: order.paymentCurrency ?? "XCD" },
+    ...(dueAt ? { dueAt: dueAt.toISOString() } : {}),
+    ...(order.paidAt ? { paidAt: order.paidAt.toISOString() } : {}),
+    ...(order.paymentReference ? { reference: order.paymentReference } : {}),
+    ...(acceptedAt
+      ? { daysOutstanding: Math.max(0, Math.floor((settledAt.getTime() - acceptedAt.getTime()) / DAY_MS)) }
+      : {}),
+  };
+}
+
+/** Latest actionable rejection shown to the farmer who owns the batch. */
+export interface BatchDecision {
+  source: "VERIFICATION" | "DELIVERY";
+  decidedAt: Date;
+  reasonCode: string | null;
+  nextAction: string | null;
+  note: string | null;
+}
+
+export function cropBatchDto(row: CropBatch, verificationStatus = "UNVERIFIED", latestDecision?: BatchDecision) {
   return {
     cropBatchId: row.id,
     farmId: row.farmId,
@@ -30,6 +83,34 @@ export function cropBatchDto(row: CropBatch, verificationStatus = "UNVERIFIED") 
     availableToPromise: quantity(row.availableToPromise),
     provenance: row.provenance,
     verificationStatus,
+    ...(latestDecision
+      ? {
+          latestDecision: {
+            source: latestDecision.source,
+            decidedAt: latestDecision.decidedAt.toISOString(),
+            ...(latestDecision.reasonCode ? { reasonCode: latestDecision.reasonCode } : {}),
+            ...(latestDecision.nextAction ? { nextAction: latestDecision.nextAction } : {}),
+            ...(latestDecision.note ? { note: latestDecision.note } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+export function cropStandardDto(row: CropStandard, publisherName: string) {
+  return {
+    standardId: row.id,
+    cropType: row.cropType,
+    publisherActorId: row.publisherActorId,
+    publisherName,
+    version: row.version,
+    status: row.status,
+    reviewedAt: row.reviewedAt.toISOString(),
+    geography: row.geography,
+    source: row.source,
+    checklist: row.checklist,
+    images: row.images,
+    guidance: row.guidance,
   };
 }
 
@@ -89,18 +170,25 @@ export function demandDto(row: BuyerDemand) {
   };
 }
 
-export function orderDto(row: Order) {
+export function orderDto(row: Order, payment?: OrderPaymentDto) {
   return {
     orderId: row.id,
     buyerId: row.buyerId,
     cropType: row.cropType,
     requestedQuantity: quantity(row.requestedQuantity),
+    committedQuantity: quantity(row.committedQuantity),
     acceptedQuantity: quantity(row.acceptedQuantity),
+    minimumAcceptableFraction: row.minimumAcceptableFraction,
+    paymentTermsDays: row.paymentTermsDays,
+    ...(payment ? { payment } : {}),
     neededBy: row.neededBy.toISOString(),
     lifecycleStatus: row.lifecycleStatus,
     atRisk: row.atRisk,
     activeExceptionIds: row.activeExceptionIds as string[],
+    ...(row.cropStandardId ? { cropStandardId: row.cropStandardId } : {}),
     ...(row.traceId ? { traceId: row.traceId } : {}),
+    ...(row.outcomeCause ? { outcomeCause: row.outcomeCause } : {}),
+    ...(row.outcomeNote ? { outcomeNote: row.outcomeNote } : {}),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -117,6 +205,8 @@ export function approvalDto(row: Approval, context?: Record<string, unknown>) {
     ...(row.decidedBy ? { decidedBy: row.decidedBy } : {}),
     ...(row.decidedAt ? { decidedAt: row.decidedAt.toISOString() } : {}),
     ...(row.reason ? { reason: row.reason } : {}),
+    ...(row.reasonCode ? { reasonCode: row.reasonCode } : {}),
+    ...(row.nextAction ? { nextAction: row.nextAction } : {}),
     ...(context ? { context } : {}),
   };
 }
@@ -199,6 +289,8 @@ export function verificationTaskDto(row: VerificationTask) {
     ...(row.resolvedBy ? { resolvedBy: row.resolvedBy } : {}),
     ...(row.resolvedAt ? { resolvedAt: row.resolvedAt.toISOString() } : {}),
     ...(row.note ? { note: row.note } : {}),
+    ...(row.reasonCode ? { reasonCode: row.reasonCode } : {}),
+    ...(row.nextAction ? { nextAction: row.nextAction } : {}),
   };
 }
 
@@ -221,6 +313,8 @@ export function deliveryAcceptanceDto(row: DeliveryAcceptance) {
     rejectedQuantity: quantity(row.rejectedQuantity),
     lineOutcomes: row.lineOutcomes,
     ...(row.note ? { note: row.note } : {}),
+    ...(row.reasonCode ? { reasonCode: row.reasonCode } : {}),
+    ...(row.nextAction ? { nextAction: row.nextAction } : {}),
     acceptedBy: row.acceptedBy,
     acceptedAt: row.acceptedAt.toISOString(),
   };

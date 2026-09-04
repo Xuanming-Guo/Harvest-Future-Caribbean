@@ -6,9 +6,96 @@ import { operationNow } from "./clock.js";
 import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { recordEvent } from "./events.js";
-import { httpError } from "./http.js";
+import { httpError, type DecisionReason } from "./http.js";
+import { commitmentValue } from "./payments.js";
 
 const kilograms = (value: number) => ({ value, unit: "kg" });
+
+/** Nullable reason columns written alongside a recorded human decision. */
+const decisionReasonColumns = (decisionReason?: DecisionReason) => ({
+  reasonCode: decisionReason?.reasonCode ?? null,
+  nextAction: decisionReason?.nextAction ?? null,
+});
+
+/** Additive reason fields carried on an `APPROVAL_DECIDED` payload. */
+const decisionReasonPayload = (decisionReason?: DecisionReason) => ({
+  ...(decisionReason?.reasonCode ? { reasonCode: decisionReason.reasonCode } : {}),
+  ...(decisionReason?.nextAction ? { nextAction: decisionReason.nextAction } : {}),
+});
+
+/** Plain-language order note explaining a declined commitment. */
+function declineNote(reason: string | undefined, decisionReason?: DecisionReason) {
+  const parts = [reason ?? "A participant declined the proposed commitment."];
+  if (decisionReason?.nextAction) parts.push(`Next: ${decisionReason.nextAction}`);
+  return parts.join(" ");
+}
+
+/** Crop-batch statuses whose produce may be promised and listed. */
+export const READY_BATCH_STATUSES = new Set(["HARVEST_READY", "HARVESTED"]);
+export const isReadyStatus = (status: string) => READY_BATCH_STATUSES.has(status);
+
+/** Product crop-batch status implied by a reported observation stage. */
+export function batchStatusForStage(cropStage: string): string {
+  switch (cropStage.toUpperCase()) {
+    case "HARVEST_READY": return "HARVEST_READY";
+    case "HARVESTED": return "HARVESTED";
+    case "PLANNED": return "PLANNED";
+    default: return "GROWING";
+  }
+}
+
+/**
+ * Flip listings whose window has closed to `EXPIRED` so they stop looking
+ * orderable. Matching already ignored them by date; the visible status did
+ * not agree, which #53 called out. Idempotent: an already-expired listing is
+ * never touched again.
+ */
+export async function expireListings(actorId: string, simulationRunId: string | null) {
+  const now = operationNow();
+  const stale = await prisma.listing.findMany({
+    where: { status: "ACTIVE", availableUntil: { lt: now }, simulationRunId },
+    orderBy: { id: "asc" },
+  });
+  if (stale.length === 0) return 0;
+  await prisma.$transaction(async (tx) => {
+    for (const listing of stale) {
+      await tx.listing.update({ where: { id: listing.id }, data: { status: "EXPIRED" } });
+      await recordEvent(tx, {
+        eventType: "LISTING_EXPIRED",
+        actorId,
+        entityId: listing.id,
+        traceId: randomUUID(),
+        provenance: Provenance.INFERRED,
+        simulationRunId,
+        payload: { listingId: listing.id, cropBatchId: listing.cropBatchId, availableUntil: listing.availableUntil.toISOString().slice(0, 10) },
+      });
+    }
+  });
+  return stale.length;
+}
+
+/**
+ * Give orders that were waiting for supply another matching pass once new
+ * supply of their crop is published. Oldest deadline first, one pass per
+ * trigger, no scheduler: the trigger is the listing publish itself.
+ */
+export async function rematchWaitingOrders(cropType: string, actorId: string, simulationRunId: string | null) {
+  const waiting = await prisma.order.findMany({
+    where: { lifecycleStatus: "REQUESTED", cropType, neededBy: { gt: operationNow() }, simulationRunId },
+    orderBy: [{ neededBy: "asc" }, { id: "asc" }],
+  });
+  const proposed: string[] = [];
+  for (const order of waiting) {
+    const traceId = order.traceId ?? randomUUID();
+    if (!order.traceId) {
+      await prisma.agentTrace.create({ data: { id: traceId, subjectType: "ORDER", subjectId: order.id, workflowType: "ORDER_FULFILMENT", stage: "ORDER_REQUESTED", status: "RUNNING", summary: "Re-matching a waiting order after new supply was published.", simulationRunId } });
+      await prisma.order.update({ where: { id: order.id }, data: { traceId } });
+    }
+    const result = await proposeAllocation(order.id, actorId, traceId);
+    if (result) proposed.push(order.id);
+  }
+  return proposed;
+}
 
 type ModelPrediction = {
   predictionId: string;
@@ -224,7 +311,11 @@ export async function produceFixturePrediction(
       _sum: { quantity: true },
     });
     const committedQuantity = committed._sum.quantity ?? 0;
-    const availableToPromise = Math.max(0, prediction.q10 - committedQuantity);
+    // Forecast evidence stays visible, but nothing is orderable until the
+    // farmer has reported the crop ready. Promising a growing crop was the
+    // first cause of empty delivery trips in #53.
+    const current = await tx.cropBatch.findUniqueOrThrow({ where: { id: cropBatchId }, select: { status: true } });
+    const availableToPromise = isReadyStatus(current.status) ? Math.max(0, prediction.q10 - committedQuantity) : 0;
     await tx.yieldPrediction.create({
       data: {
         id: prediction.predictionId,
@@ -282,7 +373,9 @@ export async function produceFixturePrediction(
         agentName: "Crop Intelligence Agent",
         toolName: config.modelAdapter === "http" ? "http-yield-model" : "fixture-yield-model",
         provenance: Provenance.MODEL_PREDICTED,
-        summary: `Forecast q10 is ${prediction.q10} kg; ${committedQuantity} kg is committed, leaving ${availableToPromise} kg ATP.`,
+        summary: isReadyStatus(current.status)
+          ? `Forecast q10 is ${prediction.q10} kg; ${committedQuantity} kg is committed, leaving ${availableToPromise} kg ATP.`
+          : `Forecast q10 is ${prediction.q10} kg, but the crop is ${current.status.toLowerCase().replaceAll("_", " ")} so ATP stays at 0 kg until it is reported harvest ready.`,
         confidence: prediction.confidence,
         simulationRunId: batch.simulationRunId,
       },
@@ -301,6 +394,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
     orderBy: { occurredAt: "desc" },
   });
 
+  await expireListings(actorId, order.simulationRunId);
   const requestedIds = order.listingIds as string[];
   const listings = await prisma.listing.findMany({
     where: {
@@ -317,6 +411,24 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
     where: { id: { in: [...new Set(listings.map((listing) => listing.cropBatchId))] }, simulationRunId: order.simulationRunId },
   });
   const remainingByBatch = new Map(batches.map((batch) => [batch.id, batch.availableToPromise]));
+  // Supply already proposed to another order is held softly until that
+  // approval resolves; otherwise re-matching several waiting orders against
+  // one new listing would over-promise the same kilograms and every approval
+  // but the first would be invalidated.
+  const pendingProposals = await prisma.allocation.findMany({
+    where: { status: "PROPOSED", orderId: { not: orderId }, simulationRunId: order.simulationRunId },
+    select: { id: true },
+  });
+  if (pendingProposals.length > 0) {
+    const softHeld = await prisma.allocationLine.groupBy({
+      by: ["cropBatchId"],
+      where: { allocationId: { in: pendingProposals.map((row) => row.id) }, cropBatchId: { in: [...remainingByBatch.keys()] } },
+      _sum: { quantity: true },
+    });
+    for (const held of softHeld) {
+      remainingByBatch.set(held.cropBatchId, Math.max(0, (remainingByBatch.get(held.cropBatchId) ?? 0) - (held._sum.quantity ?? 0)));
+    }
+  }
 
   let remaining = order.requestedQuantity;
   const lines: AllocationLineInput[] = [];
@@ -331,9 +443,27 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
     }
   }
 
-  if (remaining > 0.0001) {
+  // Stakeholder evidence (#53): a hotel that ordered 6 kg and can be offered 5
+  // would rather commit the 5 and source the last kilogram elsewhere than wait
+  // for supply that may never arrive. The buyer states that threshold up front
+  // on the order, so a partial proposal is still something they consented to.
+  const covered = order.requestedQuantity - remaining;
+  const coverageFraction = order.requestedQuantity > 0 ? covered / order.requestedQuantity : 0;
+  const threshold = order.minimumAcceptableFraction * order.requestedQuantity;
+  const isPartial = remaining > 0.0001;
+
+  if (covered + 0.0001 < threshold) {
+    const found = covered;
     await prisma.$transaction(async (tx) => {
-      await tx.order.update({ where: { id: orderId }, data: { atRisk: false, lifecycleStatus: "REQUESTED" } });
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          atRisk: false,
+          lifecycleStatus: "REQUESTED",
+          outcomeCause: found > 0.0001 ? "INSUFFICIENT_SUPPLY" : "NO_READY_SUPPLY",
+          outcomeNote: `Found ${found} kg of ${order.requestedQuantity} kg of ready supply.`,
+        },
+      });
       await tx.agentTrace.update({
         where: { id: traceId },
         data: { status: "WAITING", stage: "AWAITING_SUPPLY", summary: "No complete safe allocation is currently available; the order remains open for supply." },
@@ -346,7 +476,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
           agentName: "Market Balance Agent",
           toolName: "read-safe-supply",
           provenance: Provenance.INFERRED,
-          summary: `Found ${order.requestedQuantity - remaining} kg of ${order.requestedQuantity} kg required. No partial commitment was proposed.`,
+          summary: `Found ${covered} kg of ${order.requestedQuantity} kg required, below the ${Math.round(order.minimumAcceptableFraction * 100)}% this buyer accepts. No partial commitment was proposed.`,
           simulationRunId: order.simulationRunId,
         },
       });
@@ -355,6 +485,8 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
   }
 
   const allocationId = randomUUID();
+  const coveragePercent = Math.round(coverageFraction * 100);
+  const coverageSentence = `covers ${covered} of ${order.requestedQuantity} kg (${coveragePercent}%)`;
   const farmers = await prisma.listing.findMany({
     where: { id: { in: lines.map((line) => line.listingId) }, simulationRunId: order.simulationRunId },
     select: { farmerId: true },
@@ -375,10 +507,16 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
         simulationRunId: order.simulationRunId,
       })),
     });
-    await tx.order.update({ where: { id: orderId }, data: { lifecycleStatus: "AWAITING_APPROVAL" } });
+    await tx.order.update({ where: { id: orderId }, data: { lifecycleStatus: "AWAITING_APPROVAL", outcomeCause: null, outcomeNote: null } });
     await tx.agentTrace.update({
       where: { id: traceId },
-      data: { status: "AWAITING_APPROVAL", stage: "ALLOCATION_PROPOSED", summary: "Matched complete safe supply and paused before commitment for human approval." },
+      data: {
+        status: "AWAITING_APPROVAL",
+        stage: "ALLOCATION_PROPOSED",
+        summary: isPartial
+          ? `Matched ${coveragePercent}% of the requested quantity, which this buyer accepts, and paused before commitment for human approval.`
+          : "Matched complete safe supply and paused before commitment for human approval.",
+      },
     });
     await tx.traceStep.create({
       data: {
@@ -388,7 +526,9 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
         agentName: "Market Balance Agent",
         toolName: "read-safe-supply",
         provenance: Provenance.INFERRED,
-        summary: `Confirmed complete coverage for ${order.requestedQuantity} kg using current listing windows and per-batch ATP.`,
+        summary: isPartial
+          ? `Confirmed ${coverageSentence} using current listing windows and per-batch ATP, at or above the ${Math.round(order.minimumAcceptableFraction * 100)}% this buyer accepts.`
+          : `Confirmed complete coverage for ${order.requestedQuantity} kg using current listing windows and per-batch ATP.`,
         simulationRunId: order.simulationRunId,
       },
     });
@@ -413,7 +553,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
         agentName: "Commitment Agent",
         toolName: "request-human-approval",
         provenance: Provenance.INFERRED,
-        summary: `Requested approval from the buyer and ${approverIds.length - 1} participating farmer${approverIds.length === 2 ? "" : "s"}; no stock is reserved yet.`,
+        summary: `Requested approval from the buyer and ${approverIds.length - 1} participating farmer${approverIds.length === 2 ? "" : "s"} for a commitment that ${coverageSentence}; no stock is reserved yet.`,
         simulationRunId: order.simulationRunId,
       },
     });
@@ -429,6 +569,7 @@ export async function proposeAllocation(orderId: string, actorId: string, traceI
       payload: {
         allocationId,
         orderId,
+        coverageFraction: Number(coverageFraction.toFixed(4)),
         lines: lines.map((line) => ({ cropBatchId: line.cropBatchId, quantity: kilograms(line.quantity) })),
       },
     });
@@ -440,6 +581,7 @@ export async function approveAllocation(
   approvalId: string,
   actorId: string,
   reason?: string,
+  decisionReason?: DecisionReason,
 ) {
   return serializableTransaction(
     async (tx) => {
@@ -448,7 +590,7 @@ export async function approveAllocation(
       if (approval.status !== "PENDING") throw httpError(409, "APPROVAL_ALREADY_DECIDED", "This approval already has a final decision.");
       if (approval.requestedFromActorId !== actorId) throw httpError(403, "APPROVAL_FORBIDDEN", "This decision belongs to another participant.");
       if (approval.subjectType !== "ALLOCATION") {
-        return approveRecovery(tx, approval, actorId, reason);
+        return approveRecovery(tx, approval, actorId, reason, decisionReason);
       }
 
       const allocation = await tx.allocation.findUnique({ where: { id: approval.subjectId } });
@@ -461,7 +603,7 @@ export async function approveAllocation(
       const decidedAt = operationNow();
       const updatedApproval = await tx.approval.update({
         where: { id: approvalId },
-        data: { status: "APPROVED", decidedBy: actorId, decidedAt, reason },
+        data: { status: "APPROVED", decidedBy: actorId, decidedAt, reason, ...decisionReasonColumns(decisionReason) },
       });
       const trace = await tx.agentTrace.findFirst({ where: { subjectType: "ORDER", subjectId: order.id } });
       const traceId = order.traceId ?? trace?.id ?? randomUUID();
@@ -518,7 +660,7 @@ export async function approveAllocation(
         });
       if (invalidSupply) {
         await tx.allocation.update({ where: { id: allocation.id }, data: { status: "STALE" } });
-        await tx.order.update({ where: { id: order.id }, data: { lifecycleStatus: "REQUESTED", atRisk: false } });
+        await tx.order.update({ where: { id: order.id }, data: { lifecycleStatus: "REQUESTED", atRisk: false, outcomeCause: "SUPPLY_CHANGED", outcomeNote: "Safe supply changed before every participant approved." } });
         await tx.approval.updateMany({
           where: { subjectType: "ALLOCATION", subjectId: allocation.id, status: "PENDING" },
           data: { status: "CANCELLED", decidedAt, reason: "Cancelled because safe supply changed before commitment." },
@@ -553,7 +695,20 @@ export async function approveAllocation(
         const remainingQuantity = Math.max(0, listing.quantity - quantity);
         await tx.listing.update({ where: { id: listingId }, data: { quantity: remainingQuantity, status: remainingQuantity > 0.0001 ? "ACTIVE" : "SOLD_OUT" } });
       }
-      await tx.order.update({ where: { id: order.id }, data: { lifecycleStatus: "COMMITTED" } });
+      // Commit exactly what was approved. On a safe partial commitment that is
+      // less than the request, and the mission, its acceptance arithmetic and
+      // the released reservation all have to agree with it rather than with the
+      // quantity the buyer originally asked for.
+      const committedQuantity = lines.reduce((sum, line) => sum + line.quantity, 0);
+      // Price the commitment now, at the listing prices the farmers published
+      // and everyone just approved. Delivery acceptance recomputes it on the
+      // quantities that actually arrived. Harvest records what is owed; it
+      // never moves money.
+      const owed = commitmentValue(lines, [...listingById.values()]);
+      await tx.order.update({
+        where: { id: order.id },
+        data: { lifecycleStatus: "COMMITTED", committedQuantity, paymentAmount: owed.amount, paymentCurrency: owed.currency },
+      });
 
       const route = await buildDeliveryRoute(tx, lines, { latitude: order.latitude, longitude: order.longitude });
       const missionId = randomUUID();
@@ -562,7 +717,7 @@ export async function approveAllocation(
           id: missionId,
           orderId: order.id,
           status: "AVAILABLE",
-          quantity: order.requestedQuantity,
+          quantity: committedQuantity,
           deadline: order.neededBy,
           stops: route.stops,
           estimatedDistanceKm: route.distanceKm,
@@ -573,7 +728,7 @@ export async function approveAllocation(
       });
       if (trace) {
         await tx.agentTrace.update({ where: { id: trace.id }, data: { status: "RUNNING", stage: "DELIVERY_AVAILABLE", summary: "All participants approved; safe supply was reserved and a delivery mission is available." } });
-        await tx.traceStep.create({ data: { traceId, recordedAt: decidedAt, kind: "STATE_CHANGE", agentName: "Commitment Agent", toolName: "commit-reservations", provenance: Provenance.INFERRED, summary: "Aggregate supply was revalidated and reservations were committed atomically.", simulationRunId: order.simulationRunId } });
+        await tx.traceStep.create({ data: { traceId, recordedAt: decidedAt, kind: "STATE_CHANGE", agentName: "Commitment Agent", toolName: "commit-reservations", provenance: Provenance.INFERRED, summary: `Aggregate supply was revalidated and reservations were committed atomically for ${committedQuantity} of ${order.requestedQuantity} kg.`, simulationRunId: order.simulationRunId } });
         await tx.traceStep.create({ data: { traceId, recordedAt: decidedAt, kind: "DECISION", agentName: "Logistics Agent", toolName: "build-pickup-route", provenance: Provenance.INFERRED, summary: `Created a ${route.stops.length}-stop mission covering ${route.distanceKm} km with an estimated ${route.durationMinutes}-minute duration.`, simulationRunId: order.simulationRunId } });
       }
       const allocationEvent = await recordEvent(tx, {
@@ -585,7 +740,7 @@ export async function approveAllocation(
         causationId: approvalEvent.id,
         provenance: Provenance.OBSERVED,
         simulationRunId: order.simulationRunId,
-        payload: { allocationId: allocation.id, orderId: order.id, lines: lines.map((line) => ({ cropBatchId: line.cropBatchId, quantity: kilograms(line.quantity) })) },
+        payload: { allocationId: allocation.id, orderId: order.id, coverageFraction: Number((order.requestedQuantity > 0 ? committedQuantity / order.requestedQuantity : 0).toFixed(4)), lines: lines.map((line) => ({ cropBatchId: line.cropBatchId, quantity: kilograms(line.quantity) })) },
       });
       await recordEvent(tx, {
         eventType: "DELIVERY_MISSION_CREATED",
@@ -608,6 +763,7 @@ async function approveRecovery(
   approval: { id: string; subjectType: string; subjectId: string; simulationRunId: string | null },
   actorId: string,
   reason?: string,
+  decisionReason?: DecisionReason,
 ) {
   if (approval.subjectType !== "RECOVERY") {
     throw httpError(422, "UNSUPPORTED_APPROVAL_SUBJECT", "Only allocation and recovery approvals are implemented in this workflow.");
@@ -622,7 +778,7 @@ async function approveRecovery(
   const mission = await tx.deliveryMission.findUnique({ where: { id: changes.missionId } });
   if (!mission || ["DELIVERED", "CANCELLED"].includes(mission.status)) throw httpError(409, "STALE_APPROVAL", "The delivery mission can no longer be rescheduled.");
   const decidedAt = operationNow();
-  await tx.approval.update({ where: { id: approval.id }, data: { status: "APPROVED", decidedBy: actorId, decidedAt, reason } });
+  await tx.approval.update({ where: { id: approval.id }, data: { status: "APPROVED", decidedBy: actorId, decidedAt, reason, ...decisionReasonColumns(decisionReason) } });
   await tx.deliveryMission.update({ where: { id: mission.id }, data: { deadline: proposedDeadline } });
   await tx.operationalException.update({ where: { id: exception.id }, data: { status: "RESOLVED" } });
   const order = await tx.order.findUnique({ where: { id: mission.orderId } });
@@ -664,17 +820,17 @@ async function approveRecovery(
   return tx.approval.findUniqueOrThrow({ where: { id: approval.id } });
 }
 
-export async function rejectApproval(approvalId: string, actorId: string, reason?: string) {
+export async function rejectApproval(approvalId: string, actorId: string, reason?: string, decisionReason?: DecisionReason) {
   return prisma.$transaction(async (tx) => {
     const approval = await tx.approval.findUnique({ where: { id: approvalId } });
     if (!approval) throw httpError(404, "APPROVAL_NOT_FOUND", "Approval was not found.");
     if (approval.status !== "PENDING") throw httpError(409, "APPROVAL_ALREADY_DECIDED", "This approval already has a final decision.");
     if (approval.requestedFromActorId !== actorId) throw httpError(403, "APPROVAL_FORBIDDEN", "This decision belongs to another participant.");
     const decidedAt = operationNow();
-    const updated = await tx.approval.update({ where: { id: approvalId }, data: { status: "REJECTED", decidedBy: actorId, decidedAt, reason } });
+    const updated = await tx.approval.update({ where: { id: approvalId }, data: { status: "REJECTED", decidedBy: actorId, decidedAt, reason, ...decisionReasonColumns(decisionReason) } });
     if (approval.subjectType === "ALLOCATION") {
       const allocation = await tx.allocation.update({ where: { id: approval.subjectId }, data: { status: "REJECTED" } });
-      const order = await tx.order.update({ where: { id: allocation.orderId }, data: { lifecycleStatus: "REJECTED" } });
+      const order = await tx.order.update({ where: { id: allocation.orderId }, data: { lifecycleStatus: "REJECTED", outcomeCause: "APPROVAL_REJECTED", outcomeNote: declineNote(reason, decisionReason) } });
       await tx.approval.updateMany({
         where: { subjectType: "ALLOCATION", subjectId: allocation.id, status: "PENDING" },
         data: { status: "CANCELLED", decidedAt, reason: "Cancelled after another participant rejected the allocation." },
@@ -682,7 +838,7 @@ export async function rejectApproval(approvalId: string, actorId: string, reason
       const trace = await tx.agentTrace.findFirst({ where: { subjectType: "ORDER", subjectId: allocation.orderId } });
       const traceId = order.traceId ?? trace?.id ?? randomUUID();
       const proposedEvent = await tx.domainEvent.findFirst({ where: { eventType: "ALLOCATION_PROPOSED", entityId: allocation.id }, orderBy: { occurredAt: "desc" } });
-      await recordEvent(tx, { eventType: "APPROVAL_DECIDED", actorId, entityId: approvalId, traceId, correlationId: proposedEvent?.correlationId, causationId: proposedEvent?.id, provenance: Provenance.OBSERVED, simulationRunId: approval.simulationRunId, payload: { approvalId, subjectType: "ALLOCATION", subjectId: allocation.id, decision: "REJECT" } });
+      await recordEvent(tx, { eventType: "APPROVAL_DECIDED", actorId, entityId: approvalId, traceId, correlationId: proposedEvent?.correlationId, causationId: proposedEvent?.id, provenance: Provenance.OBSERVED, simulationRunId: approval.simulationRunId, payload: { approvalId, subjectType: "ALLOCATION", subjectId: allocation.id, decision: "REJECT", ...decisionReasonPayload(decisionReason) } });
       if (trace) {
         await tx.agentTrace.update({ where: { id: traceId }, data: { status: "COMPLETED", stage: "ALLOCATION_REJECTED", summary: "A participant rejected the proposed commitment; no stock was reserved." } });
         await tx.traceStep.create({ data: { traceId, recordedAt: decidedAt, kind: "APPROVAL", agentName: "Commitment Agent", toolName: "record-human-decision", provenance: Provenance.OBSERVED, summary: `Human rejected the allocation${reason ? `: ${reason}` : "."}`, simulationRunId: approval.simulationRunId } });
@@ -692,7 +848,7 @@ export async function rejectApproval(approvalId: string, actorId: string, reason
       const trace = await tx.agentTrace.findFirst({ where: { subjectType: "EXCEPTION", subjectId: exception.id } });
       const traceId = exception.traceId ?? trace?.id ?? randomUUID();
       const proposedEvent = await tx.domainEvent.findFirst({ where: { eventType: "RECOVERY_PROPOSED", entityId: exception.id }, orderBy: { occurredAt: "desc" } });
-      await recordEvent(tx, { eventType: "APPROVAL_DECIDED", actorId, entityId: approvalId, traceId, correlationId: proposedEvent?.correlationId, causationId: proposedEvent?.id, provenance: Provenance.OBSERVED, simulationRunId: approval.simulationRunId, payload: { approvalId, subjectType: "RECOVERY", subjectId: exception.id, decision: "REJECT" } });
+      await recordEvent(tx, { eventType: "APPROVAL_DECIDED", actorId, entityId: approvalId, traceId, correlationId: proposedEvent?.correlationId, causationId: proposedEvent?.id, provenance: Provenance.OBSERVED, simulationRunId: approval.simulationRunId, payload: { approvalId, subjectType: "RECOVERY", subjectId: exception.id, decision: "REJECT", ...decisionReasonPayload(decisionReason) } });
       if (trace) {
         await tx.agentTrace.update({ where: { id: traceId }, data: { status: "WAITING", stage: "MANUAL_RECOVERY", summary: "The automatic recovery proposal was rejected and the exception remains open." } });
         await tx.traceStep.create({ data: { traceId, recordedAt: decidedAt, kind: "APPROVAL", agentName: "Exception Agent", toolName: "record-human-decision", provenance: Provenance.OBSERVED, summary: `Human rejected the recovery proposal${reason ? `: ${reason}` : "."}`, simulationRunId: approval.simulationRunId } });

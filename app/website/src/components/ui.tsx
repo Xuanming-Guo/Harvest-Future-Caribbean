@@ -1,4 +1,8 @@
+"use client";
+
 import type { LucideIcon } from "lucide-react";
+import { ChevronDown } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { titleCase } from "@/lib/format";
 
@@ -33,4 +37,85 @@ export function ErrorState({ error }: { error: unknown }) {
 
 export function EmptyState({ title, detail }: { title: string; detail: string }) {
   return <div className="empty-state"><strong>{title}</strong><span>{detail}</span></div>;
+}
+
+/**
+ * One collapsible workspace section. Built from a plain button rather than
+ * `details`/`summary` so the closed row can carry its own outcome (a count, a
+ * badge) in the Harvest visual language instead of native disclosure chrome.
+ *
+ * `defaultOpen` can turn true after the first render, which is how a section
+ * opens itself once it becomes the recommended one. It never closes a section
+ * the reader opened.
+ */
+export function Disclosure({
+  id,
+  title,
+  summary,
+  icon: Icon,
+  primary = false,
+  defaultOpen = false,
+  children,
+  ...rest
+}: {
+  id: string;
+  title: string;
+  summary: string;
+  icon?: LucideIcon;
+  primary?: boolean;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+  /** Lets a caller hang a tutorial or action-preview hook on the whole section. */
+} & Omit<React.ComponentPropsWithoutRef<"section">, "id" | "title" | "children">) {
+  const [open, setOpen] = useState(defaultOpen);
+  useEffect(() => {
+    if (defaultOpen) setOpen(true);
+  }, [defaultOpen]);
+
+  return (
+    <section className={`workspace-section${primary ? " workspace-section-primary" : ""}`} id={id} {...rest}>
+      <h2 className="workspace-section-heading">
+        <button
+          type="button"
+          id={`${id}-summary`}
+          className="disclosure-summary"
+          aria-expanded={open}
+          aria-controls={`${id}-panel`}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <span className="disclosure-step">{Icon && <Icon size={21} aria-hidden="true" />}</span>
+          <span>
+            <span className="disclosure-title">{title}</span>
+            <span className="disclosure-detail">{summary}</span>
+          </span>
+          <ChevronDown className="disclosure-chevron" size={20} aria-hidden="true" />
+        </button>
+      </h2>
+      <div id={`${id}-panel`} className="disclosure-panel" role="region" aria-labelledby={`${id}-summary`} hidden={!open}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
+/** Second-level disclosure for detail a first-time farmer does not need first. */
+export function MoreDetail({ id, label = "More detail", children }: { id: string; label?: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="more-detail">
+      <button
+        type="button"
+        className="more-detail-toggle"
+        aria-expanded={open}
+        aria-controls={`${id}-detail`}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {open ? "Hide detail" : label}
+        <ChevronDown size={15} aria-hidden="true" />
+      </button>
+      <div id={`${id}-detail`} className="more-detail-panel" hidden={!open}>
+        {children}
+      </div>
+    </div>
+  );
 }

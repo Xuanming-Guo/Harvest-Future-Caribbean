@@ -28,6 +28,7 @@
         "VERIFICATION_DECIDED",
         "FORECAST_PRODUCED",
         "LISTING_PUBLISHED",
+        "LISTING_EXPIRED",
         "BUYER_DEMAND_CREATED",
         "ORDER_REQUESTED",
         "ALLOCATION_PROPOSED",
@@ -45,6 +46,7 @@
         "ORDER_PARTIALLY_FULFILLED",
         "ORDER_REJECTED",
         "ORDER_CANCELLED",
+        "PAYMENT_CONFIRMED",
         "SIMULATION_ACTOR_MOVED",
         "SIMULATION_DISRUPTION_OBSERVED",
         "SIMULATION_TASK_COMPLETED",
@@ -83,6 +85,7 @@
         { "$ref": "#/$defs/VerificationPayload" },
         { "$ref": "#/$defs/ForecastProducedPayload" },
         { "$ref": "#/$defs/ListingPublishedPayload" },
+        { "$ref": "#/$defs/ListingExpiredPayload" },
         { "$ref": "#/$defs/BuyerDemandCreatedPayload" },
         { "$ref": "#/$defs/OrderRequestedPayload" },
         { "$ref": "#/$defs/AllocationPayload" },
@@ -94,6 +97,7 @@
         { "$ref": "#/$defs/RecoveryPayload" },
         { "$ref": "#/$defs/DeliveryAcceptedPayload" },
         { "$ref": "#/$defs/OrderOutcomePayload" },
+        { "$ref": "#/$defs/PaymentConfirmedPayload" },
         { "$ref": "#/$defs/SimulationActorMovedPayload" },
         { "$ref": "#/$defs/SimulationDisruptionPayload" },
         { "$ref": "#/$defs/SimulationTaskPayload" },
@@ -121,6 +125,10 @@
     {
       "if": { "properties": { "eventType": { "const": "LISTING_PUBLISHED" } } },
       "then": { "properties": { "payload": { "$ref": "#/$defs/ListingPublishedPayload" } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "LISTING_EXPIRED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/ListingExpiredPayload" } } }
     },
     {
       "if": { "properties": { "eventType": { "const": "BUYER_DEMAND_CREATED" } } },
@@ -201,6 +209,10 @@
       "then": { "properties": { "payload": { "allOf": [{ "$ref": "#/$defs/OrderOutcomePayload" }, { "properties": { "status": { "const": "CANCELLED" } } }] } } }
     },
     {
+      "if": { "properties": { "eventType": { "const": "PAYMENT_CONFIRMED" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/PaymentConfirmedPayload" } } }
+    },
+    {
       "if": { "properties": { "eventType": { "const": "SIMULATION_ACTOR_MOVED" } } },
       "then": { "properties": { "payload": { "$ref": "#/$defs/SimulationActorMovedPayload" } } }
     },
@@ -252,7 +264,9 @@
         "cropBatchId": { "$ref": "../common.schema.json#/$defs/Uuid" },
         "observationId": { "$ref": "../common.schema.json#/$defs/Uuid" },
         "status": { "enum": ["OPEN", "VERIFIED", "CHANGES_REQUESTED"] },
-        "note": { "type": "string", "maxLength": 1000 }
+        "note": { "type": "string", "maxLength": 1000 },
+        "reasonCode": { "enum": ["QUANTITY_MISMATCH", "MATURITY_OR_QUALITY", "DAMAGE", "CLEANLINESS", "SIZE_OR_GRADE", "MISSING_INFORMATION", "OTHER"] },
+        "nextAction": { "type": "string", "minLength": 1, "maxLength": 300 }
       }
     },
     "ForecastProducedPayload": {
@@ -276,6 +290,16 @@
         "cropBatchId": { "$ref": "../common.schema.json#/$defs/Uuid" },
         "quantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
         "availableFrom": { "type": "string", "format": "date" }
+      }
+    },
+    "ListingExpiredPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["listingId", "cropBatchId", "availableUntil"],
+      "properties": {
+        "listingId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "cropBatchId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "availableUntil": { "type": "string", "format": "date" }
       }
     },
     "BuyerDemandCreatedPayload": {
@@ -307,6 +331,12 @@
       "properties": {
         "allocationId": { "$ref": "../common.schema.json#/$defs/Uuid" },
         "orderId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "coverageFraction": {
+          "description": "Share of the order's requested quantity these lines cover. Below 1 on a safe partial commitment the buyer accepted in advance. Optional so events recorded before this field existed still validate.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
         "lines": {
           "type": "array",
           "minItems": 1,
@@ -330,7 +360,9 @@
         "approvalId": { "$ref": "../common.schema.json#/$defs/Uuid" },
         "subjectType": { "enum": ["ALLOCATION", "RECOVERY"] },
         "subjectId": { "$ref": "../common.schema.json#/$defs/Uuid" },
-        "decision": { "enum": ["APPROVE", "REJECT"] }
+        "decision": { "enum": ["APPROVE", "REJECT"] },
+        "reasonCode": { "enum": ["QUANTITY_MISMATCH", "MATURITY_OR_QUALITY", "DAMAGE", "CLEANLINESS", "SIZE_OR_GRADE", "MISSING_INFORMATION", "OTHER"] },
+        "nextAction": { "type": "string", "minLength": 1, "maxLength": 300 }
       }
     },
     "AllocationInvalidatedPayload": {
@@ -427,6 +459,8 @@
         "acceptedQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
         "rejectedQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
         "outcome": { "enum": ["ACCEPTED", "PARTIALLY_ACCEPTED", "REJECTED"] },
+        "reasonCode": { "enum": ["QUANTITY_MISMATCH", "MATURITY_OR_QUALITY", "DAMAGE", "CLEANLINESS", "SIZE_OR_GRADE", "MISSING_INFORMATION", "OTHER"] },
+        "nextAction": { "type": "string", "minLength": 1, "maxLength": 300 },
         "lineOutcomes": {
           "type": "array",
           "minItems": 1,
@@ -437,7 +471,9 @@
             "properties": {
               "cropBatchId": { "$ref": "../common.schema.json#/$defs/Uuid" },
               "acceptedQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
-              "rejectedQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" }
+              "rejectedQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
+              "reasonCode": { "enum": ["QUANTITY_MISMATCH", "MATURITY_OR_QUALITY", "DAMAGE", "CLEANLINESS", "SIZE_OR_GRADE", "MISSING_INFORMATION", "OTHER"] },
+              "nextAction": { "type": "string", "minLength": 1, "maxLength": 300 }
             }
           }
         }
@@ -452,6 +488,21 @@
         "status": { "enum": ["FULFILLED", "PARTIALLY_FULFILLED", "REJECTED", "CANCELLED"] },
         "acceptedQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" },
         "releasedReservationQuantity": { "$ref": "../common.schema.json#/$defs/Quantity" }
+      }
+    },
+    "PaymentConfirmedPayload": {
+      "description": "The buyer's own statement that it settled this order outside Harvest. Harvest records payment evidence; it never moves, holds, or verifies money.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["orderId", "paidAt", "paymentTermsDays"],
+      "properties": {
+        "orderId": { "$ref": "../common.schema.json#/$defs/Uuid" },
+        "paidAt": { "$ref": "../common.schema.json#/$defs/UtcDateTime" },
+        "paymentTermsDays": { "type": "integer", "minimum": 0, "maximum": 90 },
+        "dueAt": { "$ref": "../common.schema.json#/$defs/UtcDateTime" },
+        "amount": { "$ref": "../common.schema.json#/$defs/Money" },
+        "reference": { "type": "string", "maxLength": 120 },
+        "daysOutstanding": { "type": "integer", "minimum": 0 }
       }
     },
     "SimulationActorMovedPayload": {
@@ -643,6 +694,21 @@
       "payload": {"listingId": "13000000-0000-4000-8000-000000000001", "cropBatchId": "10000000-0000-4000-8000-000000000001", "quantity": {"value": 200, "unit": "kg"}, "availableFrom": "2026-08-10"}
     },
     {
+      "eventId": "e0000000-0000-4000-8000-000000000103",
+      "eventType": "LISTING_EXPIRED",
+      "occurredAt": "2026-08-18T00:05:00Z",
+      "simulationTime": "2026-09-12T00:05:00Z",
+      "simulationRunId": "b0000000-0000-4000-8000-000000000001",
+      "actorId": "a0000000-0000-4000-8000-000000000003",
+      "entityId": "13000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000001",
+      "causationId": "e0000000-0000-4000-8000-000000000003",
+      "schemaVersion": "1.0",
+      "provenance": "INFERRED",
+      "payload": {"listingId": "13000000-0000-4000-8000-000000000001", "cropBatchId": "10000000-0000-4000-8000-000000000001", "availableUntil": "2026-08-17"}
+    },
+    {
       "eventId": "e0000000-0000-4000-8000-000000000004",
       "eventType": "BUYER_DEMAND_CREATED",
       "occurredAt": "2026-08-01T12:30:00Z",
@@ -685,7 +751,7 @@
       "causationId": "e0000000-0000-4000-8000-000000000005",
       "schemaVersion": "1.0",
       "provenance": "INFERRED",
-      "payload": {"allocationId": "16000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "lines": [{"cropBatchId": "10000000-0000-4000-8000-000000000001", "quantity": {"value": 120, "unit": "kg"}}]}
+      "payload": {"allocationId": "16000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "coverageFraction": 1, "lines": [{"cropBatchId": "10000000-0000-4000-8000-000000000001", "quantity": {"value": 120, "unit": "kg"}}]}
     },
     {
       "eventId": "e0000000-0000-4000-8000-000000000007",
@@ -700,7 +766,7 @@
       "causationId": "e0000000-0000-4000-8000-000000000006",
       "schemaVersion": "1.0",
       "provenance": "OBSERVED",
-      "payload": {"allocationId": "16000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "lines": [{"cropBatchId": "10000000-0000-4000-8000-000000000001", "quantity": {"value": 120, "unit": "kg"}}]}
+      "payload": {"allocationId": "16000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "coverageFraction": 1, "lines": [{"cropBatchId": "10000000-0000-4000-8000-000000000001", "quantity": {"value": 120, "unit": "kg"}}]}
     },
     {
       "eventId": "e0000000-0000-4000-8000-000000000008",
@@ -790,7 +856,7 @@
       "causationId": "e0000000-0000-4000-8000-000000000010",
       "schemaVersion": "1.0",
       "provenance": "SYNTHETIC",
-      "payload": {"deliveryId": "20000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "acceptedQuantity": {"value": 120, "unit": "kg"}, "rejectedQuantity": {"value": 0, "unit": "kg"}, "lineOutcomes": [{"cropBatchId": "10000000-0000-4000-8000-000000000001", "acceptedQuantity": {"value": 120, "unit": "kg"}, "rejectedQuantity": {"value": 0, "unit": "kg"}}], "outcome": "ACCEPTED"}
+      "payload": {"deliveryId": "20000000-0000-4000-8000-000000000001", "orderId": "15000000-0000-4000-8000-000000000001", "acceptedQuantity": {"value": 118, "unit": "kg"}, "rejectedQuantity": {"value": 2, "unit": "kg"}, "lineOutcomes": [{"cropBatchId": "10000000-0000-4000-8000-000000000001", "acceptedQuantity": {"value": 118, "unit": "kg"}, "rejectedQuantity": {"value": 2, "unit": "kg"}, "reasonCode": "SIZE_OR_GRADE", "nextAction": "Grade cucumbers to at least 15 cm before the next pickup."}], "outcome": "PARTIALLY_ACCEPTED", "reasonCode": "SIZE_OR_GRADE", "nextAction": "Grade cucumbers to at least 15 cm before the next pickup."}
     },
     {
       "eventId": "e0000000-0000-4000-8000-000000000014",
@@ -911,6 +977,20 @@
       "schemaVersion": "1.0",
       "provenance": "SYNTHETIC",
       "payload": {"pairId": "23000000-0000-4000-8000-000000000001", "baselineRunId": "b0000000-0000-4000-8000-000000000002", "harvestRunId": "b0000000-0000-4000-8000-000000000001", "metrics": {"localProcurementRate": 0.7, "fulfilmentRate": 0.91, "wasteQuantity": {"value": 80, "unit": "kg"}}}
+    },
+    {
+      "eventId": "e0000000-0000-4000-8000-000000000022",
+      "eventType": "PAYMENT_CONFIRMED",
+      "occurredAt": "2026-09-18T09:30:00Z",
+      "simulationRunId": null,
+      "actorId": "a0000000-0000-4000-8000-000000000002",
+      "entityId": "20000000-0000-4000-8000-000000000001",
+      "traceId": "c0000000-0000-4000-8000-000000000001",
+      "correlationId": "d0000000-0000-4000-8000-000000000002",
+      "causationId": "e0000000-0000-4000-8000-000000000017",
+      "schemaVersion": "1.0",
+      "provenance": "OBSERVED",
+      "payload": {"orderId": "20000000-0000-4000-8000-000000000001", "paidAt": "2026-09-18T09:30:00Z", "paymentTermsDays": 14, "dueAt": "2026-09-18T14:15:00Z", "amount": {"amount": 148.5, "currency": "XCD"}, "reference": "Bank transfer 2026-09-18", "daysOutstanding": 13}
     }
   ]
 }

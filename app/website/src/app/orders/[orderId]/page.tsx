@@ -1,17 +1,20 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, PackageCheck, Truck } from "lucide-react";
+import { ArrowLeft, BadgeCheck, CheckCircle2, PackageCheck, Truck } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useState } from "react";
 
 import { ApprovalList } from "@/components/approval-list";
+import { DecisionReasonFields, ReasonChooser, decisionReasonLabel } from "@/components/decision-reason";
 import { DeliveryJourney } from "@/components/delivery-world";
+import { OfflineHint, useOnlineStatus } from "@/components/offline";
 import { useSession } from "@/components/providers";
 import { Badge, Card, ErrorState, LoadingState, PageHeader, SectionTitle } from "@/components/ui";
-import { api } from "@/lib/api";
+import { api, type DecisionReasonCode } from "@/lib/api";
 import { formatDate, titleCase } from "@/lib/format";
+import { formatMoney, PAYMENT_STATUS_LABELS } from "@/lib/payments";
 
 const standardLifecycle = ["REQUESTED", "ALLOCATION_PROPOSED", "AWAITING_APPROVAL", "COMMITTED", "IN_DELIVERY", "FULFILLED"];
 
@@ -25,11 +28,22 @@ function lifecycleFor(status: string) {
 export default function OrderDetailPage() {
   const { orderId } = useParams<{ orderId: string }>();
   const { actor } = useSession();
+  const online = useOnlineStatus();
   const queryClient = useQueryClient();
   const [lineValues, setLineValues] = useState<Record<string, { accepted: number; rejected: number }>>({});
+  const [lineReasons, setLineReasons] = useState<Record<string, DecisionReasonCode | null>>({});
   const [note, setNote] = useState("");
+  const [reference, setReference] = useState("");
+  const [reasonCode, setReasonCode] = useState<DecisionReasonCode | null>(null);
+  const [nextAction, setNextAction] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const order = useQuery({ queryKey: ["order", orderId], queryFn: () => api.order(orderId), refetchInterval: 5_000 });
+  const standards = useQuery({
+    queryKey: ["crop-standards", order.data?.cropType],
+    queryFn: () => api.cropStandards(order.data!.cropType),
+    enabled: Boolean(order.data?.cropStandardId),
+    refetchInterval: 15_000,
+  });
   const mission = order.data?.deliveryMission;
   const missionUpdates = useQuery({
     queryKey: ["mission-updates", mission?.missionId],
@@ -41,19 +55,41 @@ export default function OrderDetailPage() {
   const resolvedLines = allocationLines.map((line) => ({ cropBatchId: line.cropBatchId, quantity: line.quantity.value, ...(lineValues[line.cropBatchId] ?? { accepted: line.quantity.value, rejected: 0 }) }));
   const accepted = resolvedLines.reduce((sum, line) => sum + line.accepted, 0);
   const rejected = resolvedLines.reduce((sum, line) => sum + line.rejected, 0);
+  // The Product API refuses a rejection without a reason and a next action, so
+  // the form applies exactly the same rule before it sends anything.
+  const trimmedNextAction = nextAction.trim();
+  const reasonMissing = rejected > 0 && (!reasonCode || !trimmedNextAction);
   const acceptance = useMutation({
     mutationFn: () => {
       if (!mission) throw new Error("No delivery is ready to accept.");
       const outcome = rejected === 0 ? "ACCEPTED" : accepted === 0 ? "REJECTED" : "PARTIALLY_ACCEPTED";
-      return api.acceptDelivery(mission.missionId, accepted, rejected, outcome, resolvedLines.map((line) => ({ cropBatchId: line.cropBatchId, acceptedQuantity: { value: line.accepted, unit: "kg" }, rejectedQuantity: { value: line.rejected, unit: "kg" } })), note || undefined);
+      const lineOutcomes = resolvedLines.map((line) => ({
+        cropBatchId: line.cropBatchId,
+        acceptedQuantity: { value: line.accepted, unit: "kg" as const },
+        rejectedQuantity: { value: line.rejected, unit: "kg" as const },
+        // A per-line reason is optional; without one the shared reason applies.
+        ...(line.rejected > 0 && lineReasons[line.cropBatchId] ? { reasonCode: lineReasons[line.cropBatchId] as DecisionReasonCode } : {}),
+      }));
+      return api.acceptDelivery(mission.missionId, accepted, rejected, outcome, lineOutcomes, note || undefined, rejected > 0 && reasonCode ? reasonCode : undefined, rejected > 0 ? trimmedNextAction : undefined);
     },
-    onSuccess: () => { setMessage("Delivery acceptance recorded. The order has been updated."); void queryClient.invalidateQueries(); },
+    onSuccess: () => { setMessage("Delivery acceptance recorded. The farmer can now see what was wrong and what to do next."); void queryClient.invalidateQueries(); },
+  });
+  const confirmPayment = useMutation({
+    mutationFn: () => api.confirmPayment(orderId, reference || undefined),
+    onSuccess: () => { setMessage("Payment recorded. Harvest tracks the payment; it does not move money."); void queryClient.invalidateQueries(); },
   });
 
   if (order.error) return <ErrorState error={order.error} />;
   if (!order.data) return <LoadingState label="Loading order..." />;
   const lifecycle = lifecycleFor(order.data.lifecycleStatus);
   const currentIndex = lifecycle.indexOf(order.data.lifecycleStatus);
+  const appliedStandard = standards.data?.items.find((standard) => standard.standardId === order.data.cropStandardId);
+  const requested = order.data.requestedQuantity.value;
+  const committed = order.data.committedQuantity.value;
+  // Only worth saying once something is actually committed and it is short.
+  const partialCommitment = committed > 0 && committed + 0.0001 < requested;
+  const committedSummary = `Committed ${committed} of ${requested} kg (${Math.round((committed / requested) * 100)}%)`;
+  const payment = order.data.payment;
 
   return (
     <>
@@ -67,17 +103,22 @@ export default function OrderDetailPage() {
       )}
       <Card>
         <SectionTitle title="Order progress" detail={order.data.atRisk ? "Needs attention" : "On track"} />
+        {partialCommitment && (
+          <div className="notice"><strong>{committedSummary}</strong><span>You accepted at least {Math.round(order.data.minimumAcceptableFraction * 100)}% of this order, so Harvest committed the supply it could confirm. Source the remaining {Number((requested - committed).toFixed(2))} kg elsewhere.</span></div>
+        )}
         <div className="lifecycle">
           {lifecycle.map((status, index) => <div className={index <= currentIndex ? "complete" : ""} key={status}><span>{index < currentIndex ? <CheckCircle2 size={16} /> : index + 1}</span><small>{titleCase(status)}</small></div>)}
         </div>
       </Card>
-      <div className="grid two-column section-gap">
+      <div className="grid two-column section-gap" data-tour="order-detail">
         <Card>
           <SectionTitle title="Supply commitment" detail="Confirmed only after everyone approves" />
+          {order.data.cropStandardId && <p className="crop-standard-applied">Standard applied: <strong>{appliedStandard ? `${appliedStandard.publisherName} v${appliedStandard.version}` : "Loading standard..."}</strong></p>}
           {!order.data.allocation ? <p>Harvest is still finding safe supply for this order.</p> : (
             <div className="allocation-list">
               <div className="split"><span>Allocation status</span><Badge>{order.data.allocation.status}</Badge></div>
               <div className="split"><span>Approvals</span><strong>{order.data.approvalSummary.approved} of {order.data.approvalSummary.required} approved</strong></div>
+              {partialCommitment && <div className="split"><span>Coverage</span><strong>{committedSummary}</strong></div>}
               {order.data.allocation.lines.map((line) => <div className="allocation-row" key={line.cropBatchId}><PackageCheck size={19} /><span><strong>{line.quantity.value} kg</strong><small>Local crop batch</small></span></div>)}
             </div>
           )}
@@ -87,19 +128,78 @@ export default function OrderDetailPage() {
           {!mission ? <p>A delivery job will be created when the supply commitment is approved.</p> : (
             <div className="delivery-summary"><Truck size={28} /><div><strong>{mission.quantity.value} kg</strong><span>Due {formatDate(mission.deadline)}</span></div><Link className="text-link" href={`/missions/${mission.missionId}`}>View delivery</Link></div>
           )}
-          {order.data.deliveryAcceptance && <div className="notice section-gap"><strong>{titleCase(order.data.deliveryAcceptance.outcome)}</strong><span>{order.data.deliveryAcceptance.acceptedQuantity.value} kg accepted · {order.data.deliveryAcceptance.rejectedQuantity.value} kg rejected</span><small>Recorded {formatDate(order.data.deliveryAcceptance.acceptedAt)}</small></div>}
+          {order.data.deliveryAcceptance && (
+            <div className="notice section-gap">
+              <strong>{titleCase(order.data.deliveryAcceptance.outcome)}</strong>
+              <span>{order.data.deliveryAcceptance.acceptedQuantity.value} kg accepted · {order.data.deliveryAcceptance.rejectedQuantity.value} kg rejected</span>
+              {order.data.deliveryAcceptance.rejectedQuantity.value > 0 && <span>Reason: {decisionReasonLabel(order.data.deliveryAcceptance.reasonCode)}</span>}
+              {order.data.deliveryAcceptance.nextAction && <span>Next step for the farmer: {order.data.deliveryAcceptance.nextAction}</span>}
+              <small>Recorded {formatDate(order.data.deliveryAcceptance.acceptedAt)}</small>
+            </div>
+          )}
         </Card>
       </div>
+      {payment && (
+        <Card className="section-gap" data-tour="order-payment">
+          <SectionTitle title="Payment" detail={`${order.data.paymentTermsDays}-day terms`} />
+          <p className="payment-disclaimer">Harvest tracks payment; it does not move money. The amount is what the accepted produce is worth at the price the farmer published.</p>
+          <div className="payment-card">
+            <div className="split"><span>Status</span><Badge tone={payment.status.toLowerCase().replaceAll("_", "-")}>{PAYMENT_STATUS_LABELS[payment.status]}</Badge></div>
+            <div className="split"><span>Amount</span><strong>{payment.amount ? formatMoney(payment.amount.amount, payment.amount.currency) : "-"}</strong></div>
+            <div className="split"><span>Agreed terms</span><strong>{order.data.paymentTermsDays} days after delivery</strong></div>
+            <div className="split"><span>Due</span><strong>{payment.dueAt ? formatDate(payment.dueAt, false) : "After the delivery is accepted"}</strong></div>
+            {payment.daysOutstanding !== undefined && <div className="split"><span>Days since delivery</span><strong>{payment.daysOutstanding}</strong></div>}
+            {payment.paidAt && <div className="split"><span>Recorded paid</span><strong>{formatDate(payment.paidAt)}</strong></div>}
+            {payment.reference && <div className="split"><span>Reference</span><strong>{payment.reference}</strong></div>}
+          </div>
+          {actor?.role === "BUYER" && payment.status !== "PAID" && payment.dueAt && (
+            <form className="form-grid section-gap" onSubmit={(event: FormEvent) => { event.preventDefault(); confirmPayment.mutate(); }}>
+              <div className="field field-full"><label>Your payment reference (optional)</label><input value={reference} maxLength={120} onChange={(event) => setReference(event.target.value)} /></div>
+              <button className="button field-full" data-tour="order-payment-confirm" disabled={confirmPayment.isPending}><BadgeCheck size={17} />Confirm payment</button>
+            </form>
+          )}
+          {confirmPayment.error && <p className="form-error">{confirmPayment.error.message}</p>}
+        </Card>
+      )}
       {actor?.role !== "COORDINATOR" && <div className="section-gap"><ApprovalList /></div>}
       {actor?.role === "BUYER" && mission?.status === "DELIVERED" && !order.data.deliveryAcceptance && (
-        <Card className="section-gap">
+        <Card className="section-gap" data-tour="delivery-acceptance">
           <SectionTitle title="Accept this delivery" detail="Record what arrived" />
-          <form className="form-grid" onSubmit={(event: FormEvent) => { event.preventDefault(); acceptance.mutate(); }}>
-            {resolvedLines.map((line) => <div className="field-full order-summary" key={line.cropBatchId}><span><strong>{line.quantity} kg crop batch</strong><small>{line.cropBatchId.slice(0, 8)}</small></span><label>Accepted (kg)<input type="number" min="0" max={line.quantity} step="0.1" value={line.accepted} onChange={(event) => setLineValues((current) => ({ ...current, [line.cropBatchId]: { accepted: Number(event.target.value), rejected: current[line.cropBatchId]?.rejected ?? line.rejected } }))} /></label><label>Rejected (kg)<input type="number" min="0" max={line.quantity} step="0.1" value={line.rejected} onChange={(event) => setLineValues((current) => ({ ...current, [line.cropBatchId]: { accepted: current[line.cropBatchId]?.accepted ?? line.accepted, rejected: Number(event.target.value) } }))} /></label></div>)}
+          <form className="form-grid" onSubmit={(event: FormEvent) => { event.preventDefault(); if (online) acceptance.mutate(); }}>
+            {resolvedLines.map((line) => (
+              <div className="field-full" key={line.cropBatchId}>
+                <div className="order-summary">
+                  <span><strong>{line.quantity} kg crop batch</strong><small>{line.cropBatchId.slice(0, 8)}</small></span>
+                  <label>Accepted (kg)<input type="number" min="0" max={line.quantity} step="0.1" value={line.accepted} onChange={(event) => setLineValues((current) => ({ ...current, [line.cropBatchId]: { accepted: Number(event.target.value), rejected: current[line.cropBatchId]?.rejected ?? line.rejected } }))} /></label>
+                  <label>Rejected (kg)<input type="number" min="0" max={line.quantity} step="0.1" value={line.rejected} onChange={(event) => setLineValues((current) => ({ ...current, [line.cropBatchId]: { accepted: current[line.cropBatchId]?.accepted ?? line.accepted, rejected: Number(event.target.value) } }))} /></label>
+                </div>
+                {line.rejected > 0 && (
+                  <ReasonChooser
+                    idPrefix={`line-${line.cropBatchId}`}
+                    label="Reason for this crop batch (optional; the shared reason applies without one)"
+                    onChange={(value) => setLineReasons((current) => ({ ...current, [line.cropBatchId]: value }))}
+                    value={lineReasons[line.cropBatchId] ?? null}
+                  />
+                )}
+              </div>
+            ))}
             <div className="field"><label>Total accepted</label><input value={`${accepted} kg`} disabled /></div>
             <div className="field"><label>Total rejected</label><input value={`${rejected} kg`} disabled /></div>
-            <div className="field field-full"><label>Note (optional)</label><textarea rows={2} value={note} onChange={(event) => setNote(event.target.value)} /></div>
-            <button className="button field-full" disabled={acceptance.isPending || Math.abs(accepted + rejected - mission.quantity.value) > 0.0001 || resolvedLines.some((line) => Math.abs(line.accepted + line.rejected - line.quantity) > 0.0001)}><CheckCircle2 size={17} />Confirm delivery</button>
+            {rejected > 0 && (
+              <DecisionReasonFields
+                idPrefix="delivery"
+                disabled={!online || acceptance.isPending}
+                nextAction={nextAction}
+                onNextAction={setNextAction}
+                onReasonCode={setReasonCode}
+                reasonCode={reasonCode}
+                reasonLabel="What was wrong with the rejected produce?"
+              />
+            )}
+            <div className="field field-full"><label htmlFor="acceptance-note">Note (optional)</label><textarea id="acceptance-note" rows={2} value={note} onChange={(event) => setNote(event.target.value)} /></div>
+            {!online && <div className="field-full"><OfflineHint>Accepting a delivery settles what was received, so it is never queued. Reconnect to confirm.</OfflineHint></div>}
+            {reasonMissing && <p className="form-error field-full">Choose a reason and say what the farmer should do next before recording a rejection.</p>}
+            <button className="button field-full" data-tour="delivery-acceptance-submit" aria-disabled={!online || undefined} disabled={acceptance.isPending || !online || reasonMissing || Math.abs(accepted + rejected - mission.quantity.value) > 0.0001 || resolvedLines.some((line) => Math.abs(line.accepted + line.rejected - line.quantity) > 0.0001)}><CheckCircle2 size={17} />Confirm delivery</button>
           </form>
           {(message || acceptance.error) && <p className={acceptance.error ? "form-error" : "form-success"}>{message ?? acceptance.error?.message}</p>}
         </Card>

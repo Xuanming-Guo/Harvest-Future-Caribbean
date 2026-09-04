@@ -23,10 +23,11 @@ const frame = {
     activeListings: 8,
     openDemands: 8,
     ordersByStatus: { FULFILLED: 4, REQUESTED: 8 },
-    orderOutcomes: { total: 12, fulfilled: 4, partiallyFulfilled: 0, unfulfilled: 5, pending: 3 },
+    orderOutcomes: { total: 12, fulfilled: 4, partiallyFulfilled: 0, unfulfilled: 5, pending: 3, causes: { NO_READY_SUPPLY: 3, MISSION_LATE: 2 } },
     deliveryAcceptedKg: 854,
     approvedCommitmentCount: 4,
     completedMissionCount: 4,
+    paymentOverdueCount: 2,
     activeMissionIds: [],
     openExceptionIds: [],
   },
@@ -42,7 +43,12 @@ describe("control-room outcome source", () => {
     expect(screen.getByText("Total orders").nextElementSibling).toHaveTextContent("12");
     expect(screen.getByText("Fulfilled").nextElementSibling).toHaveTextContent("4");
     expect(screen.getByText("Completed delivery missions").nextElementSibling).toHaveTextContent("4");
+    expect(screen.getByText("Overdue payments").nextElementSibling).toHaveTextContent("2");
+    expect(screen.getByText(/does not move money/i)).toBeInTheDocument();
     expect(screen.queryByText("Substituted")).not.toBeInTheDocument();
+    expect(screen.getByText("Why orders were missed")).toBeInTheDocument();
+    expect(screen.getByText("No ready supply").nextElementSibling).toHaveTextContent("3");
+    expect(screen.getByText("Delivery missed the deadline").nextElementSibling).toHaveTextContent("2");
   });
 
   it("keeps baseline engine outcomes visibly separate", () => {
@@ -52,5 +58,6 @@ describe("control-room outcome source", () => {
     expect(screen.getByText(/physical simulation engine/i)).toBeInTheDocument();
     expect(screen.getByText("Substituted").nextElementSibling).toHaveTextContent("2,033");
     expect(screen.queryByText("Approved commitments")).not.toBeInTheDocument();
+    expect(screen.queryByText("Overdue payments")).not.toBeInTheDocument();
   });
 });

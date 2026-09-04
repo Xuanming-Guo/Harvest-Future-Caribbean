@@ -146,7 +146,8 @@ scope, not only the role name.
   admin roles.
 - Request: optional `cropType`, status, cursor, and limit filters.
 - Response: a role-filtered page of observable crop batches with latest safe
-  prediction IDs, ATP, provenance, and latest verification status.
+  prediction IDs, ATP, provenance, latest verification status, and the optional
+  `latestDecision` explanation described under `GET /v1/crop-batches/{cropBatchId}`.
 - Product state/event and simulation effect: none; this is a read projection.
 - Consumers: farmer crop lists and authorised technical evidence views.
 
@@ -192,12 +193,47 @@ scope, not only the role name.
   coordinator/operations/admin.
 - Request: UUID path parameter; no body.
 - Response: observable batch identity/type/status, latest observation and
-  prediction IDs, deterministic `availableToPromise`, and provenance.
+  prediction IDs, deterministic `availableToPromise`, and provenance. When the
+  batch's most recent verification decision was `REQUEST_CHANGES`, or its most
+  recent delivery line was rejected, the response also carries the additive
+  optional `latestDecision` object: `source` (`VERIFICATION` or `DELIVERY`),
+  `decidedAt`, and the recorded `reasonCode`, `nextAction`, and `note`. Records
+  written before structured reasons existed simply omit those fields. This is
+  traceability evidence about one operational decision, not a food-safety
+  certification.
 - Product state/event: none.
 - Simulation effect: none; reading cannot advance time or reveal truth.
 - Consumers: farmer crop view, order/allocation detail, crop map.
 - Rules/failures: return `403` for unauthorised scope and `404` only when
   absence may safely be disclosed.
+
+#### `GET /v1/crop-standards`
+
+- Callers: every authenticated product role. Published standards are visible
+  to all roles; buyers, coordinators, and admins also see their own drafts.
+- Request: required `cropType`; optional cursor and limit filters.
+- Response: newest-first crop-standard versions with publisher identity,
+  review date, geography, attributed source, buyer checklist, licensed images,
+  and individually sourced farmer guidance.
+- Product state/event and simulation effect: none; this is a read projection.
+- Consumers: the crop detail guidance card and order standard attribution.
+
+#### `POST /v1/crop-standards`
+
+- Callers: buyer, coordinator, or admin.
+- Request: crop type, `DRAFT` or `PUBLISHED` status, review date, geography,
+  source, checklist, images, and sourced guidance. The publisher is derived
+  from the authenticated actor.
+- Response: the newly stored standard. Each command creates the next version
+  for that publisher and crop; published versions remain immutable history.
+- Product state/event and simulation effect: no domain event and no simulation
+  effect.
+- Consumers: future standards-authoring surfaces and the current crop/order
+  read projections.
+- Rules/failures: unknown fields and invalid source URLs fail validation.
+  Checklist requirements or guidance text mentioning chlorine, bleach,
+  sanitiser/sanitizer, or a pesticide dose return `422`
+  `CHEMICAL_GUIDANCE_NOT_REVIEWED` until reviewed chemical guidance is in scope.
 
 #### `POST /v1/crop-batches/{cropBatchId}/forecast-requests`
 
@@ -276,12 +312,17 @@ scope, not only the role name.
 - Request: `cropBatchId`, `quantity`, `unitPrice`, `availableFrom`,
   `availableUntil`.
 - Response: listing ID plus owner/crop/status/created time and submitted fields.
-- Product state/event: verify quantity is within current ATP, store active
-  listing, and emit `LISTING_PUBLISHED`.
+- Product state/event: verify the batch is reported `HARVEST_READY` or
+  `HARVESTED` and the quantity is within current ATP, store the active
+  listing, emit `LISTING_PUBLISHED`, then re-run matching once for every
+  `REQUESTED` order of that crop whose deadline is still ahead (oldest
+  deadline first). Before any matching pass, listings whose `availableUntil`
+  has passed move to `EXPIRED` with `LISTING_EXPIRED`.
 - Simulation effect: make supply discoverable to eligible buyer actors at later
   scheduled actions; do not change biological yield.
 - Consumers: farmer inventory/listing view, marketplace, operations supply.
-- Rules/failures: return `422` when quantity exceeds ATP or dates/prices are
+- Rules/failures: return `422` `CROP_NOT_READY` for a growing batch, `422`
+  `ATP_EXCEEDED` when quantity exceeds ATP, `422` when dates/prices are
   invalid; `409` when a concurrent reservation makes supply unsafe.
 
 #### `POST /v1/buyer-demands`
@@ -302,11 +343,36 @@ scope, not only the role name.
 
 - Callers: buyer; coordinator with authorised buyer scope.
 - Request: `cropType`, `requestedQuantity`, `neededBy`, `deliveryLocation`;
-  optional candidate `listingIds`.
-- Response: order ID, buyer ID, requested/accepted quantities, lifecycle status,
-  risk overlay, timestamps.
+  optional `minimumAcceptableFraction`, `paymentTermsDays`, and candidate
+  `listingIds`.
+- Response: order ID, buyer ID, requested/committed/accepted quantities, the
+  buyer's `minimumAcceptableFraction`, lifecycle status, risk overlay,
+  timestamps, optional `cropStandardId`, and `outcomeCause`/`outcomeNote` once
+  matching has run.
+- `minimumAcceptableFraction` is the smallest share of `requestedQuantity` the
+  buyer will accept as a commitment. It is a number from 0.5 to 1 and defaults
+  to `0.8`. That default is **stakeholder-calibrated**, from hotel buyer
+  feedback that a hotel routinely takes part of an order and sources the
+  remainder elsewhere rather than lose the delivery; the simulation's buyer
+  personas independently sit at 0.8 to 0.9. A value outside 0.5 to 1 fails with
+  `INVALID_ACCEPTANCE_THRESHOLD`.
+- `committedQuantity` is what approval actually reserved. It is `0` until an
+  allocation is approved and below `requestedQuantity` on a safe partial
+  commitment.
+- `paymentTermsDays` is the number of days after a delivery is accepted that
+  the buyer has to pay. It is a whole number from 0 to 90 and defaults to `14`.
+  That default is **stakeholder-calibrated**, from farmer feedback that hotels
+  currently take one, two, or more months to pay, which is what limits farm
+  cash flow. A value outside 0 to 90 fails with `INVALID_PAYMENT_TERMS`.
+  Harvest records the term and derives the resulting status; it never moves
+  money, holds funds, or verifies a transfer.
 - Product state/event: store `REQUESTED`, start matching, and emit
-  `ORDER_REQUESTED`. Creation does not reserve stock.
+  `ORDER_REQUESTED`. Creation does not reserve stock. An order whose safe cover
+  falls below `minimumAcceptableFraction` stays `REQUESTED` with `outcomeCause`
+  `NO_READY_SUPPLY` or `INSUFFICIENT_SUPPLY` and is re-matched automatically
+  when a later listing of the same crop is published. When a published crop
+  standard exists, creation records the newest published version for that crop
+  in `cropStandardId`; later standard versions do not rewrite the order.
 - Simulation effect: mark buyer demand pending and schedule matching/actor
   reactions.
 - Consumers: buyer marketplace and order timeline.
@@ -317,26 +383,71 @@ scope, not only the role name.
 
 - Callers: the buyer, participating farmers, and authorised coordinators.
 - Request: optional lifecycle status, risk overlay, cursor, and limit filters.
-- Response: a role-filtered order page using the same lifecycle representation
-  as order detail.
+- Response: a role-filtered order page using the same lifecycle and payment
+  representation as order detail.
 - Product state/event and simulation effect: none.
-- Consumers: buyer, farmer, and coordinator order lists.
+- Consumers: buyer, farmer, and coordinator order lists, and the crop-batch
+  journey view.
+- Rules/failures: the optional `cropBatchId` filter narrows the caller's already
+  visible orders to those whose allocation commits that batch. It never widens
+  visibility and never discloses private farm coordinates.
 
 #### `GET /v1/orders/{orderId}`
 
 - Callers: participating buyer/farm/transporter when relevant; authorised
   coordinator/operations/admin.
 - Request: order UUID.
-- Response: quantities, deadline, lifecycle status, `atRisk`, active exception
-  IDs, timestamps, safe allocation, approval totals and the caller's approval,
-  trace ID, related enriched delivery mission, and immutable delivery acceptance
-  when recorded. The mission view includes role-safe route labels and only the
-  crop batches allocated to this order.
+- Response: requested/committed/accepted quantities, the buyer's
+  `minimumAcceptableFraction`, `paymentTermsDays` and the derived `payment`
+  record, deadline, lifecycle status, optional `cropStandardId`, `atRisk`,
+  active exception IDs, timestamps, safe allocation, approval totals and the
+  caller's approval,
+  trace ID, related enriched delivery mission, immutable delivery acceptance when
+  recorded (including its `reasonCode`/`nextAction` and any per-line reasons, so
+  the affected farmer reads the same explanation the buyer recorded), and
+  `outcomeCause`/`outcomeNote` (the latest recorded reason the
+  order is not fulfilled: `NO_READY_SUPPLY`, `INSUFFICIENT_SUPPLY`,
+  `SUPPLY_CHANGED`, `APPROVAL_REJECTED`, `DELIVERY_REJECTED`, `CANCELLED`).
+  The mission view includes role-safe route labels and only the crop batches
+  allocated to this order.
   Private farm coordinates are not exposed here.
+- `payment` is present once an approved commitment prices the order and absent
+  before then, because nothing is owed until supply is reserved. It carries
+  `status`, `amount`, `dueAt`, `paidAt`, `reference`, and `daysOutstanding`.
+- `payment.status` is derived on every read rather than stored, so no scheduled
+  job can leave a stale status behind: `PAID` when a confirmation was recorded;
+  otherwise `NOT_DUE` before the delivery is accepted or while the term is
+  still running, `DUE` on the day the term expires, and `OVERDUE` on any later
+  day. `dueAt` is `deliveryAcceptance.acceptedAt` plus `paymentTermsDays`;
+  `daysOutstanding` counts whole days from acceptance to payment, or to now
+  while the order is unpaid.
+- `payment.amount` is the committed line quantity multiplied by that line's
+  listing price at commitment, recomputed on the accepted quantities when the
+  delivery outcome is recorded. Rejected produce is not billed.
 - Product state/event: none.
 - Simulation effect: none.
 - Consumers: buyer/farmer order status and coordinator order detail.
 - Rules/failures: role-filter sensitive farm, buyer, route, and location data.
+
+#### `POST /v1/orders/{orderId}/payment-confirmations`
+
+- Callers: the order's buyer, an authorised coordinator, or admin.
+- Request: optional `reference` of at most 120 characters, the buyer's own
+  reference for the transfer it made outside Harvest.
+- Response: `orderId` and the resulting `payment` record with status `PAID`.
+- Product state/event: store `paidAt` and `paymentReference`, append an outcome
+  trace step, and emit `PAYMENT_CONFIRMED`. Nothing else changes.
+- Simulation effect: none. The event records settlement evidence and mutates no
+  world state.
+- Consumers: buyer payment list, farmer money-owed summary, coordinator overdue
+  count, order payment card.
+- Rules/failures: the order must be `FULFILLED` or `PARTIALLY_FULFILLED`, else
+  `PAYMENT_NOT_PAYABLE`; an order that already carries a payment fails with
+  `PAYMENT_ALREADY_CONFIRMED`; an order the caller cannot see is `404`. Replay
+  with the same `Idempotency-Key` and body returns the first response.
+- **Harvest does not move money.** This operation records the buyer's own
+  statement that it paid. Harvest holds no funds, initiates no transfer, and
+  verifies nothing with any financial institution.
 
 ### Approvals and delivery
 
@@ -348,8 +459,11 @@ scope, not only the role name.
 - Response: pending or decided approvals with request time and role-safe
   context. Farmers see only their committed line quantity; buyers see their
   order total; each sees the estimated price for those visible lines;
-  coordinators see the concrete recovery summary. Decision
-  identity, time, and reason appear only after a final human decision.
+  coordinators see the concrete recovery summary. An allocation context also
+  carries `coverage` (requested and proposed quantities, `coverageFraction`,
+  and a `partial` flag) and states "covers X of Y kg (Z%)" in its summary, so
+  nobody approves a partial commitment believing the whole order is covered.
+  Decision identity, time, and reason appear only after a final human decision.
 - Product state/event and simulation effect: none.
 - Consumers: focused farmer, buyer, and coordinator decision cards.
 
@@ -357,16 +471,26 @@ scope, not only the role name.
 
 - Callers: the named human approver for the pending subject; admin only through
   an explicitly audited override.
-- Request: `decision` (`APPROVE`/`REJECT`) and optional `reason`.
-- Response: approval subject, final status, decider, and time.
+- Request: `decision` (`APPROVE`/`REJECT`) and optional `reason`. A `REJECT`
+  must also carry `reasonCode` (`QUANTITY_MISMATCH`, `MATURITY_OR_QUALITY`, `DAMAGE`, `CLEANLINESS`,
+  `SIZE_OR_GRADE`, `MISSING_INFORMATION`, or `OTHER`) and a `nextAction` of 1-300
+  characters saying what the affected participant should do next. A request
+  that omits either fails with `422 DECISION_REASON_REQUIRED` and records no
+  decision.
+- Response: approval subject, final status, decider, time, and the recorded
+  `reasonCode`/`nextAction` when present.
 - Product state/event: record one final decision. An allocation creates one
   targeted approval for its buyer and one for every participating farmer. No
   reservation, commitment, or mission exists until all remain valid and every
   required actor approves. The final approval atomically creates reservations
-  and the mission and emits `APPROVAL_DECIDED` and `ALLOCATION_APPROVED`. If
-  aggregate ATP or listing supply changed, invalidate the proposal with
-  `ALLOCATION_INVALIDATED`, return the order to `REQUESTED`, and create no
-  partial reservation. Any rejection marks the
+  and the mission and emits `APPROVAL_DECIDED` and `ALLOCATION_APPROVED`. The
+  order's `committedQuantity` and the mission quantity are the sum of the
+  approved allocation lines, which is below `requestedQuantity` on a safe
+  partial commitment. If aggregate ATP or listing supply changed, invalidate
+  the proposal with `ALLOCATION_INVALIDATED`, return the order to `REQUESTED`,
+  and create no partial reservation. That invalidation rule is unchanged: a
+  proposal that fails revalidation still reserves nothing at all. Any rejection
+  marks the
   allocation/order rejected and cancels the other pending approvals without
   committing inventory. Recovery approval applies its validated operational
   changes and emits `RECOVERY_APPROVED`.
@@ -462,7 +586,13 @@ scope, not only the role name.
 
 - Callers: coordinator for the task's permitted farm or admin.
 - Request: `VERIFY` or `REQUEST_CHANGES` plus an optional note.
-- Product state/event: finalise the task and emit `VERIFICATION_DECIDED`.
+  `REQUEST_CHANGES` must also carry `reasonCode` (`QUANTITY_MISMATCH`, `MATURITY_OR_QUALITY`, `DAMAGE`, `CLEANLINESS`,
+  `SIZE_OR_GRADE`, `MISSING_INFORMATION`, or `OTHER`) and a `nextAction`
+  of 1-300 characters; without both the request fails with
+  `422 DECISION_REASON_REQUIRED` and the task stays `OPEN`.
+- Product state/event: finalise the task, store the structured reason, and emit
+  `VERIFICATION_DECIDED` with the additive `reasonCode`/`nextAction` fields. The
+  reason is surfaced to the owning farmer as the batch's `latestDecision`.
 - Simulation effect: complete the observable verification action without
   changing hidden crop truth.
 - Consumers: coordinator queue and crop/listing evidence.
@@ -507,19 +637,36 @@ scope, not only the role name.
 
 - Callers: receiving buyer or explicitly authorised receiving coordinator.
 - Request: outcome, accepted quantity, rejected quantity, one accepted/rejected
-  outcome for every committed crop batch, and optional note.
-- Response: delivery/order IDs, outcome/quantities, accepter and time.
-- Product state/event: record immutable actual outcome and emit
-  `DELIVERY_ACCEPTED`; then atomically derive one of `ORDER_FULFILLED`,
+  outcome for every committed crop batch, and optional note. Whenever any
+  quantity is rejected, the request must also carry `reasonCode` (`QUANTITY_MISMATCH`, `MATURITY_OR_QUALITY`, `DAMAGE`, `CLEANLINESS`,
+  `SIZE_OR_GRADE`, `MISSING_INFORMATION`, or `OTHER`) and
+  a `nextAction` of 1-300 characters. Both may be given once on the acceptance
+  and apply to every rejected line, or per line for a batch-specific reason; a
+  per-line value overrides the shared one. Any rejected line left without both
+  fields fails with `422 DECISION_REASON_REQUIRED` and stores nothing.
+- Response: delivery/order IDs, outcome/quantities, accepter, time, the stored
+  `reasonCode`/`nextAction`, and the per-line reasons inside `lineOutcomes`.
+- Product state/event: record immutable actual outcome with its structured
+  reasons and emit `DELIVERY_ACCEPTED` carrying the additive
+  `reasonCode`/`nextAction` fields; then atomically derive one of `ORDER_FULFILLED`,
   `ORDER_PARTIALLY_FULFILLED`, or `ORDER_REJECTED` and release unused
-  reservations.
+  reservations. Accepted and rejected quantities are measured against the
+  mission quantity, which is the committed quantity. A fully accepted delivery
+  against a partial commitment derives `ORDER_PARTIALLY_FULFILLED` with
+  `outcomeCause` `INSUFFICIENT_SUPPLY`, because the shortfall came from supply
+  and not from produce being refused on arrival. `releasedReservationQuantity`
+  is what was reserved and not accepted. The order's payment amount is
+  recomputed here on the accepted quantities at their committed listing prices,
+  and the payment term starts from this acceptance time.
 - Simulation effect: record actual farmer/transporter economics and model
   evaluation data. Each crop line updates its latest prediction's accepted
   actual quantity and absolute error. Fulfilment satisfies demand and ends remaining order tasks;
   partial/rejected outcomes schedule unmet-demand/import/substitution fallback.
 - Consumers: buyer receipt, farmer outcome/revenue, trust, benchmark, Model Lab.
 - Rules/failures: quantities must use one unit, be non-negative, sum to the
-  delivered amount, and match outcome; produce rejection requires approval.
+  delivered amount, and match outcome; produce rejection requires approval and
+  an actionable reason. The affected farmer reads the recorded reason as the
+  crop batch's `latestDecision`.
 
 #### `GET /v1/agent-traces/{traceId}`
 
@@ -544,11 +691,25 @@ scope, not only the role name.
 - Response: generation time and role-filtered counts/IDs for supply, demand,
   raw order states, active missions, and open exceptions. It also returns a
   deadline-aware order outcome summary, summed accepted delivery kilograms,
-  approved commitment count, and completed mission count.
+  approved commitment count, completed mission count, and `paymentOverdueCount`.
+- `paymentOverdueCount` counts visible orders whose payment term has expired
+  with nothing recorded as paid, using the same derivation as the order reads.
+  An order with no delivery acceptance is never counted, however late it is,
+  because the term only starts when produce is accepted. The field is additive,
+  so a saved projection from before payment tracking still replays without it.
 - Outcome rules: `FULFILLED` and `PARTIALLY_FULFILLED` retain those outcomes;
   rejected/cancelled orders and incomplete orders at or past `neededBy` are
   unfulfilled; other incomplete orders are pending. Every visible order is in
-  exactly one category.
+  exactly one category. `orderOutcomes.causes` counts one cause per
+  unfulfilled or partially fulfilled order: the recorded `outcomeCause` when
+  present, otherwise the state the order ran out of time in
+  (`AWAITING_APPROVAL` → `APPROVAL_TIMEOUT`, `COMMITTED`/`IN_DELIVERY` →
+  `MISSION_LATE`, `REQUESTED` → `NO_READY_SUPPLY`). In a run-scoped snapshot,
+  an incomplete order whose `neededBy` falls after the scenario horizon is
+  counted as unfulfilled with cause `HORIZON_TRUNCATED` once the horizon has
+  passed. Before then it stays pending, because it could still be delivered
+  early. The horizon is the scenario's own start instant plus its duration, so
+  it is available while a run is still executing.
 - Connected runs capture the control-room copy through a synthetic,
   run-scoped operations observer. That observer makes no participant decisions
   and is not shown on the map; it exists only so the saved projection has the
@@ -737,15 +898,15 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
 
 | Interface | Reads | Writes/actions | Live events |
 |---|---|---|---|
-| Farmer website | Owned crop batches, prediction, participating orders and missions | Crop observation, forecast request, safe listing, own approval decision | Crop/forecast/listing/allocation/order/delivery outcomes |
-| Buyer website | Listings, owned demand/orders, relevant approval and delivery | Buyer demand, order, own approval decision, delivery acceptance | Demand/allocation/mission/delivery/order outcomes |
+| Farmer website | Owned crop batches, prediction, participating orders and missions, money owed for accepted deliveries | Crop observation, forecast request, safe listing, own approval decision | Crop/forecast/listing/allocation/order/delivery/payment outcomes |
+| Buyer website | Listings, owned demand/orders, relevant approval and delivery, payments due | Buyer demand, order, own approval decision, delivery acceptance, payment confirmation | Demand/allocation/mission/delivery/order/payment outcomes |
 | Transporter website | Available and assigned mission detail | Mission acceptance, delivery updates, exception | Mission/update/exception/recovery/order outcome |
-| Coordinator website | Permitted crops, relevant orders, targeted approvals and exceptions | Approval decision, verified update, exception escalation | Scoped operational events |
+| Coordinator website | Permitted crops, relevant orders, targeted approvals and exceptions, overdue payment count | Approval decision, verified update, exception escalation, payment confirmation on a permitted order | Scoped operational events |
 | 3D control room | Saved runs, timelines, individual frames, participants and snapshots | Create run, derived run or paired run; open replay participant | Run-scoped operational events |
 | Future benchmark view | Paired-run status/result | Create paired run | Benchmark result and run progress |
 | Future trace/evidence view | Agent trace and relevant entity detail | None | Trace-linked events |
 | Harvest simulated farmer | Same crop/listing/approval operations as farmer | Same request bodies as farmer | Run-scoped events |
-| Harvest simulated buyer | Same listing/demand/order/acceptance operations as buyer | Same request bodies as buyer | Run-scoped events |
+| Harvest simulated buyer | Same listing/demand/order/acceptance/payment operations as buyer | Same request bodies as buyer | Run-scoped events |
 | Harvest simulated transporter | Same mission/update/exception operations as transporter | Same request bodies as transporter | Run-scoped events |
 | Model service | No public Product API reads | Internal prediction response only | None |
 
@@ -782,6 +943,7 @@ missing event or apply an event whose schema it cannot validate.
 | Order fulfilled / `ORDER_FULFILLED` | Finalises order and releases unused reservations | Satisfies buyer demand, ends remaining tasks, records local procurement/fulfilment | Fulfilled order and dashboard totals update |
 | Partial/rejected / `ORDER_PARTIALLY_FULFILLED`, `ORDER_REJECTED` | Stores actual accepted quantity and releases remainder | Schedules unmet-demand/import/substitution fallback | Partial/rejected state and exception path appear |
 | Cancelled / `ORDER_CANCELLED` | Releases reservations and cancels operational work | Cancels future pickups and returns actors/vehicles to availability | Supply, routes, and order state update |
+| Payment confirmed / `PAYMENT_CONFIRMED` | Stores `paidAt` and the buyer's reference; no other state changes | None; the payload is settlement evidence only | Farmer money-owed total drops and the order shows paid |
 
 The full event list and payload purpose is in
 [`EVENT_CATALOGUE.md`](../contracts/events/EVENT_CATALOGUE.md).
@@ -800,6 +962,18 @@ REQUESTED
 `AT_RISK` is not a lifecycle status. It is an active-exception overlay while an
 order remains in its underlying state. Resolving all active exceptions clears
 the overlay without pretending that the order moved backward.
+
+Payment status is not a lifecycle status either. It is derived from the
+delivery acceptance time plus the order's `paymentTermsDays` on every read, and
+only `paidAt` is stored. Harvest tracks payment terms and status so a farmer
+can see what a hotel owes and how long it has been outstanding; it does not
+move money, hold funds, or verify a transfer.
+
+Matching proposes an allocation once safe cover reaches the order's
+`minimumAcceptableFraction`, so a commitment may be for less than the requested
+quantity. Everything downstream then measures against `committedQuantity`: the
+mission carries it, delivery acceptance sums to it, and a fully accepted
+partial commitment ends `PARTIALLY_FULFILLED` rather than `FULFILLED`.
 
 The end-to-end fulfilment sequence is:
 
@@ -838,6 +1012,17 @@ outbox adapter touch Prisma.
 
 ### Connected execution order
 
+A synthetic buyer places its orders on 7-day payment terms and then records
+paying its own accepted delivery a fixed ten simulated days later, in sorted
+order-ID order so the run stays deterministic. Both numbers are
+**stakeholder-calibrated** and scaled to the 21-day scenario: hotels quote
+short terms and pay in one to two months, a gap no 21-day window can contain,
+so 7 against 10 preserves "paid late" at demonstration scale. A delivered
+simulated order therefore falls due on day 7, reads as overdue from day 8, and
+is settled on day 10 unless the run window closes first. Real buyers keep the
+Product API's 14-day default. Baseline runs never call the operation, and
+replay reads saved frames rather than repeating it.
+
 `EXTERNAL_PRODUCT_API` mode disables the engine's internal Harvest allocation,
 approval and recovery policy. The saved-run coordinator then repeats:
 
@@ -871,7 +1056,11 @@ evidence must remain absent rather than being fabricated. The model returns:
 - `MODEL_PREDICTED` provenance and generation time.
 
 The Product API validates `q10 <= q50 <= q90`, units, dates, confidence ranges,
-IDs, and provenance. It then calculates—not the model—safe orderable supply:
+IDs, and provenance. It then calculates—not the model—safe orderable supply.
+Available-to-promise is `0` while the crop batch is `PLANNED` or `GROWING`;
+the forecast stays visible as evidence, but only a batch whose latest
+observation reports `HARVEST_READY` or `HARVESTED` can be promised or listed,
+and a later observation that leaves readiness withdraws its active listings:
 
 ```text
 availableToPromise = max(

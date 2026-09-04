@@ -268,6 +268,8 @@ a:focus-visible {
 
 .run-button:disabled { cursor: not-allowed; opacity: 0.45; }
 .participant-button { width: 100%; margin-top: 9px; }
+/* First thing in the Inspector body, so it needs no gap above it. */
+.preview-button { margin-top: 0; }
 .panel-help { margin: 8px 0 14px; color: var(--text-dim); font-size: 10px; line-height: 1.5; }
 .run-error { margin: 7px 2px 0; color: #ff9282; font-size: 11px; }
 
@@ -413,6 +415,35 @@ a:focus-visible {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: rgba(18, 48, 40, 0.55);
+}
+
+.metrics-causes {
+  margin-top: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(18, 48, 40, 0.55);
+}
+
+.metrics-cause-list {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+
+.metrics-cause-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.metrics-cause-count {
+  font-family: "Manrope", sans-serif;
+  font-weight: 800;
 }
 
 .metric-label {
@@ -686,4 +717,65 @@ a:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/*
+ * Embedded participant reenactment (issue #38).
+ *
+ * Sized for the demo screens the control room is actually shown on: at 1280x800
+ * the frame is still over 1140px wide, which is past the website's own 720px
+ * breakpoint, so its desktop layout renders rather than folding into the mobile
+ * one. Below that the panel keeps shrinking instead of overflowing, and the
+ * frame follows it down to the website's responsive breakpoints.
+ *
+ * The height stops short of the bottom of the window on purpose. The transport
+ * row lives there, and playback has to stay reachable while a preview is open,
+ * so the panel is capped above it rather than centred over it.
+ *
+ * It sits above the globe but below the run overlay, because a run being
+ * generated is the one thing that should still cover everything.
+ */
+.action-preview-panel {
+  position: fixed;
+  z-index: 40;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  width: min(1180px, calc(100vw - 48px));
+  height: min(788px, calc(100vh - 176px));
+  padding: 0 15px 11px;
+  overflow: hidden;
+  border: 1px solid var(--agent);
+  border-radius: var(--radius);
+  background: rgba(13, 31, 26, 0.97);
+  box-shadow: var(--shadow-panel);
+}
+.action-preview-panel .panel-header { margin: 0 -15px; padding-inline: 15px; }
+.action-preview-panel .action-preview-provenance {
+  margin: 9px 0;
+  padding: 7px 10px;
+  border-left: 2px solid var(--agent);
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+.action-preview-frame {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #f7f4ec; /* The website's own cream, so no dark flash while it loads. */
+}
+.action-preview-frame iframe { width: 100%; height: 100%; border: 0; }
+.action-preview-frame .empty-state, .action-preview-frame .run-error { padding: 0 24px; text-align: center; }
+.action-preview-panel .panel-help { margin: 8px 0 0; }
+
+@media (max-height: 720px) {
+  .action-preview-panel .action-preview-provenance { margin: 6px 0; }
+  .action-preview-panel .panel-help { display: none; }
 }

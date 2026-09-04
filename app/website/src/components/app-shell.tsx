@@ -3,6 +3,7 @@
 import {
   ClipboardCheck,
   Compass,
+  LayoutGrid,
   Leaf,
   LogOut,
   Map as MapIcon,
@@ -17,7 +18,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { withPreviewFlag } from "@/lib/action-preview";
 import { roleHome, type ProductRole } from "@/lib/api";
+import { ActionPreviewController } from "./action-preview";
+import { ConnectionStatus } from "./offline";
 import { OnboardingGuide } from "./onboarding-guide";
 import { useSession } from "./providers";
 
@@ -25,6 +29,7 @@ const navigation = {
   FARMER: [
     ["/farmer", "My farm", Sprout],
     ["/map", "Map", MapIcon],
+    ["/farmer/farm", "Farm map", LayoutGrid],
     ["/orders", "Orders", PackageCheck],
   ],
   BUYER: [
@@ -68,7 +73,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!ready || pathname === "/") return;
     if (!actor) router.replace("/");
-    else if (!mayVisit(actor.role, pathname)) router.replace(roleHome(actor.role));
+    else if (!mayVisit(actor.role, pathname)) router.replace(withPreviewFlag(roleHome(actor.role), window.location.search));
   }, [actor, pathname, ready, router]);
 
   if (pathname === "/") return <>{children}</>;
@@ -115,6 +120,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <button className="icon-button mobile-menu" onClick={() => setOpen((value) => !value)} aria-label="Toggle navigation">
             {open ? <X /> : <Menu />}
           </button>
+          <ConnectionStatus />
           <div className="profile-summary">
             <span className="avatar">{actor.name.slice(0, 1)}</span>
             <div><strong>{actor.name}</strong><small>{actor.role.toLowerCase()}</small></div>
@@ -126,6 +132,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <fieldset className="workspace-fieldset" disabled={Boolean(actor.readOnly)}><main className={pathname === "/map" ? "map-main" : undefined}>{children}</main></fieldset>
       </div>
       {!actor.readOnly && <OnboardingGuide actor={actor} restartSignal={tutorialRequest} />}
+      {actor.readOnly && <ActionPreviewController actor={actor} />}
     </div>
   );
 }
