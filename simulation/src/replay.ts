@@ -59,6 +59,12 @@ export interface SimulationParticipant {
   islandId: string;
 }
 
+/**
+ * Which harvest-estimation method produced a forecast during a run.
+ * `DETERMINISTIC_FALLBACK` is the rule-based fixture, never learned output.
+ */
+export type SimulationEstimationMode = 'LEARNED_MODEL' | 'DETERMINISTIC_FALLBACK';
+
 export interface SimulationAgentAction {
   actionId: string;
   at: string;
@@ -72,6 +78,11 @@ export interface SimulationAgentAction {
   entityId?: string;
   eventIds: string[];
   adapter: string;
+  /**
+   * Harvest-estimation method behind a forecast-producing tool call. Optional
+   * so saved frames from before the per-run toggle still replay.
+   */
+  estimationMode?: SimulationEstimationMode;
   /** Whether this tool crossed an approval boundary in the synthetic run. */
   approval: 'NONE' | 'SYNTHETIC_PARTICIPANT';
   correlationId?: string;

@@ -11,6 +11,9 @@ export const PARTICIPANT_WEBSITE_URL = process.env.NEXT_PUBLIC_WEBSITE_URL ?? "h
 
 export type PolicyName = "BASELINE" | "HARVEST";
 export type DecisionMode = "DETERMINISTIC" | "LLM_ASSISTED";
+/** Per-run harvest-estimation method; never a global control-room setting. */
+export type EstimationMode = "LEARNED_MODEL" | "DETERMINISTIC_FALLBACK";
+export const DEFAULT_ESTIMATION_MODE: EstimationMode = "DETERMINISTIC_FALLBACK";
 export type SavedRun = ApiSchema<"SimulationRun">;
 export type SimulationScenario = ApiSchema<"SimulationScenario">;
 
@@ -66,6 +69,7 @@ export async function createSavedRun(input: {
   policy: PolicyName;
   seed: number;
   decisionMode: DecisionMode;
+  estimationMode: EstimationMode;
   disruptions?: InjectedDisruption[];
   scope?: { mode: "ALL" } | { mode: "SELECTED"; islandIds: string[] };
 }) {
@@ -77,6 +81,7 @@ export async function createSavedRun(input: {
       policy: input.policy,
       seed: input.seed,
       decisionMode: input.decisionMode,
+      estimationMode: input.estimationMode,
       scope: input.scope ?? { mode: "SELECTED", islandIds: ["saint-lucia"] },
       disruptions: input.disruptions,
     },

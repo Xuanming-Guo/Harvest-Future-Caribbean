@@ -106,6 +106,7 @@ $runRequest = @{
   policy = "HARVEST"
   seed = 42
   decisionMode = "DETERMINISTIC"
+  estimationMode = "DETERMINISTIC_FALLBACK"
   scope = @{
     mode = "SELECTED"
     islandIds = @("saint-lucia")
@@ -134,6 +135,7 @@ status            COMPLETED
 policy            HARVEST
 decisionMode      DETERMINISTIC
 decisionAdapter   deterministic
+estimationMode    DETERMINISTIC_FALLBACK
 frameCount        119
 eventsProcessed    76
 totalDemandedKg   2183
@@ -496,11 +498,58 @@ repository-root `.env`, restart the API, and run again. Expect
 errors and invalid structured output fail the run safely. Never commit `.env`
 or a real key.
 
-## 11. Test the control room
+## 11. Verify the per-run harvest-estimation method
+
+The estimation method is part of the run, not a server setting, so two runs
+started minutes apart can use different methods without restarting the API.
+
+Repeat the section 4 request with `estimationMode = "DETERMINISTIC_FALLBACK"`
+and a new key. Expect `COMPLETED` and, on the saved run,
+`estimationMode = DETERMINISTIC_FALLBACK`. Every forecast it wrote is labelled:
+
+```powershell
+$timeline = Invoke-RestMethod `
+  -Method Get `
+  -Uri "$base/v1/simulation-runs/$($run.runId)/timeline" `
+  -Headers @{ Authorization = "Bearer $($session.accessToken)" }
+
+$timeline.frames.agentActions |
+  Where-Object { $_.toolName -eq "submit_crop_observation" } |
+  Select-Object -First 1 -Property toolName, estimationMode
+```
+
+Expect `estimationMode = DETERMINISTIC_FALLBACK`. Opening a participant
+website (section 7) on one of that run's crop batches shows an **Estimated by**
+line reading `deterministic fallback (fixture-yield-v0.1.0)`, and the forecast
+warnings start with `Deterministic fallback estimate, not a learned-model
+prediction`. The participant cannot change the method; it is read-only there.
+
+Now create a run with `estimationMode = "LEARNED_MODEL"` while the FastAPI
+model service is **not** running. Expect HTTP `502` with code
+`MODEL_UNAVAILABLE`, a saved run whose `status` is `FAILED` and whose
+`errorCode` is `MODEL_UNAVAILABLE`, and zero `yield_predictions` rows for that
+run. A silent fixture substitution would be a defect, not a graceful
+degradation: the run would claim learned-model forecasts it never made.
+
+With the model service running (see [`../model/README.md`](../model/README.md))
+the same request completes, `estimationMode` reads `LEARNED_MODEL`, and the
+crop page names the learned model and its version instead.
+
+Baseline runs record the choice and never use it, because baseline
+participants never call the Product API or a forecast model.
+
+Replay never repeats the request. Loading the timeline or any world frame of a
+completed run reads saved predictions and provenance only, so a `LEARNED_MODEL`
+run replays with the model service stopped.
+
+## 12. Test the control room
 
 At <http://localhost:3002>:
 
-1. Choose Harvest, seed `42`, and Deterministic.
+1. Choose Harvest, seed `42`, Deterministic, and **Deterministic fallback**
+   under **Harvest estimation**. The estimation control is a segmented pair of
+   buttons, never a native select, and it is disabled while Baseline is
+   selected.
 2. Choose the Saint Lucia scenario in **Scenario**.
 3. Select **Run simulation**. A loading overlay is shown until the synchronous
    API run completes.
@@ -513,6 +562,8 @@ At <http://localhost:3002>:
    role, tool, status, adapter, time, synthetic approval classification and
    safe trace/entity/event references.
 7. Choose an existing run from **Saved run** and confirm it loads immediately.
+   The masthead badge names that run's estimation method, and says `(unused)`
+   for a Baseline run.
 8. Rewind to a point with at least one simulated hour remaining, then inject a
    road/weather/crop/vehicle event. The panel shows its concrete target and
    time. A new derived run should be saved; the source run remains unchanged.

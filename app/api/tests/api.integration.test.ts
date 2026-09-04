@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { prisma } from "../src/db.js";
 import { buildServer } from "../src/server.js";
@@ -508,6 +508,9 @@ describe("participant Product API", () => {
       seed: 42,
       decisionMode: "DETERMINISTIC",
       decisionAdapter: "deterministic",
+      // This payload omits estimationMode, so the run records the labelled
+      // fallback rather than inheriting the server MODEL_ADAPTER setting.
+      estimationMode: "DETERMINISTIC_FALLBACK",
       status: "COMPLETED",
       resolvedIslandIds: ["saint-lucia"],
       evidenceLabel: expect.stringContaining("SYNTHETIC"),
@@ -1236,6 +1239,221 @@ describe("payment terms and status (#74)", () => {
     const unrelatedConfirmation = await server.inject({ method: "POST", url: `/v1/orders/${orderId}/payment-confirmations`, headers: mutationHeaders("farmer-marcus", "payment-forbidden"), payload: {} });
     expect(unrelatedConfirmation.statusCode).toBe(403);
   });
+});
+
+/**
+ * The estimation method is chosen per run and stored with it, so these tests
+ * assert what a reader of a saved run can trust: which method ran, that a
+ * fallback forecast is labelled everywhere it surfaces, and that selecting the
+ * learned model while it is unreachable fails the run instead of quietly
+ * producing fixture numbers under a learned-model label.
+ */
+describe("per-run harvest estimation (#51)", () => {
+  const basePayload = {
+    scenarioId: "saint-lucia-demo-v1",
+    policy: "HARVEST",
+    seed: 42,
+    decisionMode: "DETERMINISTIC",
+    scope: { mode: "SELECTED", islandIds: ["saint-lucia"] },
+  };
+
+  const FALLBACK_LABEL = "Deterministic fallback estimate, not a learned-model prediction";
+  /** The completed fallback run the later tests read back; set by the second test. */
+  let fallbackRunId = "";
+
+  function createRun(key: string, overrides: Record<string, unknown> = {}) {
+    return server.inject({
+      method: "POST",
+      url: "/v1/simulation-runs",
+      headers: mutationHeaders("operations-demo", key),
+      payload: { ...basePayload, ...overrides },
+    });
+  }
+
+  /**
+   * What a run's forecasts claim, as a sorted multiset. Prediction and request
+   * IDs are freshly generated per run by design, so they are excluded and the
+   * comparison is order-independent rather than resting on a UUID tiebreak.
+   */
+  async function forecastFingerprint(runId: string) {
+    const rows = await prisma.yieldPrediction.findMany({
+      where: { simulationRunId: runId },
+      select: { estimationMode: true, modelVersion: true, q10: true, q50: true, q90: true, readiness: true, confidence: true, generatedAt: true, warnings: true },
+    });
+    return rows.map((row) => JSON.stringify(row)).sort();
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("refuses a method the contract does not name", async () => {
+    const rejected = await createRun("estimation-invalid", { estimationMode: "BEST_GUESS" });
+
+    expect(rejected.statusCode).toBe(422);
+    expect(rejected.json().code).toBe("INVALID_ESTIMATION_MODE");
+    expect(await prisma.simulationRun.count({ where: { estimationMode: "LEARNED_MODEL" } })).toBe(0);
+  });
+
+  it("stores the fallback choice and labels every forecast the run produced", async () => {
+    const created = await createRun("estimation-fallback", { estimationMode: "DETERMINISTIC_FALLBACK" });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({ status: "COMPLETED", estimationMode: "DETERMINISTIC_FALLBACK" });
+    const runId = created.json().runId as string;
+    fallbackRunId = runId;
+
+    // The fallback keeps the whole crop, listing, and marketplace chain
+    // working; a run with no forecasts would make these assertions vacuous.
+    const predictions = await prisma.yieldPrediction.findMany({ where: { simulationRunId: runId } });
+    expect(predictions.length).toBeGreaterThan(0);
+    expect(predictions.every((row) => row.estimationMode === "DETERMINISTIC_FALLBACK")).toBe(true);
+    expect(predictions.every((row) => row.modelVersion.startsWith("fixture-"))).toBe(true);
+    expect(predictions.every((row) => (row.warnings as string[])[0] === FALLBACK_LABEL)).toBe(true);
+
+    // The saved trace names the method that ran, so a reader is not left
+    // inferring it from the model version alone.
+    const forecastSteps = await prisma.traceStep.findMany({ where: { simulationRunId: runId, kind: "TOOL_CALL", toolName: "deterministic-fallback-yield-model" } });
+    expect(forecastSteps).toHaveLength(predictions.length);
+    expect(await prisma.traceStep.count({ where: { simulationRunId: runId, toolName: "learned-yield-model" } })).toBe(0);
+    expect(forecastSteps.every((step) => step.summary.includes("deterministic fallback"))).toBe(true);
+
+    // What a participant sees. The prediction is read through the run's own
+    // participant session, because run-scoped records stay inside their run.
+    const farmerMapping = await prisma.simulationActorMapping.findFirstOrThrow({ where: { simulationRunId: runId, role: "FARMER", productActorId: { not: null } } });
+    const participantSession = await server.inject({
+      method: "POST",
+      url: `/v1/simulation-runs/${runId}/participant-sessions`,
+      headers: mutationHeaders("operations-demo", "estimation-participant"),
+      payload: { productActorId: farmerMapping.productActorId },
+    });
+    expect(participantSession.statusCode).toBe(201);
+    const participantAuth = { authorization: `Bearer ${participantSession.json().accessToken}` };
+    const batches = await server.inject({ method: "GET", url: "/v1/crop-batches", headers: participantAuth });
+    const forecastBatch = batches.json().items.find((item: { latestPredictionId: string | null }) => item.latestPredictionId);
+    expect(forecastBatch).toBeDefined();
+    const evidence = await server.inject({ method: "GET", url: `/v1/yield-predictions/${forecastBatch.latestPredictionId}`, headers: participantAuth });
+    expect(evidence.statusCode).toBe(200);
+    expect(evidence.json()).toMatchObject({ estimationMode: "DETERMINISTIC_FALLBACK", provenance: "MODEL_PREDICTED" });
+    expect(evidence.json().modelVersion).toMatch(/^fixture-/);
+    expect(evidence.json().warnings[0]).toBe(FALLBACK_LABEL);
+
+    // Agent-action provenance. Only the forecast-producing tool carries the
+    // method, so its absence elsewhere is information rather than an omission.
+    const timeline = await server.inject({ method: "GET", url: `/v1/simulation-runs/${runId}/timeline`, headers: auth("operations-demo") });
+    expect(timeline.json().estimationMode).toBe("DETERMINISTIC_FALLBACK");
+    const actions = timeline.json().frames.flatMap((frame: { agentActions?: Array<{ toolName: string; estimationMode?: string }> }) => frame.agentActions ?? []);
+    const forecastActions = actions.filter((action: { toolName: string }) => action.toolName === "submit_crop_observation");
+    expect(forecastActions.length).toBeGreaterThan(0);
+    expect(forecastActions.every((action: { estimationMode?: string }) => action.estimationMode === "DETERMINISTIC_FALLBACK")).toBe(true);
+    expect(actions.filter((action: { toolName: string }) => action.toolName !== "submit_crop_observation").every((action: { estimationMode?: string }) => action.estimationMode === undefined)).toBe(true);
+
+    const frame = await server.inject({ method: "GET", url: `/v1/simulation-runs/${runId}/world?frameIndex=0`, headers: auth("operations-demo") });
+    expect(frame.json().estimationMode).toBe("DETERMINISTIC_FALLBACK");
+  }, 180_000);
+
+  it("reproduces identical forecasts for the same seed and method", async () => {
+    expect(fallbackRunId).not.toBe("");
+    const first = await prisma.simulationRun.findUniqueOrThrow({ where: { id: fallbackRunId } });
+    const repeated = await createRun("estimation-fallback-repeat", { estimationMode: "DETERMINISTIC_FALLBACK" });
+    expect(repeated.statusCode).toBe(201);
+    const repeatedId = repeated.json().runId as string;
+    expect(repeatedId).not.toBe(first.id);
+
+    const stored = await prisma.simulationRun.findUniqueOrThrow({ where: { id: repeatedId } });
+    expect(stored.determinismDigest).toBe(first.determinismDigest);
+    expect(stored.metrics).toEqual(first.metrics);
+    expect(await forecastFingerprint(repeatedId)).toEqual(await forecastFingerprint(first.id));
+  }, 180_000);
+
+  it("fails a learned-model run that cannot reach the service, writing no forecast", async () => {
+    const fetchSpy = vi.fn(async () => {
+      throw new TypeError("fetch failed");
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const attempted = await createRun("estimation-learned-unreachable", { estimationMode: "LEARNED_MODEL" });
+
+    expect(attempted.statusCode).toBe(502);
+    expect(attempted.json().code).toBe("MODEL_UNAVAILABLE");
+    expect(fetchSpy).toHaveBeenCalled();
+    const failed = await prisma.simulationRun.findFirstOrThrow({ where: { estimationMode: "LEARNED_MODEL", policy: "HARVEST" }, orderBy: { createdAt: "desc" } });
+    expect(failed).toMatchObject({ status: "FAILED", errorCode: "MODEL_UNAVAILABLE" });
+    // The whole point of failing: not one fixture number was written under a
+    // run that says it used the learned model.
+    expect(await prisma.yieldPrediction.count({ where: { simulationRunId: failed.id } })).toBe(0);
+    expect(await prisma.domainEvent.count({ where: { simulationRunId: failed.id, eventType: "FORECAST_PRODUCED" } })).toBe(0);
+  }, 180_000);
+
+  it("fails the same way when the learned service answers but rejects the request", async () => {
+    const fetchSpy = vi.fn(async () => new Response("{}", { status: 422 }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const attempted = await createRun("estimation-learned-rejected", { estimationMode: "LEARNED_MODEL" });
+
+    expect(attempted.statusCode).toBe(502);
+    expect(attempted.json().code).toBe("MODEL_UNAVAILABLE");
+    expect(attempted.json().detail).toContain("no fallback estimate was substituted");
+    const failed = await prisma.simulationRun.findFirstOrThrow({ where: { estimationMode: "LEARNED_MODEL", policy: "HARVEST" }, orderBy: { createdAt: "desc" } });
+    expect(await prisma.yieldPrediction.count({ where: { simulationRunId: failed.id } })).toBe(0);
+  }, 180_000);
+
+  it("replays and scrubs a completed run without asking any model for a forecast", async () => {
+    expect(fallbackRunId).not.toBe("");
+    const run = await prisma.simulationRun.findUniqueOrThrow({ where: { id: fallbackRunId } });
+    const before = {
+      predictions: await prisma.yieldPrediction.count({ where: { simulationRunId: run.id } }),
+      forecasts: await prisma.domainEvent.count({ where: { simulationRunId: run.id, eventType: "FORECAST_PRODUCED" } }),
+    };
+    const fetchSpy = vi.fn(async () => {
+      throw new Error("Replay must never request a forecast.");
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    // Flipping the stored method is what makes this test mean anything: if a
+    // replay path re-derived a forecast it would now resolve to the learned
+    // service and hit the spy, instead of reading the saved prediction.
+    await prisma.simulationRun.update({ where: { id: run.id }, data: { estimationMode: "LEARNED_MODEL" } });
+    try {
+      const timeline = await server.inject({ method: "GET", url: `/v1/simulation-runs/${run.id}/timeline`, headers: auth("operations-demo") });
+      expect(timeline.statusCode).toBe(200);
+      for (const frameIndex of [0, Math.floor(run.frameCount / 2), run.frameCount - 1]) {
+        const frame = await server.inject({ method: "GET", url: `/v1/simulation-runs/${run.id}/world?frameIndex=${frameIndex}`, headers: auth("operations-demo") });
+        expect(frame.statusCode).toBe(200);
+      }
+      const mapping = await prisma.simulationActorMapping.findFirstOrThrow({ where: { simulationRunId: run.id, role: "FARMER", productActorId: { not: null } } });
+      const session = await server.inject({
+        method: "POST",
+        url: `/v1/simulation-runs/${run.id}/participant-sessions`,
+        headers: mutationHeaders("operations-demo", "estimation-replay-read"),
+        payload: { productActorId: mapping.productActorId },
+      });
+      const replayAuth = { authorization: `Bearer ${session.json().accessToken}` };
+      const batches = await server.inject({ method: "GET", url: "/v1/crop-batches", headers: replayAuth });
+      const batch = batches.json().items.find((item: { latestPredictionId: string | null }) => item.latestPredictionId);
+      const evidence = await server.inject({ method: "GET", url: `/v1/yield-predictions/${batch.latestPredictionId}`, headers: replayAuth });
+      expect(evidence.statusCode).toBe(200);
+      // The saved forecast keeps the method that produced it, not the method
+      // the run row now names.
+      expect(evidence.json().estimationMode).toBe("DETERMINISTIC_FALLBACK");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      await prisma.simulationRun.update({ where: { id: run.id }, data: { estimationMode: "DETERMINISTIC_FALLBACK" } });
+    }
+
+    expect(await prisma.yieldPrediction.count({ where: { simulationRunId: run.id } })).toBe(before.predictions);
+    expect(await prisma.domainEvent.count({ where: { simulationRunId: run.id, eventType: "FORECAST_PRODUCED" } })).toBe(before.forecasts);
+  }, 120_000);
+
+  it("records the choice on a Baseline run and never acts on it", async () => {
+    const fetchSpy = vi.fn(async () => {
+      throw new Error("Baseline runs must never request a forecast.");
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const baseline = await createRun("estimation-baseline", { policy: "BASELINE", estimationMode: "LEARNED_MODEL" });
+
+    expect(baseline.statusCode).toBe(201);
+    expect(baseline.json()).toMatchObject({ policy: "BASELINE", status: "COMPLETED", estimationMode: "LEARNED_MODEL" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await prisma.yieldPrediction.count({ where: { simulationRunId: baseline.json().runId } })).toBe(0);
+  }, 180_000);
 });
 
 /**

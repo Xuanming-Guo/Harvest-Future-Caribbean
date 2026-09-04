@@ -33,6 +33,7 @@ export type {
   ControlRoomTotals,
   ReplayTimeline,
   SimulationAgentAction,
+  SimulationEstimationMode,
   SimulationOperationsSnapshot,
   SimulationOrderOutcomes,
   SimulationParticipant,
