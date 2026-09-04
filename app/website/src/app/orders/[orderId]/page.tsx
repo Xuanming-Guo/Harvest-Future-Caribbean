@@ -114,7 +114,7 @@ export default function OrderDetailPage() {
           {lifecycle.map((status, index) => <div className={index <= currentIndex ? "complete" : ""} key={status}><span>{index < currentIndex ? <CheckCircle2 size={16} /> : index + 1}</span><small>{titleCase(status)}</small></div>)}
         </div>
       </Card>
-      <div className="grid two-column section-gap">
+      <div className="grid two-column section-gap" data-tour="order-detail">
         <Card>
           <SectionTitle title="Supply commitment" detail="Confirmed only after everyone approves" />
           {order.data.cropStandardId && <p className="crop-standard-applied">Standard applied: <strong>{appliedStandard ? `${appliedStandard.publisherName} v${appliedStandard.version}` : "Loading standard..."}</strong></p>}
@@ -222,7 +222,7 @@ export default function OrderDetailPage() {
         </Card>
       )}
       {payment && (
-        <Card className="section-gap">
+        <Card className="section-gap" data-tour="order-payment">
           <SectionTitle title="Payment" detail={`${order.data.paymentTermsDays}-day terms`} />
           <p className="payment-disclaimer">Harvest tracks payment; it does not move money. The amount is what the accepted produce is worth at the price the farmer published.</p>
           <div className="payment-card">
@@ -237,7 +237,7 @@ export default function OrderDetailPage() {
           {actor?.role === "BUYER" && payment.status !== "PAID" && payment.dueAt && (
             <form className="form-grid section-gap" onSubmit={(event: FormEvent) => { event.preventDefault(); confirmPayment.mutate(); }}>
               <div className="field field-full"><label>Your payment reference (optional)</label><input value={reference} maxLength={120} onChange={(event) => setReference(event.target.value)} /></div>
-              <button className="button field-full" disabled={confirmPayment.isPending}><BadgeCheck size={17} />Confirm payment</button>
+              <button className="button field-full" data-tour="order-payment-confirm" disabled={confirmPayment.isPending}><BadgeCheck size={17} />Confirm payment</button>
             </form>
           )}
           {confirmPayment.error && <p className="form-error">{confirmPayment.error.message}</p>}
@@ -245,7 +245,7 @@ export default function OrderDetailPage() {
       )}
       {actor?.role !== "COORDINATOR" && <div className="section-gap"><ApprovalList /></div>}
       {actor?.role === "BUYER" && mission?.status === "DELIVERED" && !order.data.deliveryAcceptance && (
-        <Card className="section-gap">
+        <Card className="section-gap" data-tour="delivery-acceptance">
           <SectionTitle title="Accept this delivery" detail="Record what arrived" />
           <form className="form-grid" onSubmit={(event: FormEvent) => { event.preventDefault(); if (online) acceptance.mutate(); }}>
             {resolvedLines.map((line) => (
@@ -281,7 +281,7 @@ export default function OrderDetailPage() {
             <div className="field field-full"><label htmlFor="acceptance-note">Note (optional)</label><textarea id="acceptance-note" rows={2} value={note} onChange={(event) => setNote(event.target.value)} /></div>
             {!online && <div className="field-full"><OfflineHint>Accepting a delivery settles what was received, so it is never queued. Reconnect to confirm.</OfflineHint></div>}
             {reasonMissing && <p className="form-error field-full">Choose a reason and say what the farmer should do next before recording a rejection.</p>}
-            <button className="button field-full" aria-disabled={!online || undefined} disabled={acceptance.isPending || !online || reasonMissing || Math.abs(accepted + rejected - mission.quantity.value) > 0.0001 || resolvedLines.some((line) => Math.abs(line.accepted + line.rejected - line.quantity) > 0.0001)}><CheckCircle2 size={17} />Confirm delivery</button>
+            <button className="button field-full" data-tour="delivery-acceptance-submit" aria-disabled={!online || undefined} disabled={acceptance.isPending || !online || reasonMissing || Math.abs(accepted + rejected - mission.quantity.value) > 0.0001 || resolvedLines.some((line) => Math.abs(line.accepted + line.rejected - line.quantity) > 0.0001)}><CheckCircle2 size={17} />Confirm delivery</button>
           </form>
           {(message || acceptance.error) && <p className={acceptance.error ? "form-error" : "form-success"}>{message ?? acceptance.error?.message}</p>}
         </Card>

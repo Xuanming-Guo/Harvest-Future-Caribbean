@@ -6,6 +6,16 @@ export type ProductApiPaths = paths;
 export type ProductApiSchemas = components["schemas"];
 export type ApiSchema<Name extends keyof ProductApiSchemas> = ProductApiSchemas[Name];
 export type { HarvestDomainEventEnvelope } from "./generated/event-envelope";
+export {
+  ACTION_PREVIEW_MESSAGE,
+  ACTION_PREVIEW_READY,
+  isActionPreviewMessage,
+  isActionPreviewReadyMessage,
+  type ActionPreviewMessage,
+  type ActionPreviewReadyMessage,
+  type ActionPreviewRole,
+  type ActionPreviewStatus,
+} from "./action-preview";
 
 export interface HarvestClientOptions {
   baseUrl: string;

@@ -282,6 +282,7 @@ export default function FarmerHome() {
         </Disclosure>
 
         <Disclosure
+          data-tour="farmer-respond"
           id={WORKSPACE_SECTIONS.respond}
           icon={Handshake}
           defaultOpen={recommendation?.sectionId === WORKSPACE_SECTIONS.respond}

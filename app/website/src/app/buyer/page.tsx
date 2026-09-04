@@ -51,7 +51,7 @@ export default function BuyerHome() {
               <span className="payment-amount">{order.payment?.amount ? formatMoney(order.payment.amount.amount, order.payment.amount.currency) : "-"}</span>
               <div className="inline-actions">
                 <Badge tone={order.payment ? order.payment.status.toLowerCase().replaceAll("_", "-") : undefined}>{order.payment ? PAYMENT_STATUS_LABELS[order.payment.status] : "-"}</Badge>
-                <button className="button" type="button" disabled={confirmPayment.isPending} onClick={() => confirmPayment.mutate(order.orderId)}><BadgeCheck size={16} />Confirm payment</button>
+                <button className="button" type="button" data-tour="buyer-payment-confirm" disabled={confirmPayment.isPending} onClick={() => confirmPayment.mutate(order.orderId)}><BadgeCheck size={16} />Confirm payment</button>
               </div>
             </div>
           ))}</div>

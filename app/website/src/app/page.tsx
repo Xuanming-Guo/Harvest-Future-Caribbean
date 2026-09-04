@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { useSession } from "@/components/providers";
+import { withPreviewFlag } from "@/lib/action-preview";
 import { roleHome } from "@/lib/api";
 
 const personas = [
@@ -21,7 +22,9 @@ export default function SignInPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (ready && actor) router.replace(roleHome(actor.role));
+    // A control-room preview frame lands here first, so the flag it carries has
+    // to survive this redirect or the preview never reaches a page that runs it.
+    if (ready && actor) router.replace(withPreviewFlag(roleHome(actor.role), window.location.search));
   }, [actor, ready, router]);
 
   async function choose(persona: string) {
