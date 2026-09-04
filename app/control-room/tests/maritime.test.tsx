@@ -11,7 +11,7 @@
  *      sentence that says a route is not a produce service.
  */
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ControlRoomFrame, ControlRoomScene, ControlRoomShipment, MaritimeAttribution } from "@harvest/simulation";
 import { vesselPositionAt } from "@harvest/simulation";
 import { afterEach, describe, expect, it } from "vitest";
@@ -128,6 +128,10 @@ describe("reference attribution", () => {
         maritimeNote="Ports, links and exchange rates are public references. Schedules, capacities, prices and outcomes are SYNTHETIC."
       />,
     );
+    // The publishers are named on the collapsed line and detailed one click in;
+    // the caveat is what that click has to reach.
+    expect(screen.getByText("ferry & FX references")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /Sources/ }));
     const link = screen.getByRole("link", { name: attribution.publisher });
     expect(link).toHaveAttribute("href", attribution.sourceUrl);
     expect(screen.getByText(/retrieved 2026-09-03/)).toBeInTheDocument();

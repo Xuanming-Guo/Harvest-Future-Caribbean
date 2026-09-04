@@ -807,22 +807,115 @@ a:focus-visible {
 
 .weather-provenance { margin-bottom: 0; }
 
+/*
+ * Attribution is an obligation, not a panel. ODbL requires the OpenStreetMap
+ * credit wherever the data is drawn, so the credit line is always on screen and
+ * only the detail behind it collapses.
+ *
+ * The wrapper is a bare positioning box with no surface of its own; the summary
+ * pill and the panel each carry their own. Anchoring on `bottom` is what makes
+ * the panel grow *upward* off the summary line when it opens, instead of
+ * pushing the credit further down over the globe.
+ */
 .reference-attribution {
   position: absolute;
   z-index: 2;
   left: 50%;
   bottom: 70px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   max-width: min(560px, calc(100vw - 720px));
   transform: translateX(-50%);
-  padding: 6px 9px;
+}
+
+.reference-attribution-summary {
+  max-width: 100%;
+  margin: 0;
+  padding: 4px 10px;
   border: 1px solid rgba(86, 167, 189, 0.32);
-  border-radius: 7px;
+  border-radius: 999px;
   background: rgba(7, 19, 16, 0.84);
   color: var(--text-muted);
   font-size: 10px;
-  line-height: 1.35;
+  line-height: 1.4;
+  text-align: center;
   backdrop-filter: blur(8px);
 }
+
+/*
+ * A fully reset button rather than a link or a `details` marker: the front-end
+ * design contract rules out platform-default chrome, and a disclosure triangle
+ * is drawn by the browser. Keyboard operation and the button role come free.
+ */
+.reference-attribution-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: #a8d9e5;
+  font: inherit;
+  font-weight: 600;
+  line-height: inherit;
+  cursor: pointer;
+  appearance: none;
+}
+
+.reference-attribution-toggle:hover { color: var(--text); }
+
+.reference-attribution-toggle:focus-visible {
+  outline: 2px solid #a8d9e5;
+  outline-offset: 2px;
+}
+
+.reference-attribution-caret {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  fill: currentColor;
+  transition: transform 0.15s ease;
+}
+
+.reference-attribution-toggle[aria-expanded="true"] .reference-attribution-caret {
+  transform: rotate(90deg);
+}
+
+/*
+ * Capped and scrolled rather than allowed to run: with every publisher, licence
+ * and retrieval date present, a scoped run's panel is short, and the full
+ * Caribbean scenario's is not.
+ */
+.reference-attribution-panel {
+  max-width: 100%;
+  max-height: min(42vh, 260px);
+  margin-bottom: 7px;
+  overflow-y: auto;
+  padding: 9px 11px;
+  border: 1px solid rgba(86, 167, 189, 0.32);
+  border-radius: 9px;
+  background: rgba(7, 19, 16, 0.94);
+  box-shadow: var(--shadow-panel);
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.45;
+  text-align: left;
+  backdrop-filter: blur(8px);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-bright) transparent;
+}
+
+.reference-attribution-panel::-webkit-scrollbar { width: 8px; }
+.reference-attribution-panel::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: var(--line-bright);
+}
+
+.reference-attribution-group { margin: 0 0 7px; }
+.reference-attribution-group:last-child { margin-bottom: 0; }
 
 .reference-attribution a {
   color: #a8d9e5;
