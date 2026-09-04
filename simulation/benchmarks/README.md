@@ -22,6 +22,8 @@ npm run sim -- --paired --seeds 42,8675309,7,19,23,31,101,202,303,404
 | `2026-09-02-after-engine-defects.json` / `.txt` | The same ten seeds after the three coordination fixes |
 | `2026-09-02-after-horizon-clamp.json` / `.txt` | The same ten seeds after demand generation became horizon-aware |
 | `2026-09-03-after-weather.json` / `.txt` | The same ten seeds after realised weather and forecasts (#37) |
+| `2026-09-04-after-inter-island.json` / `.txt` | The same ten seeds after scoped inter-island trade (#40); identical to the row above |
+| `2026-09-04-two-island.json` / `.txt` | Saint Lucia + Martinique, ten paired seeds, the only scope in this directory that can ship |
 
 There is no separate `before-horizon-clamp` file. The command was re-run on this
 branch immediately before the change and reproduced
@@ -250,6 +252,102 @@ What is left to argue with:
   is the part a better *harvest* forecast (#7) rather than better coordination
   would address. The weather forecast added here does not touch it: knowing a
   storm is coming does not create ready crop.
+
+## Inter-island trade changed nothing for one island, and very little for two
+
+Issue #40 adds ports, published sailings, a synthetic customs checkpoint,
+dual-currency pricing and regional coordination. Two things were measured.
+
+```bash
+# One island, the ten paired seeds above
+npm run sim -- --paired --seeds 42,8675309,7,19,23,31,101,202,303,404
+
+# Two islands joined by the one published FRS Express des Iles connection
+npm run sim -- --scenario caribbean-islands-v1 --islands saint-lucia,martinique \
+  --paired --seeds 42,8675309,7,19,23,31,101,202,303,404
+```
+
+| File | Contents |
+| --- | --- |
+| `2026-09-04-after-inter-island.json` / `.txt` | The same ten Saint Lucia paired seeds after issue #40 |
+| `2026-09-04-two-island.json` / `.txt` | Saint Lucia + Martinique, ten paired seeds, with the maritime column |
+
+### One island is bit-for-bit unchanged, and that is the design
+
+`2026-09-04-after-inter-island.json` reproduces
+`2026-09-03-after-weather.json` **digest for digest and metric for metric across
+all twenty runs**. Nothing moved, because nothing could: a one-island scope
+keeps Castries but no link, a link needs two in-scope ports on two different
+islands, and every maritime code path is gated on the scoped network having at
+least one. No new event is scheduled, no new identifier is drawn, and no new
+random stream is consumed.
+
+That is worth stating plainly because it is the only reason a coordination
+benchmark survives a change this size. The hero scenario is the comparison
+everything else in this repository is measured against, and issue #40 was built
+so that it did not have to move.
+
+### Two islands: honest numbers, and they are small
+
+Saint Lucia and Martinique are joined by one published connection (FRS Express
+des Iles, Fort-de-France to Castries, 1h30 non-stop). The scoped network is
+**2 ports and 1 link**. Both arms face the same 117 orders across the ten seeds.
+
+| | Baseline | Harvest |
+| --- | --- | --- |
+| Mean fulfilment | 4.3% | 5.2% |
+| Mean paired gap | — | **+1.0pp** |
+| Seeds won / lost / tied | — | 3 / 2 / 5 |
+
+Across the ten Harvest runs the maritime layer produced:
+
+| Measure | Value |
+| --- | --- |
+| Sailings proposed | 4 |
+| Sailings that cleared approval | 2 |
+| Delivered | 1 |
+| Failed at the checkpoint | 1 |
+| Kilograms shipped | 123.8 kg |
+| Synthetic freight + clearance | 372.86 XCD |
+| Sailings the realised weather lengthened | 2 |
+| Customs inspections | 0 |
+| Orders that needed a route the dataset does not record | 0 |
+
+**Four sailings over 117 orders is not a transformation, and it is not
+presented as one.** Three things hold it down, and none of them was tuned away:
+
+- **The regional scenario is thin.** Each island carries three smallholdings,
+  and `NO_READY_SUPPLY` is still the largest cause on both arms (66 of 111
+  Harvest misses). Regional coordination cannot move crop that nobody has
+  reported as ready, on either island.
+- **The approval gate is real and it declines.** `APPROVAL_REJECTED` rises from
+  0 to 26 across the ten Harvest runs, because the approver re-checks a promise
+  against current evidence and two hours of decay is often enough to fail it.
+  Two of the four proposed sailings never bound anybody. That is the boundary
+  doing its job, not a defect.
+- **Shipping is genuinely risky here.** One of the two approved sailings failed
+  outright, and two were lengthened by weather on the crossing. The synthetic
+  failure probability is 8% per sailing; on a sample of two, losing one is
+  unremarkable and it still cost the run a whole order.
+
+Where Harvest does win it is mostly *not* the boat. Its `SPOILED_BEFORE_PICKUP`
+count falls from 28 to 1, which is the readiness-driven collection from issue
+#53 doing the work, and its `INSUFFICIENT_SUPPLY` rises from 4 to 15 because it
+promises less. Seed 202 is the one seed where a sailing visibly helps: one
+53 kg consignment arrives and the fulfilment gap on that seed is +9.1pp.
+
+Seeds 19 and 23 are the honest losses. On 19 Harvest proposed a cross-island
+fill, had it declined at the gate, and ended the run behind a baseline that had
+promised more and delivered some of it.
+
+### What these numbers are not
+
+Every figure on this page is a seeded simulation output. The ports, the ferry
+link and the exchange rates are cited public references; the capacity, the
+freight price, the customs behaviour, the failure probability and every outcome
+above are synthetic demonstration assumptions. A published ferry route is not
+evidence that a produce service exists on it, and nothing here is evidence that
+a deployed system would move a single kilogram between two islands.
 
 ## Determinism
 

@@ -260,6 +260,83 @@ repository root to rebuild the snapshot, then review the generated diff. See
 [`docs/caribbean-scenario-data.md`](../docs/caribbean-scenario-data.md) for the
 source, licence, safe-field rules and limitations.
 
+## Scoped inter-island trade (#40)
+
+`src/world/maritime.ts` loads the reviewed offline network in
+`data/caribbean-maritime-network.v1.json` (34 ports, 13 published links, 13
+currencies, every record carrying its own source, licence and retrieval date;
+see [`data/README-maritime.md`](data/README-maritime.md)) and restricts it to
+the islands a run selected.
+
+**Scope is applied once, when the world is built.** A link survives only when
+*both* of its ports are on in-scope islands, so:
+
+- one island keeps its port and has **no links**, and therefore no shipment;
+- two islands can only use a connection between those two, and cannot see a
+  third island's port at all;
+- two published links that meet at a shared island are **not** chained into a
+  through-service, because no source publishes one;
+- where the dataset records no connection, none is invented. The run records
+  `NO_PUBLIC_ROUTE` against the order instead, which is a different failure from
+  `NO_READY_SUPPLY` (there was crop) and from `INSUFFICIENT_SUPPLY` (the promise
+  was not too small — there was no boat).
+
+Every maritime code path is gated on the scoped network having at least one
+link, which is why a one-island run reproduces its pre-#40 digests exactly.
+
+### What is public reference and what is synthetic
+
+| Public reference (cited, licensed) | Synthetic (invented here) |
+| --- | --- |
+| Port identity and coordinates | Capacity per sailing (`SAILING_CAPACITY_KG`) |
+| That a scheduled service exists between two ports | That *produce* moves on it at all |
+| A journey time the operator published | A journey time where none was published, labelled `SYNTHETIC_DEFAULT` |
+| Exchange rates and their `asOf` date | Freight price, clearance fee, every amount converted |
+| — | Customs documentation, inspection, delay and cost |
+| — | Sailing failure probability, weather delay, and every outcome |
+
+Both labels travel on every structure that leaves this package
+(`networkProvenance` and `operationsProvenance`), because one label for a
+shipment would let a reader take the synthetic half for cited evidence.
+
+### The shipment
+
+A cross-island commitment produces a `MARITIME` delivery mission with three
+legs: a local pickup run to the origin port, the published sea leg, and a local
+delivery run from the destination port to the buyer. Statuses are `SCHEDULED`,
+`DEPARTED`, `DELAYED`, `ARRIVED`, `DELIVERED` and `FAILED`.
+
+- **Capacity** binds at planning time; a consignment is never promised past the
+  synthetic per-sailing allowance.
+- **Weather** acts on the sea leg at sailing, reusing #37's storm effect, and
+  only then — at planning time that day has not happened.
+- **Customs** is a synthetic documentation check at the destination port with a
+  seeded inspection delay and a fixed cost line. **It is not a legal customs
+  model** and carries a disclaimer saying so on every instance.
+- **Failure** is a seeded per-sailing draw, held as hidden truth in the same
+  sense a scheduled disruption is. A failed consignment is scored
+  `SHIPMENT_FAILED`, not as spoilage: nothing rotted, a boat lost it.
+- **Currency**: every cross-island price is stated in the destination island's
+  currency and in XCD, with the fixed offline rate that connects them. No live
+  financial API is called, during a run or a replay.
+
+### Regional coordination
+
+Only the Harvest policy coordinates across islands
+(`PolicyCapabilities.coordinatesAcrossIslands`); the baseline declares it does
+not, which is what keeps the paired benchmark fair. When the buyer's own island
+comes up short, the policy ranks each reachable in-scope island on a documented
+deterministic score — coverage including capacity, evidence freshness, transit
+time against the time remaining, synthetic cost per kilogram, and risk — and
+proposes at most one source island and one sailing. No random stream is touched.
+
+The proposal then takes the **`INTER_ISLAND_COMMITMENT` approval gate**, which
+`AGENTS.md` requires. In the engine's own policy mode that is
+`approveCommitment`; in a connected run it is real Product API approvals from
+the buyer and every far-island grower whose crop it commits. Until the last
+approval lands there is no shipment object at all, so the gate cannot be
+bypassed by forgetting to read a flag.
+
 ## Responsibilities
 
 - Simulated clock, random seed, scenario state, and synthetic actors.

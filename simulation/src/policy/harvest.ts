@@ -27,11 +27,23 @@
 import type {
   AllocationProposal,
   CoordinationPolicy,
+  InterIslandFill,
+
   PolicyContext,
   RecoveryProposal,
 } from './types.js';
 import type { BuyerDemand, Commitment, ObservedCropBatch, ObservedDisruption } from '../world/types.js';
-import { DAY_MS, formatDate } from '../core/time.js';
+import { DAY_MS, HOUR_MS, formatDate } from '../core/time.js';
+import {
+  CUSTOMS_BASE_DELAY_HOURS,
+  FREIGHT_PER_KG_XCD,
+  PORT_HANDLING_HOURS,
+  SAILING_CAPACITY_KG,
+  SAILING_FAILURE_PROBABILITY,
+  bestRouteBetween,
+  reachableIslandIds,
+  shipmentCostXcd,
+} from '../world/maritime.js';
 import { STALE_OBSERVATION_MS } from './baseline.js';
 
 /**
@@ -93,6 +105,9 @@ export const harvestPolicy: CoordinationPolicy = {
     maxHoldMs: MAX_READY_HOLD_MS,
     rematchOnNewSupply: true,
     readsForecast: true,
+    // Only ever *considered*: whether a sailing exists at all is a property of
+    // the scoped public-reference network, and a one-island run has none.
+    coordinatesAcrossIslands: true,
   },
 
   estimateAvailableKg(context: PolicyContext, batch: ObservedCropBatch): number {
@@ -236,9 +251,43 @@ export const harvestPolicy: CoordinationPolicy = {
       remaining -= take;
     }
 
+    // Regional coordination. Only when the local island has come up short, and
+    // only over islands the run actually selected: `context.maritime` was
+    // filtered to the run scope before the policy ever saw it, so there is no
+    // out-of-scope island to reach for even by mistake.
+    const localPromised = allocations.reduce((total, allocation) => total + allocation.quantityKg, 0);
+    const interIsland = harvestPolicy.capabilities.coordinatesAcrossIslands
+      ? planInterIslandFill(context, demand, buyer.islandId, wanted - localPromised)
+      : null;
+    if (interIsland) allocations.push(...interIsland.allocations);
+
     if (allocations.length === 0) return null;
 
     const promised = allocations.reduce((total, allocation) => total + allocation.quantityKg, 0);
+
+    if (interIsland) {
+      context.record({
+        kind: 'HARVEST_PROPOSE_INTER_ISLAND',
+        summary:
+          `Local supply covered ${localPromised.toFixed(0)} kg of ${wanted.toFixed(0)} kg, so ` +
+          `${interIsland.shippedKg.toFixed(0)} kg was proposed from ${interIsland.proposal.originIslandId} ` +
+          `by ${interIsland.proposal.route.operator}, subject to inter-island approval.`,
+        evidence: {
+          demandId: demand.demandId,
+          originIslandId: interIsland.proposal.originIslandId,
+          destinationIslandId: interIsland.proposal.destinationIslandId,
+          linkId: interIsland.proposal.route.linkId,
+          originPortId: interIsland.proposal.route.originPortId,
+          destinationPortId: interIsland.proposal.route.destinationPortId,
+          seaLegHours: interIsland.proposal.route.seaLegHours,
+          journeyHoursSource: interIsland.proposal.route.journeyHoursSource,
+          shippedKg: Number(interIsland.shippedKg.toFixed(2)),
+          score: Number(interIsland.score.toFixed(4)),
+          rationale: interIsland.proposal.rationale,
+          approvalSubjectType: 'INTER_ISLAND_COMMITMENT',
+        },
+      });
+    }
 
     context.record({
       kind: 'HARVEST_PROPOSE_ALLOCATION',
@@ -261,8 +310,14 @@ export const harvestPolicy: CoordinationPolicy = {
       // A commitment binds a farmer to deliver; architecture requires a human
       // to clear that.
       requiresApproval: true,
+      ...(interIsland ? { interIsland: interIsland.proposal } : {}),
     };
   },
+
+  // Exposed on the policy so the connected Product API flow can ask for the
+  // regional decision alone, without also asking for local matching that the
+  // Product API owns in that mode.
+  planInterIslandFill,
 
   approveCommitment(context: PolicyContext, commitment: Commitment): boolean {
     // The approver's job is to re-check the promise against current evidence,
@@ -368,3 +423,193 @@ function heavyRainSince(context: PolicyContext, islandId: string): number | null
 
 /** How far ahead the Harvest policy is willing to plan a pickup. */
 export const PLANNING_HORIZON_MS = 3 * DAY_MS;
+
+// ---------------------------------------------------------------------------
+// Regional coordination
+//
+// What follows is the "consider supply on other in-scope islands when the local
+// island cannot cover an order" behaviour of issue #40. Three properties matter
+// more than the arithmetic:
+//
+//   1. It is *deterministic*. No random stream is touched; the ranking is a
+//      pure function of observed evidence, the scoped network and the clock, so
+//      the same scope, seed and policy reproduce the same choice.
+//   2. It never invents connectivity. `bestRouteBetween` returns null when the
+//      reviewed dataset records no published service between the two islands,
+//      and this function then declines rather than drawing a line.
+//   3. Every quantity it proposes is still revalidated by the engine, exactly
+//      as a local allocation is.
+// ---------------------------------------------------------------------------
+
+/**
+ * Below this, do not put a consignment on a boat.
+ *
+ * A sailing carries a fixed customs fee and a fixed chance of failing, so a few
+ * kilograms crossing a border costs more in both than it can be worth.
+ * SYNTHETIC, like every other operational figure in this package.
+ */
+export const MIN_INTER_ISLAND_SHIPMENT_KG = 25;
+
+/**
+ * The ranking weights, and what each one is measuring.
+ *
+ * They are stated as named constants rather than folded into one expression so
+ * that the trade-off is legible and arguable: this is a coordination judgement,
+ * not a tuned model, and nothing was fitted to make a benchmark look better.
+ * The two positive terms are what an island offers; the three negative terms
+ * are what taking it costs.
+ */
+/** How much of the shortfall this island can actually cover, capacity included. */
+const COVERAGE_WEIGHT = 0.4;
+/** How fresh the evidence behind that supply is. A stale report is a weak offer. */
+const READINESS_WEIGHT = 0.2;
+/** Door-to-door hours measured against the time the buyer has left. */
+const TIME_WEIGHT = 0.15;
+/** Synthetic freight and clearance per kilogram. */
+const COST_WEIGHT = 0.15;
+/** Sailing failure, plus the extra doubt attached to an unpublished journey time. */
+const RISK_WEIGHT = 0.1;
+
+/**
+ * Cost per kilogram treated as "expensive", for normalising the cost term.
+ *
+ * Twice the per-kilogram freight rate: a consignment large enough to amortise
+ * the fixed clearance fee lands near half of this and scores well, a small one
+ * pushes past it and is penalised. SYNTHETIC.
+ */
+const REFERENCE_COST_PER_KG_XCD = FREIGHT_PER_KG_XCD * 2;
+
+/** Extra risk carried by a route whose sea-leg duration nobody published. */
+const UNPUBLISHED_JOURNEY_RISK = 0.15;
+
+/** One island's offer, ranked. `shippedKg` and `score` are ranking working. */
+interface RankedInterIslandFill extends InterIslandFill {
+  shippedKg: number;
+  score: number;
+}
+
+/** Total door-to-door hours for a sailing, excluding the two road legs. */
+export function interIslandTransitHours(seaLegHours: number): number {
+  return PORT_HANDLING_HOURS * 2 + seaLegHours + CUSTOMS_BASE_DELAY_HOURS;
+}
+
+function clampUnit(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+/**
+ * Picks at most one source island for the part of an order the local island
+ * cannot cover, and the sailing to bring it over.
+ *
+ * One island rather than several: each extra source is another sailing, another
+ * clearance fee and another independent chance of failure, and an order that
+ * needs two boats is an order Harvest should decline rather than a cleverer
+ * plan. Returns null when there is no shortfall worth shipping, no reachable
+ * in-scope island with evidenced supply, or no published route to one.
+ */
+function planInterIslandFill(
+  context: PolicyContext,
+  demand: BuyerDemand,
+  destinationIslandId: string,
+  shortfallKg: number,
+): RankedInterIslandFill | null {
+  if (shortfallKg < MIN_INTER_ISLAND_SHIPMENT_KG) return null;
+  if (context.maritime.links.length === 0) return null;
+
+  const hoursUntilNeeded = (demand.neededBy - context.now) / HOUR_MS;
+  if (hoursUntilNeeded <= 0) return null;
+
+  const reachable = reachableIslandIds(context.maritime, destinationIslandId);
+  if (reachable.length === 0) return null;
+
+  let best: RankedInterIslandFill | null = null;
+
+  for (const originIslandId of reachable) {
+    const route = bestRouteBetween(context.maritime, originIslandId, destinationIslandId);
+    if (!route) continue;
+
+    const transitHours = interIslandTransitHours(route.seaLegHours);
+    // No point promising a boat that berths after the kitchen needed the crop.
+    if (transitHours >= hoursUntilNeeded) continue;
+
+    // Exactly the local candidate rule, applied to the other island: a batch
+    // someone has reported READY, whose stated window has opened, and which
+    // still has discounted supply left after what is already promised.
+    const candidates = [...context.observed.batches.values()]
+      .filter((batch) => batch.crop === demand.crop)
+      .filter((batch) => context.farms.get(batch.farmId)?.islandId === originIslandId)
+      .filter((batch) => batch.lastReportedStage === 'READY')
+      .filter((batch) => batch.expectedReadyFrom <= demand.neededBy)
+      .map((batch) => ({ batch, availableKg: harvestPolicy.estimateAvailableKg(context, batch) }))
+      .filter((candidate) => candidate.availableKg > 0)
+      .sort((a, b) => b.availableKg - a.availableKg || a.batch.batchId.localeCompare(b.batch.batchId));
+    if (candidates.length === 0) continue;
+
+    // Capacity binds here, not later: one sailing carries one synthetic
+    // allowance, and promising past it would be promising space that does not
+    // exist on the boat this policy just chose.
+    const shippableKg = Math.min(shortfallKg, SAILING_CAPACITY_KG);
+    const allocations: Array<{ batchId: string; farmId: string; quantityKg: number }> = [];
+    let remaining = shippableKg;
+    let freshnessTotal = 0;
+    for (const candidate of candidates) {
+      if (remaining <= 0) break;
+      const take = Math.min(remaining, candidate.availableKg);
+      if (take < 1) continue;
+      allocations.push({
+        batchId: candidate.batch.batchId,
+        farmId: candidate.batch.farmId,
+        quantityKg: Number(take.toFixed(2)),
+      });
+      const ageMs =
+        candidate.batch.lastObservedAt === null ? STALE_OBSERVATION_MS : context.now - candidate.batch.lastObservedAt;
+      freshnessTotal += 1 - clampUnit(ageMs / STALE_OBSERVATION_MS);
+      remaining -= take;
+    }
+
+    const shippedKg = allocations.reduce((total, allocation) => total + allocation.quantityKg, 0);
+    if (shippedKg < MIN_INTER_ISLAND_SHIPMENT_KG) continue;
+
+    const cost = shipmentCostXcd(shippedKg);
+    const coverage = clampUnit(shippedKg / shortfallKg);
+    const readiness = allocations.length > 0 ? clampUnit(freshnessTotal / allocations.length) : 0;
+    const timePressure = clampUnit(transitHours / hoursUntilNeeded);
+    const costPressure = clampUnit(cost.totalXcd / shippedKg / REFERENCE_COST_PER_KG_XCD);
+    const risk = clampUnit(
+      SAILING_FAILURE_PROBABILITY + (route.journeyHoursSource === 'SYNTHETIC_DEFAULT' ? UNPUBLISHED_JOURNEY_RISK : 0),
+    );
+
+    const score =
+      COVERAGE_WEIGHT * coverage +
+      READINESS_WEIGHT * readiness -
+      TIME_WEIGHT * timePressure -
+      COST_WEIGHT * costPressure -
+      RISK_WEIGHT * risk;
+
+    const rationale =
+      `${shippedKg.toFixed(0)} kg covering ${Math.round(coverage * 100)}% of the shortfall, ` +
+      `${transitHours.toFixed(1)} h door to door against ${hoursUntilNeeded.toFixed(1)} h remaining, ` +
+      `${(cost.totalXcd / shippedKg).toFixed(2)} XCD/kg, ` +
+      `${route.journeyHoursSource === 'PUBLIC_TIMETABLE' ? 'published' : 'synthetic-default'} sailing time.`;
+
+    const candidateFill: RankedInterIslandFill = {
+      proposal: {
+        originIslandId,
+        destinationIslandId,
+        route,
+        batchIds: allocations.map((allocation) => allocation.batchId),
+        rationale,
+      },
+      allocations,
+      shippedKg,
+      score,
+    };
+
+    // Strictly greater, and `reachable` is sorted, so an exact tie keeps the
+    // alphabetically first island. A tiebreak that depended on iteration order
+    // would make the run irreproducible.
+    if (best === null || candidateFill.score > best.score) best = candidateFill;
+  }
+
+  return best;
+}
