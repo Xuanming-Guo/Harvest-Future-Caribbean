@@ -183,12 +183,14 @@ export const UNMET_CAUSES = [
   /**
    * The run's horizon closed before the buyer's window did.
    *
-   * Demand generation no longer raises an order it cannot follow through to
-   * settlement, so on the hero scenario this stays at zero. It is kept as a
-   * guard rather than deleted: a scenario, an injected effect or a future
-   * demand source could reintroduce one, and letting such an order fall
-   * through to `MISSION_LATE` would read as a coordination failure that
-   * never happened.
+   * The run now keeps going for a settlement window after buyers stop
+   * ordering, long enough for the latest deadline the ordering window can
+   * produce, so on the hero scenario this stays at zero because every order
+   * raised is followed through rather than because late orders are withheld.
+   * It is kept as a guard: a scenario with a shorter settlement window, an
+   * injected effect or a future demand source could reintroduce one, and
+   * letting such an order fall through to `MISSION_LATE` would read as a
+   * coordination failure that never happened.
    */
   'HORIZON_TRUNCATED',
   /** Nothing was promised: no batch had evidence recent enough to commit against. */
@@ -342,6 +344,9 @@ export class SimulationEngine {
 
   private clock: SimulationInstant;
   private readonly startsAt: SimulationInstant;
+  /** Last instant a buyer may raise an order. The ordering window closes here. */
+  private readonly demandEndsAt: SimulationInstant;
+  /** Last instant of the run, ordering window plus settlement window. */
   private readonly endsAt: SimulationInstant;
   private status: RunStatus = 'READY';
   private eventsProcessed = 0;
@@ -366,7 +371,11 @@ export class SimulationEngine {
     this.ids = new IdFactory(this.random.stream('ids'));
 
     this.startsAt = parseInstant(this.scenario.startsAtIso);
-    this.endsAt = this.startsAt + this.scenario.durationDays * DAY_MS;
+    // Two horizons, not one. Buyers order until `demandEndsAt`; the run keeps
+    // running to `endsAt` so the last orders raised can be delivered, settled
+    // and scored inside the window they were given.
+    this.demandEndsAt = this.startsAt + this.scenario.durationDays * DAY_MS;
+    this.endsAt = this.demandEndsAt + this.scenario.settlementDays * DAY_MS;
     this.clock = this.startsAt;
 
     // Always consume the deterministic id draw. The Product API may replace
@@ -424,8 +433,8 @@ export class SimulationEngine {
   }
 
   /** Scenario horizon for deterministic day stepping. */
-  get horizon(): { startsAt: SimulationInstant; endsAt: SimulationInstant } {
-    return { startsAt: this.startsAt, endsAt: this.endsAt };
+  get horizon(): { startsAt: SimulationInstant; demandEndsAt: SimulationInstant; endsAt: SimulationInstant } {
+    return { startsAt: this.startsAt, demandEndsAt: this.demandEndsAt, endsAt: this.endsAt };
   }
 
   /** Next queued physical instant, or null once only horizon settlement remains. */
@@ -993,12 +1002,18 @@ export class SimulationEngine {
     const stream = this.random.stream(`actor:${buyerId}:demand`);
     const quantityKg = Math.max(20, Math.round(stream.normal(buyer.typicalOrderKg, buyer.typicalOrderKg * 0.2)));
     const neededBy = this.clock + stream.int(3, 7) * DAY_MS;
-    // Drawn before the horizon guard below rather than after it, so this
-    // buyer's ordering rhythm, and every later draw on its stream, is the same
+    // Drawn before the ordering-window guard below rather than after it, so
+    // this buyer's rhythm, and every later draw on its stream, is the same
     // whether or not this particular order is raised.
     const nextOrderAt = this.clock + stream.int(4, 8) * DAY_MS;
 
-    if (this.settlesWithinHorizon(neededBy)) {
+    // Orders are raised inside the ordering window only. The deadline is not
+    // consulted: the settlement window exists precisely so that a deadline
+    // running past the ordering window is a normal order rather than one the
+    // run has to refuse. The buyer keeps its later check-ins either way, which
+    // is what lets a connected run keep approving and dispatching through the
+    // settlement window.
+    if (this.clock <= this.demandEndsAt) {
       const demand: BuyerDemand = {
         demandId: this.ids.next(),
         buyerId,
@@ -1031,14 +1046,14 @@ export class SimulationEngine {
    * `schedule` drops anything past the horizon, so a demand whose
    * `DEMAND_DEADLINE` falls outside the window never fires one: it sits
    * PENDING until `settleOutstandingDemand` sweeps it up and scores it short.
-   * The order was never given the days it asked for, so counting it against a
-   * coordinator measures the length of the run rather than the policy. Demand
-   * generation withholds those orders instead.
+   * Counting that against a coordinator measures the length of the run rather
+   * than the policy.
    *
-   * Withholding rather than clamping is deliberate. Pulling `neededBy` back
-   * inside the window would keep the order but turn it into an unusually
-   * urgent one, manufacturing exactly the tight deadlines a coordination
-   * benchmark is most sensitive to.
+   * The settlement window is what makes this true by construction on the hero
+   * scenario: the latest deadline the last ordering day can draw, plus the
+   * substitution grace, still lands before `endsAt`. This stays as a guard, so
+   * a scenario with too short a settlement window, or an injected effect,
+   * cannot have such an order silently recorded as a late delivery instead.
    */
   private settlesWithinHorizon(neededBy: SimulationInstant): boolean {
     return neededBy + SUBSTITUTION_GRACE_MS <= this.endsAt;
@@ -1766,12 +1781,11 @@ export class SimulationEngine {
    * reaches a policy, and it changes nothing about the run.
    */
   private classifyDemand(demand: BuyerDemand): UnmetCause {
-    // The scenario horizon closed before the buyer's window did, so this order
-    // was never given a chance rather than being coordinated badly. Demand
-    // generation now declines to raise these at all, so this rung should be
-    // unreachable on the hero scenario. It stays because a scenario or an
-    // injected effect could still produce one, and such an order must not be
-    // mistaken for a late delivery.
+    // The run closed before the buyer's window did, so this order was never
+    // given a chance rather than being coordinated badly. The settlement
+    // window makes this rung unreachable on the hero scenario. It stays
+    // because another scenario's window could be too short, and such an order
+    // must not be mistaken for a late delivery.
     if (!this.settlesWithinHorizon(demand.neededBy)) return 'HORIZON_TRUNCATED';
 
     const commitments = [...this.world.observed.commitments.values()].filter(
@@ -1895,6 +1909,7 @@ export class SimulationEngine {
       policy: this.policy.name,
       seed: this.seed,
       startsAt: formatInstant(this.startsAt),
+      demandEndsAt: formatInstant(this.demandEndsAt),
       endsAt: formatInstant(this.endsAt),
       farms: [...this.world.farms.values()].map((farm) => ({
         farmId: farm.farmId,

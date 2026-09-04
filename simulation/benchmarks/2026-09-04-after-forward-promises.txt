@@ -1,0 +1,40 @@
+
+Scenario: saint-lucia-demo-v1
+SYNTHETIC. Licensed public place references provide geographic context; every actor, yield, price, demand, road speed and spoilage figure is invented. A nearby reference does not imply participation.
+
+BASELINE  seed=42         fulfilled=  9.1%  localSupply= 14.2%  waste=   3387kg  substituted=   2535kg  demands= 1/11  events=  111  digest=0fc70ed50f68dcd4  causes=NO_READY_SUPPLY:4,NOT_READY_IN_TIME:4,SPOILED_BEFORE_PICKUP:1,INSUFFICIENT_SUPPLY:1
+HARVEST   seed=42         fulfilled= 45.5%  localSupply= 50.8%  waste=   2639kg  substituted=   1454kg  demands= 5/11  events=  148  digest=82907a6182482d95  causes=NO_READY_SUPPLY:1,APPROVAL_REJECTED:2,MISSION_LATE:1,SPOILED_BEFORE_PICKUP:1,INSUFFICIENT_SUPPLY:1
+BASELINE  seed=8675309    fulfilled=  0.0%  localSupply= 27.9%  waste=   2886kg  substituted=   2218kg  demands= 0/12  events=  116  digest=7788f66a072f41aa  causes=NO_READY_SUPPLY:6,MISSION_LATE:1,NOT_READY_IN_TIME:1,SPOILED_BEFORE_PICKUP:3,INSUFFICIENT_SUPPLY:1
+HARVEST   seed=8675309    fulfilled= 41.7%  localSupply= 52.1%  waste=   2247kg  substituted=   1325kg  demands= 5/12  events=  179  digest=eda6deab7ce880bb  causes=APPROVAL_REJECTED:1,MISSION_LATE:1,SPOILED_BEFORE_PICKUP:2,INSUFFICIENT_SUPPLY:3
+BASELINE  seed=7          fulfilled= 10.0%  localSupply= 12.9%  waste=   4263kg  substituted=   2186kg  demands= 1/10  events=  106  digest=c4febdd089af76a4  causes=NO_READY_SUPPLY:3,NOT_READY_IN_TIME:4,INSUFFICIENT_SUPPLY:2
+HARVEST   seed=7          fulfilled= 50.0%  localSupply= 48.8%  waste=   3455kg  substituted=   1284kg  demands= 5/10  events=  139  digest=884696da07fd8c52  causes=APPROVAL_REJECTED:3,MISSION_LATE:2
+BASELINE  seed=19         fulfilled= 15.4%  localSupply= 20.1%  waste=   3494kg  substituted=   2601kg  demands= 2/13  events=  113  digest=92923c02b30c2970  causes=NO_READY_SUPPLY:7,NOT_READY_IN_TIME:3,SPOILED_BEFORE_PICKUP:1
+HARVEST   seed=19         fulfilled= 53.8%  localSupply= 44.0%  waste=   2702kg  substituted=   1821kg  demands= 7/13  events=  156  digest=4c5f9eac2c5b02ed  causes=APPROVAL_REJECTED:4,SPOILED_BEFORE_PICKUP:1,INSUFFICIENT_SUPPLY:1
+BASELINE  seed=23         fulfilled= 20.0%  localSupply= 28.6%  waste=   2105kg  substituted=   1973kg  demands= 2/10  events=  110  digest=f7ce93dffb1d0d81  causes=NO_READY_SUPPLY:5,NOT_READY_IN_TIME:1,SPOILED_BEFORE_PICKUP:1,INSUFFICIENT_SUPPLY:1
+HARVEST   seed=23         fulfilled= 20.0%  localSupply= 17.4%  waste=   2330kg  substituted=   2283kg  demands= 2/10  events=  145  digest=d90bf2f1a81500df  causes=NO_READY_SUPPLY:4,APPROVAL_REJECTED:2,NOT_READY_IN_TIME:1,INSUFFICIENT_SUPPLY:1
+BASELINE  seed=31         fulfilled= 15.4%  localSupply= 22.5%  waste=   3515kg  substituted=   2358kg  demands= 2/13  events=  111  digest=7945942035aedb0e  causes=NO_READY_SUPPLY:10,NOT_READY_IN_TIME:1
+HARVEST   seed=31         fulfilled= 53.8%  localSupply= 60.3%  waste=   2651kg  substituted=   1208kg  demands= 7/13  events=  181  digest=e1fdf98d4ab0ff31  causes=NO_READY_SUPPLY:1,APPROVAL_REJECTED:1,NOT_READY_IN_TIME:1,INSUFFICIENT_SUPPLY:3
+BASELINE  seed=101        fulfilled=  8.3%  localSupply= 18.7%  waste=   2208kg  substituted=   2507kg  demands= 1/12  events=  112  digest=c36a78f89dce2c63  causes=NO_READY_SUPPLY:5,NOT_READY_IN_TIME:3,INSUFFICIENT_SUPPLY:3
+HARVEST   seed=101        fulfilled= 25.0%  localSupply= 36.8%  waste=   1776kg  substituted=   1949kg  demands= 3/12  events=  156  digest=0595845d80319efe  causes=NO_READY_SUPPLY:3,APPROVAL_REJECTED:2,NOT_READY_IN_TIME:1,SPOILED_BEFORE_PICKUP:1,INSUFFICIENT_SUPPLY:2
+BASELINE  seed=202        fulfilled=  0.0%  localSupply=  7.7%  waste=   3939kg  substituted=   2675kg  demands= 0/10  events=  103  digest=2fe3605f159fe5ac  causes=NO_READY_SUPPLY:6,NOT_READY_IN_TIME:3,INSUFFICIENT_SUPPLY:1
+HARVEST   seed=202        fulfilled= 60.0%  localSupply= 55.7%  waste=   2662kg  substituted=   1212kg  demands= 6/10  events=  154  digest=c41ee90d57cdde6e  causes=APPROVAL_REJECTED:2,SPOILED_BEFORE_PICKUP:1,INSUFFICIENT_SUPPLY:1
+BASELINE  seed=303        fulfilled=  8.3%  localSupply=  6.0%  waste=   2042kg  substituted=   2919kg  demands= 1/12  events=  104  digest=3d6dd7312973bd59  causes=NO_READY_SUPPLY:6,NOT_READY_IN_TIME:3,SPOILED_BEFORE_PICKUP:1,INSUFFICIENT_SUPPLY:1
+HARVEST   seed=303        fulfilled= 33.3%  localSupply= 30.6%  waste=   1477kg  substituted=   2156kg  demands= 4/12  events=  149  digest=a136bad5cfffc43a  causes=NO_READY_SUPPLY:2,APPROVAL_REJECTED:1,MISSION_LATE:2,SPOILED_BEFORE_PICKUP:1,INSUFFICIENT_SUPPLY:2
+BASELINE  seed=404        fulfilled=  0.0%  localSupply=  1.3%  waste=   2865kg  substituted=   2627kg  demands= 0/11  events=  110  digest=e20606edb82b356f  causes=NO_READY_SUPPLY:4,NOT_READY_IN_TIME:6,INSUFFICIENT_SUPPLY:1
+HARVEST   seed=404        fulfilled= 45.5%  localSupply= 63.7%  waste=   1723kg  substituted=    932kg  demands= 5/11  events=  160  digest=2bc79e36854f1bb4  causes=APPROVAL_REJECTED:1,MISSION_LATE:2,NOT_READY_IN_TIME:2,SPOILED_BEFORE_PICKUP:1
+
+Paired comparison (same world, policy is the only difference):
+  seed=42  fulfilment +36.4pp  waste -748kg  substituted -1081kg
+  seed=8675309  fulfilment +41.7pp  waste -639kg  substituted -893kg
+  seed=7  fulfilment +40.0pp  waste -808kg  substituted -903kg
+  seed=19  fulfilment +38.5pp  waste -792kg  substituted -780kg
+  seed=23  fulfilment +0.0pp  waste +225kg  substituted +310kg
+  seed=31  fulfilment +38.5pp  waste -865kg  substituted -1149kg
+  seed=101  fulfilment +16.7pp  waste -432kg  substituted -559kg
+  seed=202  fulfilment +60.0pp  waste -1277kg  substituted -1463kg
+  seed=303  fulfilment +25.0pp  waste -565kg  substituted -763kg
+  seed=404  fulfilment +45.5pp  waste -1142kg  substituted -1695kg
+
+SYNTHETIC SIMULATED COUNTERFACTUAL. Produced by a seeded simulation, not measured from a deployed system. Not evidence of real-world impact.
+Completed 20 run(s) in 35 ms.
+

@@ -21,138 +21,143 @@ npm run sim -- --paired --seeds 42,8675309,7,19,23,31,101,202,303,404
 | `2026-09-02-before.json` / `.txt` | Ten paired seeds at `origin/main`, before any issue #53 fix |
 | `2026-09-02-after-engine-defects.json` / `.txt` | The same ten seeds after the three coordination fixes |
 | `2026-09-02-after-horizon-clamp.json` / `.txt` | The same ten seeds after demand generation became horizon-aware |
+| `2026-09-04-after-forward-promises.json` / `.txt` | The same ten seeds after forward promises and the settlement window (#91) |
 
-There is no separate `before-horizon-clamp` file. The command was re-run on this
-branch immediately before the change and reproduced
-`2026-09-02-after-engine-defects.json` metric for metric and digest for digest,
-so that file is the pre-clamp column and a copy of it would only be a copy.
+There is no separate "before forward promises" file. The command was re-run on
+this branch immediately before the change and reproduced
+`2026-09-02-after-horizon-clamp.json` metric for metric and digest for digest,
+so that file is the pre-change column and a copy of it would only be a copy. The
+same is true one change earlier, which is why there is no
+`before-horizon-clamp` file either.
 
-## The world moved this time, and the baseline moved with it
+## The order book is back to its full size, and the run is longer
 
-The three coordination fixes were policy and scheduling logic, so the baseline
-arm came out bit-for-bit identical and the comparison could be read as a clean
-policy delta. **The horizon clamp is not like that.** It changes demand
-generation, which is part of the world, so both arms see a different and smaller
-set of orders, and every baseline digest changed.
+The horizon clamp took `HORIZON_TRUNCATED` to zero by refusing to raise 29 of
+114 orders. A hotel ordering on day 20 for delivery on day 25 is a normal order,
+and a benchmark that declines to score it is answering an easier question than
+the one asked. The run now has a **7-day settlement window**: buyers still order
+for 21 days, the run continues to day 28, and every order raised is followed
+through to a real outcome. `HORIZON_TRUNCATED` is still zero, now by
+construction rather than by omission.
 
-What changed is stated precisely rather than waved at. A buyer whose next
-`neededBy` plus the twelve-hour substitution grace would fall after the
-twenty-one-day horizon no longer raises that order at all. Over the ten seeds
-that withholds **29 of 114 orders**. Both policies face the identical reduced
-order book, drawn from the same seeded streams in the same sequence, so the
-pairing that makes the comparison meaningful is intact.
-
-The deadline is *withheld*, never pulled back inside the window. Clamping
-`neededBy` would have kept all 114 orders and turned the late ones into
-unusually urgent ones, manufacturing exactly the tight deadlines a coordination
-benchmark is most sensitive to.
-
-For the baseline the removed orders cost it nothing physical. Per seed, its
-waste, accepted kilograms, completed deliveries and count of fully met orders
-are **identical** before and after the clamp; only four approvals that never led
-to a delivery disappear along with the orders they were for. Its fulfilment
-*rate* rises because the denominator shrank, not because it did anything better.
-
-For Harvest the removed orders were not all failures. Of the 29, twenty were
-scored `HORIZON_TRUNCATED` and nine Harvest had actually delivered in full
-before the run ended, despite their settlement falling outside the window. The
-clamp therefore takes real wins away from Harvest as well as artefactual losses
-from the baseline, and Harvest's waste rises slightly because crop those nine
-orders would have absorbed is now left in the field.
+At the same time Harvest may promise a crop that is still growing, dated from
+the grower's own forecast window, and collect it when the growers report it
+ready. Both changes move the world, so **every baseline digest is different**
+and the comparison below crosses two different order books: 85 orders before,
+114 after. Within each column both arms face the identical book from the same
+seeded streams in the same order, which is what makes the pairing meaningful;
+comparing a Harvest figure in one column against a Harvest figure in the other
+compares two different questions.
 
 ## Fulfilment rate, ten paired seeds
 
-Fulfilment is the share of a run's demands met in full by their deadline. The
-first three value columns share one world of 114 orders; the last two share the
-clamped world of 85. Comparing across that boundary compares two different order
-books.
+Fulfilment is the share of a run's demands met in full by their deadline. `Δ` is
+Harvest minus the baseline on that column's own order book.
 
-| Seed | Baseline, pre-clamp | Harvest, before defects | Harvest, after defects | Baseline, clamped | Harvest, clamped | Δ clamped |
+| Seed | Baseline, clamped | Harvest, clamped | Δ clamped | Baseline, forward | Harvest, forward | Δ forward |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 42 | 9.1% | 0.0% | 45.5% | 12.5% | 50.0% | +37.5pp |
-| 8675309 | 0.0% | 8.3% | 41.7% | 0.0% | 55.6% | +55.6pp |
-| 7 | 10.0% | 40.0% | 60.0% | 14.3% | 85.7% | +71.4pp |
-| 19 | 15.4% | 7.7% | 30.8% | 22.2% | 22.2% | 0.0pp |
-| 23 | 20.0% | 10.0% | 30.0% | 25.0% | 25.0% | 0.0pp |
-| 31 | 15.4% | 7.7% | 69.2% | 20.0% | 60.0% | +40.0pp |
-| 101 | 8.3% | 8.3% | 41.7% | 9.1% | 45.5% | +36.4pp |
-| 202 | 0.0% | 10.0% | 50.0% | 0.0% | 71.4% | +71.4pp |
-| 303 | 8.3% | 0.0% | 25.0% | 14.3% | 28.6% | +14.3pp |
-| 404 | 0.0% | 18.2% | 36.4% | 0.0% | 33.3% | +33.3pp |
-| **median** | **8.7%** | **8.3%** | **41.7%** | **13.4%** | **47.7%** | **+36.9pp** |
-| **mean** | **8.7%** | **11.0%** | **43.0%** | **11.7%** | **47.7%** | **+36.0pp** |
+| 42 | 12.5% | 50.0% | +37.5pp | 9.1% | 45.5% | +36.4pp |
+| 8675309 | 0.0% | 55.6% | +55.6pp | 0.0% | 41.7% | +41.7pp |
+| 7 | 14.3% | 85.7% | +71.4pp | 10.0% | 50.0% | +40.0pp |
+| 19 | 22.2% | 22.2% | 0.0pp | 15.4% | 53.8% | +38.5pp |
+| 23 | 25.0% | 25.0% | 0.0pp | 20.0% | 20.0% | 0.0pp |
+| 31 | 20.0% | 60.0% | +40.0pp | 15.4% | 53.8% | +38.5pp |
+| 101 | 9.1% | 45.5% | +36.4pp | 8.3% | 25.0% | +16.7pp |
+| 202 | 0.0% | 71.4% | +71.4pp | 0.0% | 60.0% | +60.0pp |
+| 303 | 14.3% | 28.6% | +14.3pp | 8.3% | 33.3% | +25.0pp |
+| 404 | 0.0% | 33.3% | +33.3pp | 0.0% | 45.5% | +45.5pp |
+| **median** | **13.4%** | **47.7%** | **+36.9pp** | **8.7%** | **45.5%** | **+38.5pp** |
+| **mean** | **11.7%** | **47.7%** | **+36.0pp** | **8.7%** | **42.9%** | **+34.2pp** |
 
-`Δ clamped` is Harvest minus the baseline on the clamped world, per seed. The
-median row's Δ is the median of the ten per-seed deltas, not the difference of
-the two medians. Note that this is a *policy* gap; the `Δ Harvest` column this
-table used to carry compared Harvest against its own earlier self, which is a
-different question.
+The median row's Δ is the median of the ten per-seed deltas, not the difference
+of the two medians.
 
-Read the win count rather than only the mean. On the pre-clamp world Harvest
-beat the baseline on all ten seeds, by a mean of 34.4pp. On the clamped world
-the mean gap is slightly wider at 36.0pp, but Harvest wins eight seeds and
-**ties two** (19 and 23), losing none. Both ties are the same mechanism: the
-clamp removed orders Harvest was filling and orders the baseline was failing, so
-the two arms converged. A claim that Harvest leads on every seed is no longer
-true and is not made here.
+Read the win count rather than only the mean. On the clamped book Harvest beat
+the baseline on eight seeds and tied two. On the full book it wins **nine and
+ties one**, losing none. Seed 19 was one of the two ties and is now +38.5pp,
+because the orders the clamp had removed from it were ones Harvest could fill:
+it meets 7 of 13 where it met 2 of 9. Seed 7 is the largest single drop, 85.7%
+to 50.0%, and it is a denominator: its clamped book was seven orders, of which
+Harvest filled six, and on the ten orders it now faces it fills five.
 
-Supporting figures, means across the same ten seeds.
+Both arms score lower on the fuller book. The restored orders are late-window
+ones, which are harder for everyone, and the baseline drops with Harvest.
 
-| Measure | Baseline, pre-clamp | Harvest, before defects | Harvest, after defects | Baseline, clamped | Harvest, clamped |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Local procurement rate | 13.2% | 15.8% | 46.3% | 16.9% | 53.1% |
-| Physical waste (kg) | 2,336 | 2,348 | 1,759 | 2,336 | 1,813 |
-| Substituted, i.e. imported (kg) | 2,545 | 2,468 | 1,478 | 1,787 | 1,033 |
-| Commitments approved (10 seeds) | 58 | 56 | 80 | 54 | 63 |
-| Observation requests | 0 | 5.9 | 7.8 | 0 | 7.2 |
-| Events processed | 89 | 118 | 144 | 86 | 130 |
-| Orders raised (10 seeds) | 114 | 114 | 114 | 85 | 85 |
+Supporting figures, means across the same ten seeds unless marked.
 
-Two lines are worth reading twice. The baseline's waste is unchanged to the
-kilogram, which is the check that the clamp did not quietly hand it a physical
-advantage. Harvest's waste rises from 1,759 kg to 1,813 kg, because the nine
-orders it was filling past the horizon were pulling produce out of fields that
-now spoil unpicked. That is the price of measuring only what the run can settle,
-and it is paid by the policy the benchmark favours.
+| Measure | Baseline, clamped | Harvest, clamped | Baseline, forward | Harvest, forward |
+| --- | ---: | ---: | ---: | ---: |
+| Local procurement rate | 16.9% | 53.1% | 16.0% | 46.0% |
+| Physical waste (kg) | 2,336 | 1,813 | 3,070 | 2,366 |
+| Substituted, i.e. imported (kg) | 1,787 | 1,033 | 2,460 | 1,562 |
+| Commitments approved (10 seeds) | 54 | 63 | 58 | 84 |
+| Observation requests | 0 | 7.2 | 0 | 4.4 |
+| Events processed | 86 | 130 | 110 | 157 |
+| Orders raised (10 seeds) | 85 | 85 | 114 | 114 |
+
+Three lines are worth reading twice.
+
+**Commitments approved rise from 63 to 84** while the order book grows by 34%.
+Harvest is not merely seeing more orders, it is converting more of them into a
+promise: the whole point of promising a crop that is still growing is that an
+order placed before anything is pickable can now be filled.
+
+**Waste rises on both arms, from 2,336 to 3,070 kg for the baseline and 1,813 to
+2,366 kg for Harvest.** Twenty-nine more orders and seven more days of a crop
+losing six to fourteen percent of itself a day produce more spoilage in absolute
+terms. Harvest's advantage over the baseline widens slightly, from 523 kg to
+704 kg per run.
+
+**Harvest's observation requests fall from 7.2 to 4.4 per run.** It asks a
+grower to go and look when it has nothing recent enough to promise against, and
+it now has a legitimate way to promise against a crop whose window is known. That
+is a saving in farmer effort, which is the friction stakeholders complained
+about, and it is worth watching in case it becomes a quality problem instead.
 
 ## Why demand went unmet
 
 `causeCounts` assigns exactly one cause to every demand that ended unmet or
 partially met, at the point it settles. Counts are totals across the same ten
-seeds. The metric did not exist before the engine-defect fixes, so there is no
-column for `2026-09-02-before.json`.
+seeds. `NOT_READY_IN_TIME` is new: it separates a load that came up short
+because the crop had never been reported ready from one that came up short
+because the crop was lost. Both used to read as `SPOILED_BEFORE_PICKUP`, which
+said produce had perished when it had simply not arrived.
 
-| Cause | Baseline, pre-clamp | Harvest, after defects | Baseline, clamped | Harvest, clamped |
+| Cause | Baseline, clamped | Harvest, clamped | Baseline, forward | Harvest, forward |
 | --- | ---: | ---: | ---: | ---: |
-| `SPOILED_BEFORE_PICKUP` | 33 | 4 | 33 | 4 |
-| `NO_READY_SUPPLY` | 31 | 15 | 31 | 15 |
-| `HORIZON_TRUNCATED` | 29 | 20 | 0 | 0 |
-| `INSUFFICIENT_SUPPLY` | 10 | 18 | 10 | 18 |
-| `APPROVAL_REJECTED` | 0 | 7 | 0 | 7 |
-| `MISSION_LATE` | 1 | 1 | 1 | 1 |
+| `NO_READY_SUPPLY` | 31 | 15 | 56 | 11 |
+| `NOT_READY_IN_TIME` | n/a | n/a | 29 | 5 |
+| `SPOILED_BEFORE_PICKUP` | 33 | 4 | 7 | 8 |
+| `INSUFFICIENT_SUPPLY` | 10 | 18 | 11 | 14 |
+| `APPROVAL_REJECTED` | 0 | 7 | 0 | 19 |
+| `MISSION_LATE` | 1 | 1 | 1 | 8 |
 | `DELIVERY_REJECTED` | 0 | 0 | 0 | 0 |
-| **Total short** | **104 of 114** | **65 of 114** | **75 of 85** | **45 of 85** |
+| `HORIZON_TRUNCATED` | 0 | 0 | 0 | 0 |
+| **Total short** | **75 of 85** | **45 of 85** | **104 of 114** | **65 of 114** |
 
-Every non-horizon row is unchanged. That is the strongest evidence the clamp did
-what it claimed and nothing else: it removed a category of scored failure that
-was an artefact of the run's length, and left every other way of failing exactly
-where it was. `HORIZON_TRUNCATED` is now zero on both arms across all ten seeds,
-asserted in `tests/fulfilment.test.ts` rather than only recorded here. The
-classification survives in the engine as a guard, because a scenario or an
-injected effect could still produce such an order and it must not be mistaken
-for a late delivery.
+The baseline's 29 `NOT_READY_IN_TIME` is the reclassification doing its work: it
+promises against a stated calendar window and sends a vehicle to a field nobody
+has looked at, and 29 of its 33 former "spoilages" were that. Harvest carries 5,
+which is the honest cost of forward promising: a promise dated from the grower's
+own late estimate is still a promise about the future, and sometimes the future
+disagrees.
 
-What is left to argue with:
+Two of Harvest's rows got worse, and neither is an artefact.
 
-- `INSUFFICIENT_SUPPLY` at 18 against the baseline's 10. Harvest delivers on far
-  more orders, so partial deliveries it previously never attempted register here
-  instead of as `NO_READY_SUPPLY`. That is the expected shape of the trade
-  rather than a defect, but it is now the largest single bucket left.
-- `APPROVAL_REJECTED` at 7. The approver re-checks a promise against evidence
-  that decayed since the proposal. Whether the gate is calibrated or merely
-  strict is still open.
-- `NO_READY_SUPPLY` at 15. The orders nobody could commit against at all, which
-  is the part a better forecast rather than better coordination would address.
+- **`APPROVAL_REJECTED`, 7 to 19.** The approval gate re-checks each promise
+  against current evidence two hours after it was proposed, and Harvest now
+  proposes far more. This is now its largest bucket. Whether the gate is
+  calibrated or merely strict has not been established, and it is the biggest
+  single thing standing between Harvest and orders it has already matched.
+- **`MISSION_LATE`, 1 to 8.** With 84 approved commitments rather than 63, more
+  vehicles are on the road when the valley road closes or the van breaks down.
+  Raising the lead time the policy reserves does not move this figure, which
+  says it is the world rather than the schedule; the recovery path is where to
+  look next.
+
+Against that, `NO_READY_SUPPLY` falls from 15 to 11 on a book a third larger,
+which is what forward promising was for, and `SPOILED_BEFORE_PICKUP` stays in
+single figures on both columns.
 
 ## Determinism
 

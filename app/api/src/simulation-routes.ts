@@ -102,14 +102,26 @@ function readPolicy(value: unknown): PolicyName {
 const DAY_MS = 86_400_000;
 
 /**
+ * How long a run lasts: the ordering window plus the settlement window.
+ *
+ * An order raised on the last ordering day is meant to be delivered during the
+ * settlement window, so anything measuring against the ordering window alone
+ * would report exactly the orders that window exists to see through as
+ * truncated by the run.
+ */
+function scenarioRunLengthDays(scenario: { durationDays: number; settlementDays: number }) {
+  return scenario.durationDays + scenario.settlementDays;
+}
+
+/**
  * The run row records when a completed run ended, but a run still executing
  * has no stored horizon, and the connected snapshot is taken while the row is
  * still `CREATING`. The scenario recipe is the authority in both cases: its
- * start instant and duration are fixed, deterministic inputs of the run.
+ * start instant and length are fixed, deterministic inputs of the run.
  */
 function scenarioHorizonEnd(scenarioId: string, endedAt: Date | null): Date | undefined {
   const scenario = SCENARIOS[scenarioId];
-  if (scenario) return new Date(new Date(scenario.startsAtIso).getTime() + scenario.durationDays * DAY_MS);
+  if (scenario) return new Date(new Date(scenario.startsAtIso).getTime() + scenarioRunLengthDays(scenario) * DAY_MS);
   return endedAt ?? undefined;
 }
 
@@ -150,12 +162,12 @@ function readScope(value: unknown, scenarioId: string): { scope: RunScope; resol
   return { scope: { mode: "SELECTED", islandIds }, resolvedIslandIds: islandIds };
 }
 
-function readDisruptions(value: unknown, durationDays: number): InjectedDisruption[] {
+function readDisruptions(value: unknown, runLengthDays: number): InjectedDisruption[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) {
     throw httpError(400, "VALIDATION_FAILED", "disruptions must be an array.");
   }
-  const horizonMs = durationDays * 24 * 60 * 60 * 1_000;
+  const horizonMs = runLengthDays * 24 * 60 * 60 * 1_000;
   return value.map((item, index) => {
     const disruption = assertObjectBody(
       item,
@@ -464,6 +476,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
         description: scenario.description,
         startsAt: scenario.startsAtIso,
         durationDays: scenario.durationDays,
+        settlementDays: scenario.settlementDays,
         availablePolicies: ["BASELINE", "HARVEST"],
         availableDecisionModes: ["DETERMINISTIC", "LLM_ASSISTED"],
         islands: ISLANDS.filter((island) => scenario.availableIslandIds.includes(island.islandId)),
@@ -521,7 +534,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
           throw httpError(409, "SOURCE_RUN_NOT_REPLAYABLE", "A derived run requires a completed source run.");
         }
         const scenario = readScenario(source.scenarioId);
-        const additions = readDisruptions(body.disruptions, scenario.durationDays);
+        const additions = readDisruptions(body.disruptions, scenarioRunLengthDays(scenario));
         if (!additions.length) {
           throw httpError(422, "DERIVED_RUN_REQUIRES_DISRUPTION", "A derived run must add at least one disruption.");
         }
@@ -557,7 +570,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
         decisionMode,
         scope,
         resolvedIslandIds,
-        disruptions: readDisruptions(body.disruptions, scenario.durationDays),
+        disruptions: readDisruptions(body.disruptions, scenarioRunLengthDays(scenario)),
         createdByActorId: actor.id,
       });
       return simulationRunDto(row);
@@ -652,7 +665,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
       const decisionMode = readDecisionMode(body.decisionMode);
       const seed = readSeed(body.seed);
       const { scope, resolvedIslandIds } = readScope(body.scope, scenario.scenarioId);
-      const disruptions = readDisruptions(body.disruptions, scenario.durationDays);
+      const disruptions = readDisruptions(body.disruptions, scenarioRunLengthDays(scenario));
       const pairId = randomUUID();
       const baselineRunId = randomUUID();
       const harvestRunId = randomUUID();

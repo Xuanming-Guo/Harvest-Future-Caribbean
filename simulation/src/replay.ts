@@ -1,7 +1,7 @@
 /**
  * Replay frames for the control room.
  *
- * A whole twenty-one-day run takes a few milliseconds, so the control room does
+ * A whole four-week run takes a few milliseconds, so the control room does
  * not need to drive the engine in real time. The engine runs once, records a
  * frame after every event, and the interface replays that timeline. Play,
  * pause, speed, scrub and reset then become array indexing rather than
@@ -33,6 +33,13 @@ export interface ControlRoomScene {
   policy: 'BASELINE' | 'HARVEST';
   seed: number;
   startsAt: string;
+  /**
+   * When buyers stop raising orders. The run itself continues to `endsAt` so
+   * the last orders raised can be delivered and settled. Optional: timelines
+   * saved before the settlement window existed have no ordering horizon of
+   * their own, and playback falls back to labelling the whole run.
+   */
+  demandEndsAt?: string;
   endsAt: string;
   farms: Array<{ farmId: string; islandId: string; name: string; position: GeoPoint; referencePlaceId?: string }>;
   /**

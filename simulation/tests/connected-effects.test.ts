@@ -89,7 +89,14 @@ describe('validated Product effects', () => {
     expect(accepted).toMatchObject({ applied: true, reason: 'APPLIED' });
     expect(accepted.simulationMissionId).toBeDefined();
 
-    const frames = engine.advanceTo(engine.currentTime + 120_000);
+    // The engine, not the accepting transporter, decides when the vehicle
+    // leaves: a forward promise is offered as soon as it is approved, so the
+    // Product API's "a minute from now" is an availability, not a departure.
+    const scheduled = engine.checkpoint('AFTER_ACCEPT').missions[0]!;
+    expect(scheduled.plannedDepartureAt).toBeGreaterThan(engine.currentTime + 60_000);
+    expect(scheduled.plannedArrivalAt).toBe(scheduled.plannedDepartureAt + 60_000);
+
+    const frames = engine.advanceTo(scheduled.plannedArrivalAt);
     expect(frames.some((frame) => frame.eventType === 'MISSION_DEPART')).toBe(true);
     expect(frames.some((frame) => frame.eventType === 'MISSION_ARRIVE')).toBe(true);
   });
@@ -111,7 +118,9 @@ describe('validated Product effects', () => {
     const productMissionId = '20000000-0000-4000-8000-000000000002';
     engine.applyProductEffect({ eventId: '10000000-0000-4000-8000-000000000010', cursor: '10', atMs: engine.currentTime, type: 'ALLOCATION_APPROVED', demandId: demand.demandId, allocations: [{ batchId: batch.batchId, quantityKg: 10 }] });
     engine.applyProductEffect({ eventId: '10000000-0000-4000-8000-000000000011', cursor: '11', atMs: engine.currentTime, type: 'MISSION_ACCEPTED', productMissionId, demandId: demand.demandId, transporterId: transporter.transporterId, path: [farm.position, buyer.position], plannedDepartureAt: engine.currentTime + 60_000, plannedArrivalAt: engine.currentTime + 120_000 });
-    const delayedArrival = engine.currentTime + 240_000;
+    // Later than the arrival the engine already scheduled, so the recovery is a
+    // real postponement rather than a request to arrive sooner.
+    const delayedArrival = engine.checkpoint('AFTER_ACCEPT').missions[0]!.plannedArrivalAt + 240_000;
     expect(engine.applyProductEffect({ eventId: '10000000-0000-4000-8000-000000000012', cursor: '12', atMs: engine.currentTime, type: 'MISSION_DELAYED', productMissionId, plannedArrivalAt: delayedArrival })).toMatchObject({ applied: true });
     expect(engine.applyProductEffect({ eventId: '10000000-0000-4000-8000-000000000013', cursor: '13', atMs: engine.currentTime, type: 'NO_PHYSICAL_EFFECT', origin: 'PHYSICAL_ECHO' })).toEqual({ applied: false, reason: 'PHYSICAL_ECHO' });
 

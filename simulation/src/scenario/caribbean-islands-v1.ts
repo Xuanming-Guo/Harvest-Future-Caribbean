@@ -6,6 +6,8 @@ import type { Buyer, Farm, HiddenCropTruth, ObservedCropBatch, RoadSegment, Sche
 
 const START_ISO = '2026-09-01T06:00:00Z';
 const DURATION_DAYS = 21;
+/** Same settlement window as the hero scenario, for the same reason. */
+const SETTLEMENT_DAYS = 7;
 const evidence = 'SYNTHETIC. Manifest identity and licensed public places are offline reference inputs; every actor, quantity, yield, weather, speed, disruption and outcome is synthetic. A nearby reference place does not imply that the real organisation participates in Harvest.';
 
 function haversineKm(a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }): number {
@@ -24,6 +26,7 @@ export const caribbeanIslandsV1: Scenario = {
   availableIslandIds: CARIBBEAN_ISLANDS_V1.map((island) => island.islandId),
   startsAtIso: START_ISO,
   durationDays: DURATION_DAYS,
+  settlementDays: SETTLEMENT_DAYS,
   provenanceNote: evidence,
   build(context: ScenarioContext): World {
     const requested = context.islandIds?.length ? [...context.islandIds] : CARIBBEAN_ISLANDS_V1.map((island) => island.islandId);
@@ -102,7 +105,7 @@ export const caribbeanIslandsV1: Scenario = {
         cruiseSpeedKmh: Math.round(stream.float(28, 42)),
       });
       for (const farmId of farmIds) { const batchId = context.ids.next(); const readyAt = context.startsAt + stream.int(1, 17) * DAY_MS; crops.set(batchId, { batchId, potentialYieldKg: Math.round(stream.float(120, 420)), readyAt, qualityFraction: Number(stream.float(0.7, 0.95).toFixed(3)), dailySpoilageRate: Number(stream.float(0.05, 0.12).toFixed(3)), stage: 'GROWING', harvestedKg: 0, lostKg: 0 }); batches.set(batchId, { batchId, farmId, crop: stream.pick(island.crops) as string, plantedAt: readyAt - stream.int(45, 65) * DAY_MS, expectedReadyFrom: readyAt - 3 * DAY_MS, expectedReadyTo: readyAt + 3 * DAY_MS, areaHectares: Number(stream.float(0.15, 0.6).toFixed(3)), lastReportedStage: 'GROWING', lastObservedAt: null, observations: [], confirmedHarvestedKg: 0, provenance: 'SYNTHETIC' }); }
-      for (let day = 0; day <= DURATION_DAYS; day += 1) rainfallMmByDate.set(`${island.islandId}:${formatDate(context.startsAt + day * DAY_MS)}`, Number(Math.max(0, stream.normal(12, 8)).toFixed(2)));
+      for (let day = 0; day <= DURATION_DAYS + SETTLEMENT_DAYS; day += 1) rainfallMmByDate.set(`${island.islandId}:${formatDate(context.startsAt + day * DAY_MS)}`, Number(Math.max(0, stream.normal(12, 8)).toFixed(2)));
       const roadId = [...roads.values()].find((road) => road.islandId === island.islandId)?.roadSegmentId; if (roadId) disruptions.push({ disruptionId: context.ids.next(), type: 'ROAD', startsAt: context.startsAt + stream.int(7, 14) * DAY_MS, endsAt: context.startsAt + stream.int(15, 18) * DAY_MS, affectedEntityIds: [roadId], severity: Number(stream.float(0.4, 0.85).toFixed(2)), publicDescription: `Heavy rain has disrupted a local ${island.name} farm road.` });
     }
     return { farms, buyers, transporters, roads, referencePlaces, referenceDataSources, truth: { crops, disruptions, rainfallMmByDate }, observed: { batches, demands: new Map(), commitments: new Map(), missions: new Map(), disruptions: [], degradedRoadSegmentIds: new Set() } };
@@ -117,10 +120,11 @@ export const caribbeanIslandsV1: Scenario = {
  */
 export const caribbeanIslandScenarios: readonly Scenario[] = CARIBBEAN_ISLANDS_V1.map((island) => ({
   scenarioId: `caribbean-${island.islandId}-v1`,
-  description: `Synthetic ${island.name} local food system over three weeks.`,
+  description: `Synthetic ${island.name} local food system over three weeks of ordering and a fourth week of settlement.`,
   availableIslandIds: [island.islandId],
   startsAtIso: START_ISO,
   durationDays: DURATION_DAYS,
+  settlementDays: SETTLEMENT_DAYS,
   provenanceNote: evidence,
   build(context: ScenarioContext): World {
     return caribbeanIslandsV1.build({ ...context, islandIds: [island.islandId] });
