@@ -45,5 +45,16 @@ export interface Scenario {
    * important inputs.
    */
   provenanceNote: string;
+  /**
+   * Dataset id of a committed recorded-weather reference this scenario replays.
+   *
+   * Optional and opt-in. A scenario that omits it keeps the synthetic weather
+   * generator unchanged, which is how issue #90 avoids disturbing the regional
+   * island scenarios or any digest recorded before it. When present, realised
+   * weather for the calendar days the dataset covers is RECORDED and labelled
+   * `PUBLIC_REFERENCE` per day; every other input to the scenario stays
+   * synthetic and `provenanceNote` must say so.
+   */
+  weatherReference?: string;
   build(context: ScenarioContext): World;
 }

@@ -19,15 +19,33 @@
  * from leaking through a legitimate-looking channel, and
  * `WeatherModel.realisedOn` refuses a future date rather than trusting callers.
  *
- * Everything here is SYNTHETIC. Realised weather is generated from the
- * scenario's own seeded rainfall stream; forecasts are labelled
- * `MODEL_PREDICTED` because they are the output of a (very small) prediction
- * model rather than a record of anything. No live weather service is contacted
- * from this package or from anything that consumes it.
+ * Realised weather is SYNTHETIC by default: generated from the scenario's own
+ * seeded rainfall stream. A scenario may instead declare a `weatherReference`,
+ * in which case the realised series for the days that dataset covers comes from
+ * a committed, offline snapshot of *recorded* weather and is labelled
+ * `PUBLIC_REFERENCE` per day (issue #90, `world/weather-reference.ts`). The
+ * label is per day rather than per run, because a run can be partly recorded
+ * and nothing may round that up to "this run used real weather".
+ *
+ * Forecasts are labelled `MODEL_PREDICTED` either way, because they are the
+ * output of a (very small) prediction model rather than a record of anything —
+ * a noised view of the realised series, whatever that series is made of. No
+ * live weather service is contacted from this package or from anything that
+ * consumes it: the reference dataset is a file on disk.
  */
 
 import { DAY_MS, formatDate, type SimulationInstant } from '../core/time.js';
 import type { RandomStream } from '../core/random.js';
+import {
+  REFERENCE_WEATHER_EVIDENCE,
+  SYNTHETIC_WEATHER_EVIDENCE,
+  type ReferenceDayReading,
+  type WeatherEvidenceType,
+  type WeatherReferenceSeries,
+} from './weather-reference.js';
+
+export type { WeatherEvidenceType, WeatherReferenceSeries } from './weather-reference.js';
+export { REFERENCE_WEATHER_EVIDENCE, SYNTHETIC_WEATHER_EVIDENCE } from './weather-reference.js';
 
 /** What the sky is doing, in the smallest vocabulary crops and roads care about. */
 export type WeatherCondition = 'CLEAR' | 'CLOUD' | 'RAIN' | 'STORM';
@@ -58,6 +76,22 @@ export interface RealisedWeather extends WeatherReading {
   islandId: string;
   /** ISO-8601 calendar date. */
   date: string;
+  /**
+   * Whether this day was generated or taken from the recorded reference.
+   *
+   * Per day, not per run: a run may be recorded for the dates its dataset
+   * covers and synthetic for the rest, and nothing downstream may describe such
+   * a run as wholly one or the other.
+   */
+  evidenceType: WeatherEvidenceType;
+  /**
+   * For a `PUBLIC_REFERENCE` day, the calendar date the value was recorded on.
+   *
+   * Present because the run's date and the record's date are different years —
+   * the demo runs a 2026 window against a recorded September — and a reader who
+   * cannot see which real day a value came from cannot check it.
+   */
+  recordedDate?: string;
 }
 
 /** One forecast day. Never equal to the realised value it was drawn from. */
@@ -139,6 +173,17 @@ export interface WeatherLegend {
   forecastHorizonDays: number;
   realisedProvenance: typeof REALISED_WEATHER_PROVENANCE;
   forecastProvenance: typeof FORECAST_PROVENANCE;
+  /**
+   * Evidence labels a realised day in this system may carry.
+   *
+   * Separate from `realisedProvenance`, which stays SYNTHETIC: the run as a
+   * whole is a synthetic simulation even on days whose physical inputs are
+   * recorded, exactly as the demo's coordinates are real while its farms are
+   * not.
+   */
+  realisedEvidenceTypes: readonly WeatherEvidenceType[];
+  /** Thresholds a recorded day is classified by, which are not the synthetic ones. */
+  referenceConditionNote: string;
   note: string;
 }
 
@@ -158,9 +203,16 @@ export const WEATHER_LEGEND: WeatherLegend = {
   forecastHorizonDays: FORECAST_HORIZON_DAYS,
   realisedProvenance: REALISED_WEATHER_PROVENANCE,
   forecastProvenance: FORECAST_PROVENANCE,
+  realisedEvidenceTypes: [SYNTHETIC_WEATHER_EVIDENCE, REFERENCE_WEATHER_EVIDENCE],
+  referenceConditionNote:
+    'A day taken from the recorded reference is classified on its own lower thresholds (storm at 20 mm or ' +
+    '45 kph, rain at 5 mm, cloud at 60% recorded cover), because a daily grid-cell aggregate is not the same ' +
+    'kind of number as a draw from the synthetic generator. See world/weather-reference.ts.',
   note:
-    'SYNTHETIC. Realised weather is generated from the run seed; forecasts are a noised model of it and are ' +
-    'deliberately imperfect. No live weather service is used anywhere in this system.',
+    'SYNTHETIC simulation. Realised weather is generated from the run seed unless the scenario declares a ' +
+    'weather reference, in which case the days that dataset covers are RECORDED and labelled PUBLIC_REFERENCE ' +
+    'individually. Forecasts are a noised model of the realised series either way and are deliberately ' +
+    'imperfect. No live weather service is used anywhere in this system; a reference dataset is a file on disk.',
 };
 
 /** A day is a storm on either limb: enough rain, or enough wind. */
@@ -195,6 +247,14 @@ export interface WeatherModelInput {
   realisedStream: RandomStream;
   /** A stream of its own, so forecast noise cannot perturb physical truth. */
   forecastStream: RandomStream;
+  /**
+   * A resolved recorded-weather series, when the scenario declares one.
+   *
+   * Omitted by every scenario that does not opt in, which is why this change
+   * leaves the twenty-eight regional islands and every previously recorded
+   * digest exactly where they were.
+   */
+  reference?: WeatherReferenceSeries;
 }
 
 /**
@@ -211,14 +271,21 @@ export class WeatherModel {
   private readonly forecasts = new Map<string, ForecastDay[]>();
   readonly islandIds: readonly string[];
   readonly dates: readonly string[];
+  /** The recorded series this run replays, or null when everything is generated. */
+  readonly reference: WeatherReferenceSeries | null;
 
   constructor(input: WeatherModelInput) {
     this.islandIds = [...input.islandIds].sort();
     this.dates = Array.from({ length: input.days }, (_, day) => formatDate(input.startsAt + day * DAY_MS));
+    this.reference = input.reference ?? null;
 
     for (const islandId of this.islandIds) {
       for (const date of this.dates) {
-        this.hiddenRealisedWeather.set(weatherKey(islandId, date), realiseDay(islandId, date, input.rainfallMm(islandId, date), input.realisedStream));
+        const recorded = this.reference?.readingFor(islandId, date) ?? null;
+        this.hiddenRealisedWeather.set(
+          weatherKey(islandId, date),
+          realiseDay(islandId, date, input.rainfallMm(islandId, date), input.realisedStream, recorded),
+        );
       }
     }
 
@@ -352,8 +419,22 @@ function cloudCoverFor(rainMm: number, windKph: number): number {
  * Rain comes from the scenario's existing seeded rainfall, untouched. Only the
  * fields rainfall does not already fix are drawn here, from a stream of their
  * own, so every previously recorded rainfall value survives this change.
+ *
+ * When `recorded` is present the drawn values are discarded and the recorded
+ * ones stand instead. **The draws are still made.** Skipping them would move
+ * the realised stream's position, so a scenario that opted into a reference
+ * covering only part of its window would generate different synthetic weather
+ * on the uncovered days than the same seed generates today — a change to days
+ * the reference says nothing about. Drawing and discarding costs three numbers
+ * per island-day and keeps the two halves of a partly-recorded run independent.
  */
-function realiseDay(islandId: string, date: string, rainfallMm: number, stream: RandomStream): RealisedWeather {
+function realiseDay(
+  islandId: string,
+  date: string,
+  rainfallMm: number,
+  stream: RandomStream,
+  recorded: ReferenceDayReading | null,
+): RealisedWeather {
   const rainMm = round(Math.max(0, rainfallMm), 2);
   const windKph = round(Math.max(0, stream.float(BASE_WIND_MIN_KPH, BASE_WIND_MAX_KPH) + rainMm * WIND_PER_RAIN_MM), 1);
   const windFromDegrees = stream.int(0, 359);
@@ -362,6 +443,21 @@ function realiseDay(islandId: string, date: string, rainfallMm: number, stream: 
   // in a Caribbean September.
   const heatRoll = stream.next();
   const tempBand: TempBand = rainMm >= RAIN_DAY_MM ? (heatRoll < 0.35 ? 'COOL' : 'WARM') : heatRoll < 0.45 ? 'WARM' : 'HOT';
+
+  if (recorded) {
+    return {
+      islandId,
+      date,
+      rainMm: recorded.rainMm,
+      windKph: recorded.windKph,
+      windFromDegrees: recorded.windFromDegrees,
+      cloudCoverFraction: recorded.cloudCoverFraction,
+      tempBand: recorded.tempBand,
+      condition: recorded.condition,
+      evidenceType: REFERENCE_WEATHER_EVIDENCE,
+      recordedDate: recorded.recordedDate,
+    };
+  }
 
   return {
     islandId,
@@ -372,6 +468,7 @@ function realiseDay(islandId: string, date: string, rainfallMm: number, stream: 
     cloudCoverFraction: round(cloudCoverFor(rainMm, windKph), 2),
     tempBand,
     condition: classifyCondition(rainMm, windKph),
+    evidenceType: SYNTHETIC_WEATHER_EVIDENCE,
   };
 }
 

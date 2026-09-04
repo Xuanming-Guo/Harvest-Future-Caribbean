@@ -82,21 +82,48 @@ unchanged when it does not intersect relevant activity.
 ## Honest status of the baseline-versus-Harvest comparison
 
 **On the current scenario the Harvest policy outperforms the fragmented
-baseline, but by less than it did, and it now loses one seed.** Across the same
-ten paired seeds, mean fulfilment is 32.7% for Harvest against 11.6% for the
-baseline: seven wins, two ties, and one loss. Before realised weather (#37) it
-was 47.7% against 11.7%, with eight wins, two ties and no losses. Before the
-issue #53 fixes it was 11.0% against 8.7%, losing on five seeds and carried on
-the mean by one.
+baseline, and it still loses one seed.** Across the same ten paired seeds, mean
+fulfilment is 39.2% for Harvest against 12.7% for the baseline: seven wins, two
+ties, and one loss. Under the synthetic weather generator that preceded recorded
+weather (#90) it was 32.7% against 11.6% on the same record of wins. Before
+realised weather existed at all (#37) it was 47.7% against 11.7%, with eight
+wins, two ties and no losses. Before the issue #53 fixes it was 11.0% against
+8.7%, losing on five seeds and carried on the mean by one.
 
-Weather cost Harvest roughly a third of its lead and cost the baseline almost
-nothing, for a reason worth stating plainly: **Harvest's advantage is delivered
-through promises, and weather is a machine for invalidating promises.** A batch
-that ripens up to three days late, loses grade to rain and rots faster once
-ready is a batch Harvest has already committed against; the baseline was mostly
-failing those orders anyway. The full mechanism, the losing seed, and what was
-*not* done about it are in [`benchmarks/README.md`](benchmarks/README.md). No
-weather constant was tuned to recover the earlier numbers.
+Two changes to the physics move these numbers, in opposite directions, and
+neither was tuned.
+
+Realised weather (#37) cost Harvest roughly a third of its lead and cost the
+baseline almost nothing, for a reason worth stating plainly: **Harvest's
+advantage is delivered through promises, and weather is a machine for
+invalidating promises.** A batch that ripens late, loses grade to rain and rots
+faster once ready is a batch Harvest has already committed against; the baseline
+was mostly failing those orders anyway.
+
+Recorded weather (#90) then gave part of that back, because **the real record is
+milder than the generator was**: 4.7 wet days per run against 10.0, and 0.4 storm
+days against 3.8. That is a fact about daily gridded reanalysis over a small
+island rather than a claim that Saint Lucian Septembers are calm, and
+[`data/README-weather.md`](data/README-weather.md) sets out the limits of the
+dataset at length. Two results in that column are awkward and are reported as
+measured: the baseline is **not** flat for the first time (seed 19 gains an
+order), and baseline physical waste *rises* in the gentler world, because crop
+that ripens on schedule spends more days standing ready in a field nobody
+collects from.
+
+The full mechanism, the losing seed, and what was *not* done about any of it are
+in [`benchmarks/README.md`](benchmarks/README.md). No weather constant was tuned
+to recover an earlier number, in either direction.
+
+Realised weather for `saint-lucia-demo-v1` is **recorded**, not generated:
+the scenario declares `weatherReference` and replays 1-22 September of a real
+year chosen deterministically from the run seed, from the committed offline
+snapshot in [`data/README-weather.md`](data/README-weather.md) (Open-Meteo
+Historical Weather API, CC BY 4.0). Those days carry
+`evidenceType: 'PUBLIC_REFERENCE'`; generated days carry `'SYNTHETIC'`, and the
+label is per day rather than per run. Scenarios that do not declare a reference
+keep the generator unchanged. Forecasts stay `MODEL_PREDICTED` either way, and
+no weather service is contacted at runtime.
 
 The per-seed table, the supporting waste and substitution figures, and the
 unmet-demand histogram are in [`benchmarks/README.md`](benchmarks/README.md).

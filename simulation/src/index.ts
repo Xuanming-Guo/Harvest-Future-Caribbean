@@ -53,6 +53,31 @@ export {
   weatherKey,
 } from './world/weather.js';
 export type { ForecastDay, RealisedWeather, TempBand, WeatherCondition, WeatherLegend, WeatherReading } from './world/weather.js';
+export {
+  REFERENCE_CLOUD_FRACTION,
+  REFERENCE_COOL_MAX_C,
+  REFERENCE_HOT_MIN_C,
+  REFERENCE_RAIN_MM,
+  REFERENCE_STORM_RAIN_MM,
+  REFERENCE_STORM_WIND_KPH,
+  REFERENCE_WEATHER_EVIDENCE,
+  SAINT_LUCIA_WEATHER_REFERENCE,
+  SYNTHETIC_WEATHER_EVIDENCE,
+  buildWeatherReferenceSeries,
+  classifyReferenceCondition,
+  loadWeatherReference,
+  pickReferenceYear,
+  referenceTempBand,
+  toReferenceReading,
+} from './world/weather-reference.js';
+export type {
+  ReferenceDayReading,
+  WeatherEvidenceType,
+  WeatherReferenceDay,
+  WeatherReferenceFile,
+  WeatherReferenceSeries,
+  WeatherReferenceStation,
+} from './world/weather-reference.js';
 
 export { EventQueue, Priority } from './core/queue.js';
 export type { ScheduledEvent } from './core/queue.js';

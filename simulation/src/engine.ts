@@ -2028,6 +2028,9 @@ export class SimulationEngine {
    * not reached would publish hidden truth to anybody with developer tools
    * open. Both halves carry their own provenance because they are different
    * kinds of claim: one is a synthetic record, the other a synthetic prediction.
+   * The record additionally carries `evidenceType`, which says whether the
+   * conditions it records were generated or taken from a recorded reference —
+   * a third distinction, and the one issue #90 adds.
    */
   private createWeatherFrame(): ControlRoomWeather[] {
     const observable = this.observableWeather;
@@ -2045,6 +2048,8 @@ export class SimulationEngine {
         cloudCoverFraction: current.cloudCoverFraction,
         tempBand: current.tempBand,
         provenance: REALISED_WEATHER_PROVENANCE,
+        evidenceType: current.evidenceType,
+        ...(current.recordedDate ? { recordedDate: current.recordedDate } : {}),
         forecastProvenance: FORECAST_PROVENANCE,
         forecast: observable.forecast(islandId).map((day) => ({ ...day })),
       });

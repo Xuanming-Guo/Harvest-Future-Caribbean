@@ -32,9 +32,23 @@ import { DAY_MS, formatDate, parseInstant } from '../src/core/time.js';
 import type { ControlRoomFrame } from '../src/replay.js';
 
 const SCENARIO = saintLuciaDemoV1.scenarioId;
-/** Driest and wettest of the ten benchmark seeds, by realised wet days. */
-const DRY_SEED = 31;
-const WET_SEED = 404;
+const BENCHMARK_SEEDS = [42, 8675309, 7, 19, 23, 31, 101, 202, 303, 404];
+
+/**
+ * Driest and wettest of the ten benchmark seeds, by realised wet days.
+ *
+ * Re-derived after issue #90 pointed the demo at recorded weather, by the same
+ * method the original pair was chosen with: measure `metrics.weather.wetDays`
+ * across the ten benchmark seeds, then take the extremes, before writing any
+ * assertion. The recorded series makes wetness a property of *which September
+ * the seed replays* rather than of the seed itself, so the extremes are now
+ * ties — every seed that draws 2023 sees 3 wet days and every seed that draws
+ * 2024 sees 7. The tie is broken by taking the numerically smallest seed in
+ * each class, a rule fixed before the numbers were looked at, so that no seed
+ * here was picked for making an assertion pass.
+ */
+const DRY_SEED = 19;
+const WET_SEED = 7;
 
 function capturedFrames(seed: number, policy: 'BASELINE' | 'HARVEST' = 'HARVEST'): ControlRoomFrame[] {
   const result = runScenario({ scenarioId: SCENARIO, policy, seed, captureFrames: true });
@@ -188,18 +202,40 @@ describe('provenance', () => {
 });
 
 describe('realised weather changes the run', () => {
-  it('slows readiness, costs grade and delays vehicles more in a wet run than a dry one', () => {
+  it('slows readiness and costs more grade in a wet run than a dry one', () => {
     const dry = runScenario({ scenarioId: SCENARIO, policy: 'HARVEST', seed: DRY_SEED }).metrics.weather;
     const wet = runScenario({ scenarioId: SCENARIO, policy: 'HARVEST', seed: WET_SEED }).metrics.weather;
 
     expect(wet.wetDays).toBeGreaterThan(dry.wetDays);
     expect(wet.readinessDelayDays).toBeGreaterThan(dry.readinessDelayDays);
     expect(wet.qualityLost).toBeGreaterThan(dry.qualityLost);
-    expect(wet.weatherDelayedMissions).toBeGreaterThan(dry.weatherDelayedMissions);
+  });
+
+  /**
+   * Mission delay is deliberately NOT asserted to order with wetness.
+   *
+   * It did under the synthetic generator, whose wet spells covered a fifth of
+   * the run at 60 mm a day. The recorded series has three to seven wet days in
+   * twenty-two, so whether any of them coincides with a departure is a property
+   * of the delivery schedule rather than of how wet the run was, and the two
+   * stopped ordering together the moment the weather became real: the driest
+   * benchmark seed delays one mission and the wettest delays none.
+   *
+   * Weakening the claim to "some mission, on some seed" is what the evidence
+   * supports. Hunting for a seed pair that restored the stronger ordering would
+   * have made the test a statement about the search rather than about the
+   * physics.
+   */
+  it('still lets departure-day weather delay missions somewhere across the benchmark seeds', () => {
+    const delayed = BENCHMARK_SEEDS.reduce(
+      (total, seed) => total + runScenario({ scenarioId: SCENARIO, policy: 'HARVEST', seed }).metrics.weather.weatherDelayedMissions,
+      0,
+    );
+    expect(delayed).toBeGreaterThan(0);
   });
 
   it('attributes some spoilage to the weather on every benchmark seed', () => {
-    for (const seed of [42, 8675309, 7, 19, 23, 31, 101, 202, 303, 404]) {
+    for (const seed of BENCHMARK_SEEDS) {
       const { weather } = runScenario({ scenarioId: SCENARIO, policy: 'HARVEST', seed }).metrics;
       expect(weather.wetDays).toBeGreaterThan(0);
       expect(weather.weatherSpoilageKg).toBeGreaterThan(0);
@@ -208,18 +244,38 @@ describe('realised weather changes the run', () => {
   });
 });
 
+const actsOnForecastStorm = (seed: number): boolean =>
+  runScenario({ scenarioId: SCENARIO, policy: 'HARVEST', seed }).decisions.some(
+    (decision) => decision.kind === 'HARVEST_PULL_PICKUP_FORWARD' && decision.evidence.source === 'FORECAST',
+  );
+
 describe('forecasts inform decisions without touching physics', () => {
-  it('lets the Harvest policy bring a pickup forward on a forecast storm', () => {
-    const acted = [42, 8675309, 7, 19, 23, 31, 101, 202, 303, 404].some((seed) =>
-      runScenario({ scenarioId: SCENARIO, policy: 'HARVEST', seed }).decisions.some(
-        (decision) => decision.kind === 'HARVEST_PULL_PICKUP_FORWARD' && decision.evidence.source === 'FORECAST',
-      ),
-    );
-    expect(acted).toBe(true);
+  /**
+   * The recorded world almost never gives this path anything to act on.
+   *
+   * Under the synthetic generator one of the ten benchmark seeds triggered it.
+   * Under the recorded reference none of them do, and that is the data talking
+   * rather than a defect: the dataset holds one storm day across all six
+   * station-years, so a *forecast* storm landing inside a hold window is now
+   * genuinely rare. A sweep of seeds 1 to 120 — a range fixed before it was
+   * run, not widened until something appeared — fires the path on exactly one,
+   * seed 52.
+   *
+   * Both halves are asserted. The first keeps the path from rotting into dead
+   * code. The second pins the rarity, so if a future change puts storms back
+   * into this scenario the test fails and this comment has to be rewritten
+   * rather than quietly left wrong.
+   */
+  it('still lets the Harvest policy bring a pickup forward on a forecast storm', () => {
+    expect(actsOnForecastStorm(52)).toBe(true);
+  });
+
+  it('records that no benchmark seed reaches that path under recorded weather', () => {
+    expect(BENCHMARK_SEEDS.filter(actsOnForecastStorm)).toEqual([]);
   });
 
   it('leaves the baseline blind to the forecast', () => {
-    for (const seed of [42, 8675309, 7, 19, 23, 31, 101, 202, 303, 404]) {
+    for (const seed of BENCHMARK_SEEDS) {
       const decisions = runScenario({ scenarioId: SCENARIO, policy: 'BASELINE', seed }).decisions;
       expect(decisions.some((decision) => decision.evidence.source === 'FORECAST')).toBe(false);
       expect(decisions.some((decision) => decision.kind === 'HARVEST_PULL_PICKUP_FORWARD')).toBe(false);

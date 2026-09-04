@@ -25,6 +25,7 @@ import type { SimulationInstant } from './core/time.js';
 import type { ObservableActor, ObservableDisruptionView } from './world/observable.js';
 import type { CropStage, GeoPoint, ReferenceDataSource, ReferencePlace } from './world/types.js';
 import type { ForecastDay, TempBand, WeatherCondition, WeatherLegend } from './world/weather.js';
+import type { WeatherEvidenceType } from './world/weather-reference.js';
 import type { DecisionRecord } from './policy/types.js';
 
 /** Static furniture, sent once rather than repeated in every frame. */
@@ -146,8 +147,23 @@ export interface ControlRoomWeather {
   windFromDegrees: number;
   cloudCoverFraction: number;
   tempBand: TempBand;
-  /** Realised weather is a synthetic record. */
+  /**
+   * The run is a synthetic simulation, so its record of a day is synthetic.
+   *
+   * Unchanged by issue #90 on purpose. Where the *physical inputs* to a day came
+   * from is a different question, and `evidenceType` below answers it: a
+   * recorded day makes the conditions real without making the delivery, the
+   * order or the farm real, exactly as the demo's licensed coordinates make its
+   * geography real without making its farms real.
+   */
   provenance: 'SYNTHETIC';
+  /**
+   * Whether this day's conditions were generated or taken from a recorded,
+   * committed reference dataset. `PUBLIC_REFERENCE` days are real weather.
+   */
+  evidenceType: WeatherEvidenceType;
+  /** For a `PUBLIC_REFERENCE` day, the calendar date the value was recorded on. */
+  recordedDate?: string;
   /** A forecast is a synthetic prediction, which is a different kind of claim. */
   forecastProvenance: 'MODEL_PREDICTED';
   forecast: ForecastDay[];
