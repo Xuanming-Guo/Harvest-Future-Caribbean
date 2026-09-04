@@ -178,7 +178,9 @@ export default function OrderDetailPage() {
                   : ` · ${formatMoney(interIsland.cost.comparisonAmount, interIsland.cost.comparisonCurrency)}`}
               </strong>
             </div>
-            <div className="split"><span>Rate used</span><strong>{interIsland.cost.unitsPerComparisonCurrency} {interIsland.cost.localCurrency} per {interIsland.cost.comparisonCurrency}, as of {interIsland.cost.rateAsOf}</strong></div>
+            {interIsland.cost.localCurrency !== interIsland.cost.comparisonCurrency && (
+              <div className="split"><span>Rate used</span><strong>{interIsland.cost.unitsPerComparisonCurrency} {interIsland.cost.localCurrency} per {interIsland.cost.comparisonCurrency}, as of {interIsland.cost.rateAsOf}</strong></div>
+            )}
           </div>
           {shipment && (
             <>
@@ -205,6 +207,12 @@ export default function OrderDetailPage() {
               </div>
               {(shipment.weatherDelayHours ?? 0) > 0 && (
                 <div className="notice"><strong>Weather delayed the crossing by {shipment.weatherDelayHours} h</strong></div>
+              )}
+              {shipment.loadedKg === 0 && shipment.status !== "SCHEDULED" && (
+                <div className="notice">
+                  <strong>This sailing carried nothing</strong>
+                  <span>No allocated crop was ready to load at the origin farm when the vehicle left, so the boat crossed empty. The booked freight and clearance were still charged.</span>
+                </div>
               )}
               {shipment.failureReason && (
                 <div className="notice"><strong>This consignment did not arrive</strong><span>{shipment.failureReason}</span></div>

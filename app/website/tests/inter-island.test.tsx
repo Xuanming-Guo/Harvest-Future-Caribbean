@@ -179,6 +179,41 @@ describe("a cross-island order", () => {
     expect(screen.queryByText("Shipment legs")).not.toBeInTheDocument();
   });
 
+  it("says so when a boat crossed empty rather than showing a silent zero", async () => {
+    vi.spyOn(api, "order").mockResolvedValue(
+      order({
+        interIslandCommitment: commitment(),
+        maritimeShipment: shipment({ status: "DELIVERED", loadedKg: 0 }),
+      }) as never,
+    );
+    renderOrder();
+
+    await waitFor(() => expect(screen.getByText("This sailing carried nothing")).toBeInTheDocument());
+    expect(screen.getByText(/The booked freight and clearance were still charged/)).toBeInTheDocument();
+  });
+
+  it("drops the rate line when both halves are the same currency", async () => {
+    const sameCurrency = {
+      localAmount: 291,
+      localCurrency: "XCD",
+      comparisonAmount: 291,
+      comparisonCurrency: "XCD",
+      unitsPerComparisonCurrency: 1,
+      rateProvenance: "PUBLIC_REFERENCE",
+      amountProvenance: "SYNTHETIC",
+      rateAsOf: "2026-09-02",
+    };
+    vi.spyOn(api, "order").mockResolvedValue(
+      order({ interIslandCommitment: commitment({ cost: sameCurrency, destinationIslandId: "saint-lucia" }) }) as never,
+    );
+    renderOrder();
+
+    await waitFor(() => expect(screen.getByText("Cross-island supply")).toBeInTheDocument());
+    // "1 XCD per XCD" is noise, not provenance.
+    expect(screen.queryByText(/per XCD, as of/)).not.toBeInTheDocument();
+    expect(screen.getByText("XCD 291.00")).toBeInTheDocument();
+  });
+
   it("reports a lost consignment rather than quietly dropping it", async () => {
     vi.spyOn(api, "order").mockResolvedValue(
       order({

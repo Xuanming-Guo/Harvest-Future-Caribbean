@@ -28,6 +28,31 @@ const attribution: MaritimeAttribution = {
   retrievedAt: "2026-09-03",
 };
 
+/** The rate citation travels with every converted amount, so fixtures carry one too. */
+const rateSource = {
+  source: {
+    title: "Eastern Caribbean Central Bank — Exchange Rates",
+    url: "https://www.eccb-centralbank.org/exchange-rates",
+    publisher: "Eastern Caribbean Central Bank (ECCB)",
+  },
+  licence: "Publicly published central-bank statistic; no open-data licence asserted.",
+  retrievedAt: "2026-09-03",
+  geography: "XCD has been pegged at EC$2.70 = US$1.00 since 1976.",
+  evidenceType: "PUBLIC_REFERENCE" as const,
+};
+
+const money = (amount: number) => ({
+  localAmount: amount,
+  localCurrency: "XCD",
+  comparisonAmount: amount,
+  comparisonCurrency: "XCD" as const,
+  unitsPerComparisonCurrency: 1,
+  rateProvenance: "PUBLIC_REFERENCE" as const,
+  amountProvenance: "SYNTHETIC" as const,
+  rateAsOf: "2026-09-02",
+  rateSource,
+});
+
 const SEA_START = 1_000_000;
 const SEA_END = 1_100_000;
 
@@ -61,11 +86,7 @@ const shipment: ControlRoomShipment = {
     disclaimer: "Synthetic checkpoint, not a legal customs model.",
     provenance: "SYNTHETIC",
   },
-  cost: {
-    freight: { localAmount: 216, localCurrency: "XCD", comparisonAmount: 216, comparisonCurrency: "XCD", unitsPerComparisonCurrency: 1, rateProvenance: "PUBLIC_REFERENCE", amountProvenance: "SYNTHETIC", rateAsOf: "2026-09-02" },
-    customsFee: { localAmount: 75, localCurrency: "XCD", comparisonAmount: 75, comparisonCurrency: "XCD", unitsPerComparisonCurrency: 1, rateProvenance: "PUBLIC_REFERENCE", amountProvenance: "SYNTHETIC", rateAsOf: "2026-09-02" },
-    total: { localAmount: 291, localCurrency: "XCD", comparisonAmount: 291, comparisonCurrency: "XCD", unitsPerComparisonCurrency: 1, rateProvenance: "PUBLIC_REFERENCE", amountProvenance: "SYNTHETIC", rateAsOf: "2026-09-02" },
-  },
+  cost: { freight: money(216), customsFee: money(75), total: money(291) },
   scheduledDepartureAt: SEA_START,
   scheduledArrivalAt: SEA_END,
   actualDepartureAt: SEA_START,
