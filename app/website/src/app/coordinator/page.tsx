@@ -8,6 +8,7 @@ import { useState } from "react";
 import { ApprovalList } from "@/components/approval-list";
 import { OfflineHint, useOnlineStatus } from "@/components/offline";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, Metric, PageHeader, SectionTitle } from "@/components/ui";
+import { IslandWeatherTable } from "@/components/weather";
 import { api } from "@/lib/api";
 import { formatDate, titleCase } from "@/lib/format";
 
@@ -57,6 +58,8 @@ export default function CoordinatorHome() {
         ))}</div>}
         {exceptionDetail.data?.recoveryProposal && <div className="notice section-gap"><strong>{titleCase(exceptionDetail.data.recoveryProposal.action)} proposal</strong><span>{exceptionDetail.data.recoveryProposal.summary}</span><small>{exceptionDetail.data.approvalSummary?.pending ?? 0} approval waiting</small></div>}
       </Card>
+      <IslandWeatherTable />
+
       <Card className="section-gap">
         <SectionTitle title="Farm verification" detail="Permitted farms" />
         <div className="verification-grid">{batches.data.items.map((batch, index) => <Link href={`/crops/${batch.cropBatchId}`} key={batch.cropBatchId} data-tour={index === 0 ? "coordinator-crop-link" : undefined}><CheckCircle2 /><span><strong>{titleCase(batch.cropType)}</strong><small>{batch.availableToPromise.value} kg safe to promise</small></span><ArrowRight size={16} /></Link>)}</div>

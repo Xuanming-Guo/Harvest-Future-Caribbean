@@ -136,6 +136,13 @@ const FORBIDDEN_FIELD_NAMES = new Set([
   'severity',
   'rainfallMmByDate',
   'truth',
+  // A `WeatherModel` carries realised weather for days that have not happened,
+  // which is future truth in the same sense a scheduled disruption is. The
+  // model names its own store `hiddenRealisedWeather` precisely so that leaking
+  // the whole object into a payload trips this alarm rather than passing
+  // silently: the guard matches on field names, and a class instance's private
+  // fields are ordinary own properties at runtime.
+  'hiddenRealisedWeather',
 ]);
 
 export function assertNoTruthLeak(value: unknown, context: string): void {

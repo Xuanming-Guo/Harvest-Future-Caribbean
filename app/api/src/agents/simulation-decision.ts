@@ -2,6 +2,26 @@ import type { SimulationParticipant } from "@harvest/simulation";
 
 import { completeStructured, readLlmConfiguration } from "./structured-client.js";
 
+/**
+ * Read-only tools, kept apart from the mutation allow-list below.
+ *
+ * `toolsByRole` gates tools that change operational state, and a model chooses
+ * from it each simulated day. Reading the shared weather changes nothing, is
+ * safe for every role that plans around it, and must not become something a
+ * model can withhold: the whole point of issue #37 is that every participant
+ * plans from the same forecast. So it is listed here and always permitted.
+ *
+ * The buyer is absent on purpose. A hotel orders against a deadline and a
+ * price; the weather reaches it through the supply it is offered, not through
+ * its own planning.
+ */
+export const readToolsByRole: Record<SimulationParticipant["role"], string[]> = {
+  FARMER: ["read_weather"],
+  BUYER: [],
+  TRANSPORTER: ["read_weather"],
+  COORDINATOR: ["read_weather"],
+};
+
 const toolsByRole: Record<SimulationParticipant["role"], string[]> = {
   FARMER: ["submit_crop_observation", "publish_listing", "decide_approval"],
   BUYER: ["create_buyer_demand", "place_order", "decide_approval", "record_delivery_acceptance", "confirm_payment"],

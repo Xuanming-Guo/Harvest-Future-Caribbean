@@ -922,6 +922,55 @@ paths:
                 activeMissionIds: [23232323-2323-4323-8323-232323232323]
                 openExceptionIds: []
         default: {$ref: '#/components/responses/Problem'}
+  /v1/weather:
+    get:
+      tags: [Operations]
+      operationId: getIslandWeather
+      summary: Read observed conditions and the shared imperfect forecast for an island
+      description: >-
+        Every participant, human or simulated, plans from this one answer.
+        `current` is the realised weather for a day that has already occurred
+        and is labelled SYNTHETIC; `forecast` covers days that have not and is
+        labelled MODEL_PREDICTED, because a forecast is a prediction and not a
+        record. Realised weather for a future day is never stored and therefore
+        cannot be returned. No live weather service is contacted.
+      parameters:
+        - name: islandId
+          in: query
+          description: Defaults to the island of the caller's simulation run, or to saint-lucia.
+          schema: {type: string, minLength: 1, maxLength: 64}
+        - name: asOf
+          in: query
+          description: >-
+            Calendar date to read. Defaults to the most recent day on record.
+            A date later than that returns the most recent day instead of
+            inventing one, so the horizon cannot be probed.
+          schema: {type: string, format: date}
+        - name: simulationRunId
+          in: query
+          description: Operations and admin actors may select a saved run; a simulated actor is confined to its own.
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Current conditions and the forecast issued on the same day.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IslandWeather'}
+              example:
+                islandId: saint-lucia
+                asOf: '2026-09-05'
+                current:
+                  date: '2026-09-05'
+                  condition: RAIN
+                  rainMm: 18.4
+                  windKph: 24.1
+                  windFromDegrees: 84
+                  cloudCoverFraction: 0.54
+                  tempBand: WARM
+                  provenance: SYNTHETIC
+                forecast:
+                  - {date: '2026-09-06', leadDays: 1, condition: STORM, rainMm: 48.2, windKph: 41.5, windFromDegrees: 79, cloudCoverFraction: 0.9, tempBand: WARM, confidence: 0.78, provenance: MODEL_PREDICTED}
+        default: {$ref: '#/components/responses/Problem'}
   /v1/agent-traces/{traceId}:
     get:
       tags: [Operations]
@@ -2218,6 +2267,54 @@ components:
           minimum: 0
         activeMissionIds: {type: array, items: {type: string, format: uuid}}
         openExceptionIds: {type: array, items: {type: string, format: uuid}}
+    WeatherObservation:
+      description: Realised weather for a day that has already occurred. Synthetic record.
+      type: object
+      additionalProperties: false
+      required: [date, condition, rainMm, windKph, windFromDegrees, cloudCoverFraction, tempBand, provenance]
+      properties:
+        date: {type: string, format: date}
+        condition: {enum: [CLEAR, CLOUD, RAIN, STORM]}
+        rainMm: {type: number, minimum: 0}
+        windKph: {type: number, minimum: 0}
+        windFromDegrees:
+          description: Direction the wind blows from, clockwise from true north.
+          type: number
+          minimum: 0
+          exclusiveMaximum: 360
+        cloudCoverFraction: {type: number, minimum: 0, maximum: 1}
+        tempBand: {enum: [COOL, WARM, HOT]}
+        provenance: {const: SYNTHETIC}
+    WeatherForecastDay:
+      description: >-
+        One forecast day. Deliberately imperfect: a noised model of the realised
+        series whose error grows with lead time, never a reading of it.
+      type: object
+      additionalProperties: false
+      required: [date, leadDays, condition, rainMm, windKph, windFromDegrees, cloudCoverFraction, tempBand, confidence, provenance]
+      properties:
+        date: {type: string, format: date}
+        leadDays: {type: integer, minimum: 1}
+        condition: {enum: [CLEAR, CLOUD, RAIN, STORM]}
+        rainMm: {type: number, minimum: 0}
+        windKph: {type: number, minimum: 0}
+        windFromDegrees: {type: number, minimum: 0, exclusiveMaximum: 360}
+        cloudCoverFraction: {type: number, minimum: 0, maximum: 1}
+        tempBand: {enum: [COOL, WARM, HOT]}
+        confidence: {type: number, minimum: 0, maximum: 1}
+        provenance: {const: MODEL_PREDICTED}
+    IslandWeather:
+      type: object
+      additionalProperties: false
+      required: [islandId, asOf, forecast]
+      properties:
+        islandId: {type: string}
+        asOf: {type: string, format: date}
+        simulationRunId: {type: string, format: uuid}
+        current:
+          description: Absent when no day has been recorded for this island yet.
+          $ref: '#/components/schemas/WeatherObservation'
+        forecast: {type: array, items: {$ref: '#/components/schemas/WeatherForecastDay'}}
     OrderOutcomeSummary:
       type: object
       additionalProperties: false

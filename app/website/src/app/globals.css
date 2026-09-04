@@ -958,6 +958,27 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 @media (prefers-reduced-motion: reduce) {
   .farm-progress-scene, .field-crop-sprite, .crop-ready-spark, .crop-stage-art, .crop-stage-spark, .route-node-icon, .world-location-fallback, .hotel-scene-sky span, .world-place-scene { animation: none !important; }
 }
+/* Weather (#37). Conditions and a deliberately imperfect forecast, shared by
+   every role. Built from the same card, badge and line tokens as the rest of
+   the workspace so a forecast reads as part of the product, not as a widget. */
+.weather-card { display: grid; gap: 15px; }
+.weather-today { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 13px; }
+.weather-mark { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 12px; color: var(--forest); background: var(--mint); }
+.weather-today b { display: block; margin-top: 6px; font-size: 15px; }
+.weather-today small { color: var(--muted); }
+.weather-forecast { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.weather-forecast li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 11px; }
+.weather-forecast-day { font-weight: 700; }
+.weather-forecast-rain { color: var(--muted); font-size: 13px; }
+.weather-forecast small { color: var(--muted); font-size: 11px; }
+.weather-risk { margin: 0; padding: 12px; border-radius: 9px; color: #7d5710; background: #fff4da; font-size: 13px; line-height: 1.5; }
+.weather-provenance { margin: 0; }
+.weather-table-scroll { overflow-x: auto; }
+.weather-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.weather-table th, .weather-table td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.weather-table thead th { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.weather-table tbody th { font-weight: 700; }
+.weather-table tbody tr:last-child th, .weather-table tbody tr:last-child td { border-bottom: 0; }
 
 /*
  * Simulated action replay (issue #38).

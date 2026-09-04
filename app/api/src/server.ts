@@ -17,6 +17,7 @@ import { recordEvent } from "./events.js";
 import { assertObjectBody, decisionReasonKeys, httpError, idempotent, readDecisionReason, readLocation, readQuantity, requireDecisionReason, sendProblem, type DecisionReasonCode } from "./http.js";
 import { acceptedValue } from "./payments.js";
 import { registerSimulationRoutes } from "./simulation-routes.js";
+import { readAsOfDate, readIslandId, readIslandWeather, weatherRunScope } from "./weather.js";
 import { batchStatusForStage, isReadyStatus } from "./workflows.js";
 import {
   approvalDto,
@@ -882,6 +883,25 @@ export async function buildServer() {
     });
     return { orderId, payment: updated.payment };
   }));
+
+  /**
+   * The one weather answer everybody plans from.
+   *
+   * Open to every product role deliberately: a farmer, a coordinator, a
+   * transporter and a simulated participant acting for any of them must see the
+   * same conditions and the same forecast, or the shared-forecast property in
+   * issue #37 is only a claim. It carries no run-scoped operational data, so
+   * there is nothing here to filter by role.
+   */
+  server.get("/v1/weather", async (request) => {
+    const actor = requireRole(request, [...productRoles]);
+    const query = request.query as JsonObject;
+    return readIslandWeather({
+      islandId: readIslandId(query.islandId),
+      simulationRunId: weatherRunScope(actor, query.simulationRunId),
+      asOf: readAsOfDate(query.asOf),
+    });
+  });
 
   server.get("/v1/agent-traces/:traceId", async (request) => {
     const actor = requireRole(request, [...productRoles]);

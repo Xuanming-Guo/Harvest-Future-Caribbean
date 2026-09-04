@@ -39,6 +39,7 @@ import type {
   ControlRoomFrame,
   ControlRoomMission,
   ControlRoomScene,
+  ControlRoomWeather,
   ReplayTimeline,
   SimulationAgentAction,
   SimulationOperationsSnapshot,
@@ -49,10 +50,25 @@ import type {
   DeliveryMission,
   GeoPoint,
   HiddenCropTruth,
+  ObservableWeatherAccess,
   ObservedCropBatch,
   ScheduledDisruption,
   World,
 } from './world/types.js';
+import {
+  FORECAST_PROVENANCE,
+  MAX_WEATHER_READINESS_DELAY_MS,
+  MINIMUM_QUALITY_FRACTION,
+  REALISED_WEATHER_PROVENANCE,
+  WEATHER_LEGEND,
+  isWetDay,
+  qualityLoss,
+  readinessDelayMs,
+  spoilageMultiplier,
+  travelSpeedFactor,
+  weatherDegradesRoad,
+} from './world/weather.js';
+import type { RealisedWeather } from './world/weather.js';
 
 export type PolicyName = 'BASELINE' | 'HARVEST';
 export type RunStatus = 'READY' | 'RUNNING' | 'PAUSED' | 'COMPLETED' | 'FAILED';
@@ -245,6 +261,31 @@ export interface RunMetrics {
    */
   causeCounts: Record<UnmetCause, number>;
   eventsProcessed: number;
+  /**
+   * What the realised weather did to this run.
+   *
+   * Recorded because "different weather changes the outcome" is an acceptance
+   * criterion, and a criterion nobody can measure is a claim rather than a
+   * result. Every figure here is a *counterfactual against the same run with
+   * mild weather*, not a share of the total, so a run whose weather did nothing
+   * reports zeros.
+   */
+  weather: WeatherEffectMetrics;
+}
+
+export interface WeatherEffectMetrics {
+  /** Island-days realised as RAIN or STORM. */
+  wetDays: number;
+  /** Island-days realised as STORM, a subset of `wetDays`. */
+  stormDays: number;
+  /** Total ripening pushed back across every batch, in days. */
+  readinessDelayDays: number;
+  /** Marketable fraction taken off batches by wet weather, summed across batches. */
+  qualityLost: number;
+  /** Kilograms of the run's waste that the weather multiplier added. */
+  weatherSpoilageKg: number;
+  /** Missions that left into rain or a storm and were slowed by it. */
+  weatherDelayedMissions: number;
 }
 
 export interface RunResult {
@@ -272,6 +313,27 @@ const EVIDENCE_LABEL =
 
 /** Above this daily rainfall a rain-sensitive road is treated as degraded. */
 const HEAVY_RAIN_MM = 45;
+
+// --------------------------------------------------------------------------
+// Weather levers that belong to coordination rather than to physics.
+//
+// The physical rules — how rain slows ripening, how a storm rots a ready crop,
+// how wet tarmac slows a van — live in `world/weather.ts` beside the weather
+// they act on. What stays here is the one lever that reads a *forecast*, which
+// is a scheduling decision and not a fact about the world.
+// --------------------------------------------------------------------------
+
+/**
+ * How far ahead a forecast storm pulls a pickup forward, and how little of the
+ * ready-hold window survives when one is coming.
+ *
+ * This reads the forecast, which may be wrong, and it only ever brings a
+ * collection forward inside the bounds the deadline already sets, so acting on
+ * a forecast that misses costs a slightly early pickup rather than a broken
+ * promise.
+ */
+const STORM_FORECAST_WINDOW_DAYS = 2;
+const STORM_FORECAST_HOLD_MS = 2 * HOUR_MS;
 
 /**
  * How long a buyer waits past the deadline before sourcing elsewhere.
@@ -317,6 +379,16 @@ export class SimulationEngine {
   private readonly rematchAttempts = new Map<string, number>();
   /** Why a demand ended short, recorded as it settles. */
   private readonly demandCauses = new Map<string, UnmetCause>();
+  /** Readiness already lost to weather per batch, so the cap is a total and not a per-day one. */
+  private readonly weatherReadinessDelayMs = new Map<string, number>();
+  /** Marketable fraction the weather has taken off batches, summed across the run. */
+  private weatherQualityLost = 0;
+  /** Kilograms of spoilage the weather multiplier added over mild-weather decay. */
+  private weatherSpoilageKg = 0;
+  /** Missions whose journey the departure-day weather lengthened. */
+  private weatherDelayedMissions = 0;
+  /** Batch to island, memoised: every weather effect needs it and the mapping is static. */
+  private readonly islandByBatchId = new Map<string, string>();
   private observationRequestCount = 0;
   private readonly captureFrames: boolean;
   private readonly coordinationMode: CoordinationMode;
@@ -584,7 +656,6 @@ export class SimulationEngine {
 
   private onWorldTick(): void {
     const today = formatDate(this.clock);
-    const rainfallMm = this.world.truth.rainfallMmByDate.get(today) ?? 0;
     const stormSeverity = Math.max(
       0,
       ...[...this.disruptionRuntimes.values()]
@@ -592,11 +663,12 @@ export class SimulationEngine {
         .map((runtime) => runtime.disruption.severity),
     );
 
-    // Rain degrades sensitive roads. This is observable: a driver can see a
-    // flooded road, so it is allowed to reach the observed world.
+    // Rain degrades sensitive roads, and a storm takes out roads that ordinary
+    // rain would not. This is observable: a driver can see a flooded road, so
+    // it is allowed to reach the observed world.
     for (const road of this.world.roads.values()) {
-      const degraded = rainfallMm >= HEAVY_RAIN_MM && road.rainSensitivity > 0.5;
-      if (degraded) {
+      const weather = this.realisedWeatherToday(road.islandId, today);
+      if (weatherDegradesRoad(weather, road.rainSensitivity, HEAVY_RAIN_MM)) {
         this.world.observed.degradedRoadSegmentIds.add(road.roadSegmentId);
       } else if (!this.isRoadDisrupted(road.roadSegmentId)) {
         this.world.observed.degradedRoadSegmentIds.delete(road.roadSegmentId);
@@ -606,6 +678,29 @@ export class SimulationEngine {
     // Advance crop truth. Stage changes are physical; nobody has to see them.
     for (const crop of this.world.truth.crops.values()) {
       if (crop.stage === 'HARVESTED' || crop.stage === 'SPOILED') continue;
+
+      const weather = this.realisedWeatherToday(this.islandForBatch(crop.batchId), today);
+
+      // Ripening slows in the wet. Applied before the stage branch below, so a
+      // batch that would have tipped into READY today stays MATURING for the
+      // whole tick rather than being ready and delayed in the same breath.
+      if (this.clock < crop.readyAt && isWetDay(weather)) {
+        const alreadySlipped = this.weatherReadinessDelayMs.get(crop.batchId) ?? 0;
+        const slipMs = Math.min(readinessDelayMs(weather), MAX_WEATHER_READINESS_DELAY_MS - alreadySlipped);
+        if (slipMs > 0) {
+          crop.readyAt += slipMs;
+          this.weatherReadinessDelayMs.set(crop.batchId, alreadySlipped + slipMs);
+        }
+      }
+
+      // Wet weather costs marketable grade whether the batch is standing ready
+      // or still growing: split and blemished fruit is refused at the gate.
+      const gradeLost = qualityLoss(weather);
+      if (gradeLost > 0) {
+        const before = crop.qualityFraction;
+        crop.qualityFraction = Math.max(MINIMUM_QUALITY_FRACTION, Number((crop.qualityFraction - gradeLost).toFixed(6)));
+        this.weatherQualityLost += before - crop.qualityFraction;
+      }
 
       if (this.clock >= crop.readyAt) {
         if (crop.stage !== 'READY') crop.stage = 'READY';
@@ -619,8 +714,13 @@ export class SimulationEngine {
           // A visible storm accelerates deterioration, but multiple overlapping
           // fronts do not compound into an implausible exponential penalty.
           // The strongest active seeded severity sets the multiplier.
-          const lostToday = Math.min(remaining, remaining * crop.dailySpoilageRate * (1 + stormSeverity));
+          const withoutWeather = Math.min(remaining, remaining * crop.dailySpoilageRate * (1 + stormSeverity));
+          const lostToday = Math.min(
+            remaining,
+            remaining * crop.dailySpoilageRate * (1 + stormSeverity) * spoilageMultiplier(weather),
+          );
           crop.lostKg += lostToday;
+          this.weatherSpoilageKg += lostToday - withoutWeather;
 
           if (crop.potentialYieldKg - crop.harvestedKg - crop.lostKg <= 0.5) {
             crop.stage = 'SPOILED';
@@ -636,6 +736,95 @@ export class SimulationEngine {
     }
 
     this.schedule(this.clock + DAY_MS, 'WORLD_TICK', Priority.World, {});
+  }
+
+  // ------------------------------------------------------------------
+  // Weather
+  // ------------------------------------------------------------------
+
+  /**
+   * Realised weather for an island on a date, for the engine's own use.
+   *
+   * Physics may read the day it is simulating; nothing facing a participant
+   * may. `observableWeather` below is the boundary that enforces the second
+   * half of that sentence, and it is the only weather a policy, a replay frame
+   * or the Product API ever receives.
+   */
+  private realisedWeatherToday(islandId: string | null, date: string): RealisedWeather | null {
+    if (!islandId) return null;
+    return this.world.truth.weather.truthOn(islandId, date);
+  }
+
+  private islandForBatch(batchId: string): string | null {
+    const cached = this.islandByBatchId.get(batchId);
+    if (cached !== undefined) return cached;
+    const farmId = this.world.observed.batches.get(batchId)?.farmId;
+    const islandId = farmId ? this.world.farms.get(farmId)?.islandId : undefined;
+    if (islandId === undefined) return null;
+    this.islandByBatchId.set(batchId, islandId);
+    return islandId;
+  }
+
+  /** The island a mission is working on, taken from where it is picking up. */
+  private islandForMission(mission: DeliveryMission): string | null {
+    const commitment = this.world.observed.commitments.get(mission.commitmentId);
+    const farmId = commitment?.allocations[0]?.farmId;
+    return farmId ? this.world.farms.get(farmId)?.islandId ?? null : null;
+  }
+
+  /**
+   * The weather any observer may have: realised days that have occurred, and
+   * forecasts for the ones that have not.
+   *
+   * Public because the connected Product API writes exactly this into run-scoped
+   * storage each frame, so a human on the website and a simulated participant
+   * read the same numbers from the same place rather than from two models that
+   * agree until they do not.
+   */
+  get observableWeather(): ObservableWeatherAccess {
+    const model = this.world.truth.weather;
+    const asOf = () => formatDate(this.clock);
+    return {
+      current: (islandId) => model.realisedUpTo(islandId, asOf(), asOf()),
+      realisedOn: (islandId, date) => model.realisedUpTo(islandId, date, asOf()),
+      forecast: (islandId) => model.forecastIssuedOn(islandId, asOf()),
+    };
+  }
+
+  /**
+   * The realised weather's effect on this run, counted rather than asserted.
+   *
+   * `wetDays` walks the whole realised series up to the clock rather than only
+   * the days something happened on, because a run in which every batch was
+   * already harvested before a wet week still had a wet week.
+   */
+  private weatherEffectMetrics(): WeatherEffectMetrics {
+    let wetDays = 0;
+    let stormDays = 0;
+    const today = formatDate(this.clock);
+    for (const islandId of this.weatherIslandIds) {
+      for (const date of this.world.truth.weather.dates) {
+        if (date > today) break;
+        const reading = this.world.truth.weather.truthOn(islandId, date);
+        if (!reading) continue;
+        if (reading.condition === 'STORM') stormDays += 1;
+        if (isWetDay(reading)) wetDays += 1;
+      }
+    }
+    const delayMs = [...this.weatherReadinessDelayMs.values()].reduce((total, value) => total + value, 0);
+    return {
+      wetDays,
+      stormDays,
+      readinessDelayDays: Number((delayMs / DAY_MS).toFixed(3)),
+      qualityLost: Number(this.weatherQualityLost.toFixed(6)),
+      weatherSpoilageKg: Number(this.weatherSpoilageKg.toFixed(2)),
+      weatherDelayedMissions: this.weatherDelayedMissions,
+    };
+  }
+
+  /** Islands this run actually covers, sorted, so weather publication is bounded. */
+  get weatherIslandIds(): readonly string[] {
+    return [...new Set([...this.world.farms.values()].map((farm) => farm.islandId))].sort();
   }
 
   private isRoadDisrupted(roadSegmentId: string): boolean {
@@ -857,10 +1046,10 @@ export class SimulationEngine {
     if (runtime.disruption.type === 'ROAD') {
       for (const roadSegmentId of runtime.disruption.affectedEntityIds) {
         const today = formatDate(this.clock);
-        const rainfallMm = this.world.truth.rainfallMmByDate.get(today) ?? 0;
         const road = this.world.roads.get(roadSegmentId);
-        // Only clear it if rain is not independently keeping it degraded.
-        if (!road || rainfallMm < HEAVY_RAIN_MM || road.rainSensitivity <= 0.5) {
+        const weather = road ? this.realisedWeatherToday(road.islandId, today) : null;
+        // Only clear it if the weather is not independently keeping it degraded.
+        if (!road || !weatherDegradesRoad(weather, road.rainSensitivity, HEAVY_RAIN_MM)) {
           this.world.observed.degradedRoadSegmentIds.delete(roadSegmentId);
         }
       }
@@ -1054,6 +1243,7 @@ export class SimulationEngine {
       roads: this.world.roads,
       ids: this.ids,
       random: this.random.stream('policy'),
+      weather: this.observableWeather,
       record: (decision) => {
         this.decisions.push({ ...decision, at: this.clock });
       },
@@ -1297,11 +1487,40 @@ export class SimulationEngine {
     // Readiness only ever brings a departure forward: the deadline stays the
     // upper bound, and the readiness figure is the grower's report rather than
     // the hidden `readyAt`, so this buys no foresight.
-    const { collectOnReadiness, maxHoldMs } = this.policy.capabilities;
+    const { collectOnReadiness, maxHoldMs, readsForecast } = this.policy.capabilities;
     const reportedReadyAt = collectOnReadiness ? this.reportedReadyAt(commitment) : null;
 
+    // A forecast storm shortens how long a reported-ready batch may sit. This
+    // is the one place a forecast touches behaviour, and it is coordination
+    // rather than biology: it moves a vehicle, never a crop. It can also be
+    // wrong, because the forecast can be wrong, and the cost of being wrong is
+    // an early pickup rather than a broken promise.
+    const islandId = this.world.farms.get(commitment.allocations[0]?.farmId ?? '')?.islandId ?? null;
+    const stormForecast =
+      readsForecast && islandId
+        ? this.observableWeather
+            .forecast(islandId)
+            .find((day) => day.condition === 'STORM' && day.leadDays <= STORM_FORECAST_WINDOW_DAYS)
+        : undefined;
+    const effectiveHoldMs = stormForecast ? Math.min(maxHoldMs, STORM_FORECAST_HOLD_MS) : maxHoldMs;
+    if (stormForecast) {
+      this.decisions.push({
+        at: this.clock,
+        kind: 'HARVEST_PULL_PICKUP_FORWARD',
+        summary: `Storm forecast for ${stormForecast.date}; collection brought forward rather than held to the deadline.`,
+        evidence: {
+          commitmentId: commitment.commitmentId,
+          islandId: islandId ?? 'unknown',
+          forecastDate: stormForecast.date,
+          leadDays: stormForecast.leadDays,
+          confidence: stormForecast.confidence,
+          source: 'FORECAST',
+        },
+      });
+    }
+
     let departAt = deadlineDeparture;
-    if (reportedReadyAt !== null && deadlineDeparture - reportedReadyAt > maxHoldMs) {
+    if (reportedReadyAt !== null && deadlineDeparture - reportedReadyAt > effectiveHoldMs) {
       const promptDeparture = Math.max(this.clock + HOUR_MS, reportedReadyAt + handlingMs);
       departAt = Math.min(deadlineDeparture, promptDeparture);
     }
@@ -1365,6 +1584,28 @@ export class SimulationEngine {
     const vehicle = this.world.transporters.get(mission.transporterId);
     mission.loadedKg = Math.min(loaded, vehicle?.capacityKg ?? loaded);
     mission.status = 'ACTIVE';
+
+    // Weather on the day the vehicle actually sets out slows the journey. Read
+    // here rather than at planning time because at planning time it has not
+    // happened yet, and letting the planner use it would be the engine handing
+    // itself the foresight the whole design denies the policy.
+    //
+    // The mission stays ACTIVE rather than becoming DELAYED. It is leaving on
+    // time and simply travelling slower, which is a later arrival and not a
+    // stalled mission — and `DELAYED` is the status the connected Product API
+    // flow reads as "this vehicle did not set out", which would strand the
+    // pickup updates that follow.
+    const weather = this.realisedWeatherToday(this.islandForMission(mission), formatDate(this.clock));
+    const speedFactor = travelSpeedFactor(weather);
+    if (speedFactor < 1) {
+      const remainingMs = Math.max(0, mission.plannedArrivalAt - this.clock);
+      const extraMs = Math.round(remainingMs * (1 / speedFactor - 1));
+      if (extraMs > 0) {
+        mission.plannedArrivalAt += extraMs;
+        this.weatherDelayedMissions += 1;
+        this.replaceMissionSchedule(mission, false);
+      }
+    }
   }
 
   private onMissionArrive(missionId: string): void {
@@ -1765,6 +2006,7 @@ export class SimulationEngine {
       demands,
       disruptions: projection.disruptions,
       degradedRoadSegmentIds: [...this.world.observed.degradedRoadSegmentIds].sort(),
+      weather: this.createWeatherFrame(),
       newDecisions,
       totals: {
         acceptedKg: Number(acceptedKg.toFixed(2)),
@@ -1776,6 +2018,38 @@ export class SimulationEngine {
         observationRequests: this.observationRequestCount,
       },
     };
+  }
+
+  /**
+   * Observable weather for every island in the run, as of this frame.
+   *
+   * Today's realised conditions plus today's forecast, and nothing else. A
+   * replay is handed to a browser, so a realised value for a day the frame has
+   * not reached would publish hidden truth to anybody with developer tools
+   * open. Both halves carry their own provenance because they are different
+   * kinds of claim: one is a synthetic record, the other a synthetic prediction.
+   */
+  private createWeatherFrame(): ControlRoomWeather[] {
+    const observable = this.observableWeather;
+    const frames: ControlRoomWeather[] = [];
+    for (const islandId of this.weatherIslandIds) {
+      const current = observable.current(islandId);
+      if (!current) continue;
+      frames.push({
+        islandId,
+        date: current.date,
+        condition: current.condition,
+        rainMm: current.rainMm,
+        windKph: current.windKph,
+        windFromDegrees: current.windFromDegrees,
+        cloudCoverFraction: current.cloudCoverFraction,
+        tempBand: current.tempBand,
+        provenance: REALISED_WEATHER_PROVENANCE,
+        forecastProvenance: FORECAST_PROVENANCE,
+        forecast: observable.forecast(islandId).map((day) => ({ ...day })),
+      });
+    }
+    return frames;
   }
 
   private recordFrame(eventType: string): void {
@@ -1853,6 +2127,7 @@ export class SimulationEngine {
           islandId: transporter.islandId,
         })),
       ],
+      weatherLegend: WEATHER_LEGEND,
       evidenceLabel: EVIDENCE_LABEL,
     };
   }
@@ -1901,6 +2176,7 @@ export class SimulationEngine {
       observationRequests: this.observationRequestCount,
       causeCounts,
       eventsProcessed: this.eventsProcessed,
+      weather: this.weatherEffectMetrics(),
     };
 
     return {

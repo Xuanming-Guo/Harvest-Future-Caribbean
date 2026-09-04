@@ -71,6 +71,12 @@ export const baselinePolicy: CoordinationPolicy = {
     collectOnReadiness: false,
     maxHoldMs: Number.POSITIVE_INFINITY,
     rematchOnNewSupply: false,
+    // The forecast is published to everyone, but a fragmented market has nobody
+    // holding a field of ready crop next to a five-day outlook, so nothing here
+    // acts on it. This is the fairness line for the paired benchmark: the
+    // baseline is unchanged by the arrival of forecasts, which the tests assert
+    // by digest rather than take on trust.
+    readsForecast: false,
   },
 
   estimateAvailableKg(_context: PolicyContext, batch: ObservedCropBatch): number {

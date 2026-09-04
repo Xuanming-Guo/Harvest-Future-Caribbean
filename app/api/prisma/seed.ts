@@ -1,4 +1,5 @@
 import { PrismaClient, Provenance } from "@prisma/client";
+import { RandomSource, WeatherModel } from "@harvest/simulation";
 
 const databaseUrl =
   process.env.DATABASE_URL ??
@@ -82,6 +83,7 @@ async function main() {
     prisma.cropObservationIntake.deleteMany(),
     prisma.traceStep.deleteMany(),
     prisma.domainEvent.deleteMany(),
+    prisma.weatherObservation.deleteMany(),
     prisma.simulationActorMapping.deleteMany(),
     prisma.pairedRun.deleteMany(),
     prisma.simulationRun.deleteMany(),
@@ -587,6 +589,8 @@ async function main() {
     ],
   });
 
+  await seedIslandWeather();
+
   const eventBase = {
     traceId: ids.trace,
     correlationId: "d0000000-0000-4000-8000-000000000001",
@@ -604,6 +608,68 @@ async function main() {
       { ...eventBase, id: "e0000000-0000-4000-8000-000000000006", eventType: "ALLOCATION_PROPOSED", occurredAt: at("2026-09-04T08:13:00Z"), actorId: ids.coordinator, entityId: ids.allocation, causationId: "e0000000-0000-4000-8000-000000000005", provenance: Provenance.INFERRED, payload: { allocationId: ids.allocation, orderId: ids.order, lines: [{ cropBatchId: ids.batchOne, quantity: { value: 14, unit: "kg" } }, { cropBatchId: ids.batchTwo, quantity: { value: 6, unit: "kg" } }] } },
     ],
   });
+}
+
+/**
+ * A week of realised weather for the development island, and the forecast each
+ * of those days issued.
+ *
+ * Built with the simulation's own `WeatherModel` rather than by hand, so the
+ * seeded world and a saved run are the same weather implementation and cannot
+ * drift apart. Days after `LAST_SEEDED_DAY` are generated because a forecast
+ * needs something to approximate, and are then deliberately not stored: the
+ * table holds only days that have occurred, which is what makes it structurally
+ * unable to leak future weather to a participant.
+ *
+ * Everything written here is SYNTHETIC. No live weather service is contacted.
+ */
+async function seedIslandWeather() {
+  const ISLAND_ID = "saint-lucia";
+  const FIRST_SEEDED_DAY = "2026-08-29";
+  const LAST_SEEDED_DAY = "2026-09-04";
+  const GENERATED_DAYS = 12;
+
+  const startsAt = Date.parse(`${FIRST_SEEDED_DAY}T00:00:00Z`);
+  const random = new RandomSource(20260904);
+  const rainStream = random.stream("seed:weather:rain");
+  const rainfall = new Map<string, number>();
+  for (let day = 0; day < GENERATED_DAYS; day += 1) {
+    const date = new Date(startsAt + day * 86_400_000).toISOString().slice(0, 10);
+    rainfall.set(date, Number(Math.max(0, rainStream.normal(12, 8)).toFixed(2)));
+  }
+
+  const model = new WeatherModel({
+    islandIds: [ISLAND_ID],
+    startsAt,
+    days: GENERATED_DAYS,
+    rainfallMm: (_islandId, date) => rainfall.get(date) ?? 0,
+    realisedStream: random.stream("seed:weather:realised"),
+    forecastStream: random.stream("seed:weather:forecast"),
+  });
+
+  const rows = model.dates
+    .filter((date) => date <= LAST_SEEDED_DAY)
+    .map((date) => {
+      const realised = model.truthOn(ISLAND_ID, date);
+      if (!realised) return null;
+      return {
+        islandId: ISLAND_ID,
+        observedOn: at(`${date}T00:00:00Z`),
+        condition: realised.condition,
+        rainMm: realised.rainMm,
+        windKph: realised.windKph,
+        windFromDegrees: realised.windFromDegrees,
+        cloudCoverFraction: realised.cloudCoverFraction,
+        tempBand: realised.tempBand,
+        provenance: Provenance.SYNTHETIC,
+        forecast: model.forecastIssuedOn(ISLAND_ID, date).map((day) => ({ ...day, provenance: Provenance.MODEL_PREDICTED })),
+        forecastProvenance: Provenance.MODEL_PREDICTED,
+        simulationRunId: null,
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null);
+
+  await prisma.weatherObservation.createMany({ data: rows, skipDuplicates: true });
 }
 
 main()
