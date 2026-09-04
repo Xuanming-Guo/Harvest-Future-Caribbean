@@ -23,7 +23,7 @@ import Image from "next/image";
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
 import { Badge, Card, EmptyState, SectionTitle } from "@/components/ui";
-import { IslandGameCanvas } from "@/components/island-game-canvas";
+import { IslandGameCanvas, type IslandMarkerState } from "@/components/island-game-canvas";
 import { formatDate, titleCase } from "@/lib/format";
 
 export type DeliveryMissionView = ApiSchema<"DeliveryMissionView">;
@@ -336,12 +336,14 @@ export function DeliveryJourney({
   const points = [routeStart, ...anchors];
   const gamePoints = points.map((point) => ({ x: point.x / 920, y: point.y / 560 }));
   const gameMarkers = [
-    { kind: "DEPOT" as const, label: "Driver base", point: { x: routeStart.x / 920, y: routeStart.y / 560 }, sequence: 0 },
+    { kind: "DEPOT" as const, label: "Driver base", point: { x: routeStart.x / 920, y: routeStart.y / 560 }, sequence: 0, state: "DEPOT" as const, variant: 0 },
     ...mission.stops.map((stop, index) => ({
       kind: stop.kind,
       label: stop.displayName,
       point: { x: anchors[index]!.x / 920, y: anchors[index]!.y / 560 },
       sequence: stop.sequence,
+      state: (stop.kind === "DROPOFF" ? "OPEN" : mission.cargo.find((item) => item.farmId === stop.farmId)?.cropStatus ?? "QUIET") as IslandMarkerState,
+      variant: index % 3,
     })),
   ];
   const moving = mission.status === "IN_TRANSIT" && mission.currentStopSequence < mission.stops.length;

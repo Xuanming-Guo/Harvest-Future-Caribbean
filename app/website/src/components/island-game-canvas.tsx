@@ -3,11 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 
 export type IslandPoint = { x: number; y: number };
+export type IslandMarkerState = "PLANNED" | "GROWING" | "HARVEST_READY" | "HARVESTED" | "CLOSED" | "OPEN" | "QUIET" | "DEPOT";
 export type IslandMarker = {
   kind: "DEPOT" | "PICKUP" | "DROPOFF";
   label: string;
   point: IslandPoint;
   sequence: number;
+  state: IslandMarkerState;
+  variant: number;
 };
 
 type IslandGameCanvasProps = {
@@ -162,19 +165,67 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
         const container = new Container();
         const labelSide = marker.point.x < 0.42 ? "right" : marker.point.x > 0.58 ? "left" : "center";
         const markerColor = marker.kind === "PICKUP" ? 0x55c982 : marker.kind === "DROPOFF" ? 0xff8262 : 0xffca52;
-        const groundGlow = new Graphics().ellipse(0, 12, 43, 14).fill({ color: markerColor, alpha: 0.18 });
+        const isReady = marker.state === "HARVEST_READY";
+        const hasDemand = marker.state === "OPEN";
+        const groundGlow = new Graphics().ellipse(0, 12, isReady || hasDemand ? 49 : 43, isReady || hasDemand ? 17 : 14).fill({ color: markerColor, alpha: 0.18 });
         const pulse = new Graphics().ellipse(0, 7, 48, 28).stroke({ color: markerColor, width: 4, alpha: 0.8 });
         const symbol = new Container();
+        const accessory = new Container();
         if (marker.kind === "PICKUP") {
           const farm = new Sprite(farmTexture);
           farm.anchor.set(0.5, 0.75);
-          farm.scale.set(94 / farmTexture.width);
+          const farmScale = (91 + marker.variant * 3) / farmTexture.width;
+          farm.scale.set(marker.variant === 2 ? -farmScale : farmScale, farmScale);
+          farm.rotation = (marker.variant - 1) * 0.015;
+          if (marker.state === "CLOSED") {
+            farm.tint = 0xb9beaa;
+            farm.alpha = 0.72;
+          }
           symbol.addChild(farm);
+
+          if (marker.state === "PLANNED") {
+            [-12, 0, 12].forEach((x, index) => {
+              const seedling = new Graphics()
+                .moveTo(x, 7).lineTo(x, -2 - index % 2 * 2).stroke({ color: 0x3b7652, width: 2.4 })
+                .ellipse(x - 3, -3 - index % 2 * 2, 4, 2.2).fill({ color: 0x73b960 })
+                .ellipse(x + 3, -5 - index % 2 * 2, 4, 2.2).fill({ color: 0x58a553 });
+              seedling.position.set(-4, 18);
+              accessory.addChild(seedling);
+            });
+          }
+          if (marker.state === "GROWING") {
+            [-15, 0, 15].forEach((x, index) => {
+              const crop = new Graphics()
+                .ellipse(x - 4, 0, 7, 3.5).fill({ color: 0x4d9e4d })
+                .ellipse(x + 4, -2, 7, 3.5).fill({ color: 0x71bb54 })
+                .circle(x, -5 - index % 2 * 2, 4).fill({ color: 0xa4d55e });
+              crop.position.set(-2, 17);
+              accessory.addChild(crop);
+            });
+          }
+          if (marker.state === "HARVESTED") {
+            const crate = new Graphics()
+              .roundRect(-12, -8, 24, 16, 2).fill({ color: 0xd58b3c }).stroke({ color: 0x754525, width: 2 })
+              .moveTo(-10, -2).lineTo(10, -2).moveTo(-10, 4).lineTo(10, 4).stroke({ color: 0xf0b85d, width: 1.5 });
+            crate.position.set(32, 12);
+            accessory.addChild(crate);
+          }
         } else if (marker.kind === "DROPOFF") {
           const hotel = new Sprite(hotelTexture);
           hotel.anchor.set(0.5, 0.75);
-          hotel.scale.set(91 / hotelTexture.width);
+          const hotelScale = (89 + marker.variant * 3) / hotelTexture.width;
+          hotel.scale.set(marker.variant === 2 ? -hotelScale : hotelScale, hotelScale);
+          hotel.rotation = (marker.variant - 1) * 0.012;
+          if (marker.state === "QUIET") hotel.tint = 0xe3e6d8;
           symbol.addChild(hotel);
+
+          if (hasDemand) {
+            const orderFlag = new Graphics()
+              .moveTo(0, 13).lineTo(0, -13).stroke({ color: 0x784527, width: 2.5 })
+              .poly([1, -12, 20, -8, 1, 1]).fill({ color: 0xffdb52 }).stroke({ color: 0xa95b2f, width: 2 });
+            orderFlag.position.set(25, -38);
+            accessory.addChild(orderFlag);
+          }
         } else {
           const depot = new Graphics();
           depot.roundRect(-19, -12, 38, 31, 4).fill({ color: 0xeaa43d }).stroke({ color: 0x784527, width: 2.5 });
@@ -203,9 +254,18 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
           .roundRect(boardX, 24, labelWidth, label.height + 10, 7)
           .fill({ color: 0xfff5c9, alpha: 0.96 })
           .stroke({ color: 0xb98943, width: 2 });
-        container.addChild(groundGlow, pulse, symbol, labelBoard, label);
+        const statusSparks = isReady ? Array.from({ length: 3 }, (_, index) => {
+          const spark = new Graphics()
+            .poly([0, -6, 2, -2, 6, 0, 2, 2, 0, 6, -2, 2, -6, 0, -2, -2])
+            .fill({ color: 0xffe870 })
+            .stroke({ color: 0xc68730, width: 1.2 });
+          spark.position.set([-34, 31, 5][index]!, [-33, -25, -53][index]!);
+          accessory.addChild(spark);
+          return spark;
+        }) : [];
+        container.addChild(groundGlow, pulse, symbol, accessory, labelBoard, label);
         markerLayer.addChild(container);
-        return { container, groundGlow, label, labelBoard, marker, pulse, point: marker.point };
+        return { accessory, container, groundGlow, label, labelBoard, marker, pulse, point: marker.point, statusSparks };
       });
 
       const dust = Array.from({ length: 7 }, (_, index) => {
@@ -341,14 +401,21 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
           mote.position.set(originX + Math.sin(phase * Math.PI * 2 + index) * 13, originY - phase * 31);
           mote.alpha = reducedMotion.matches ? 0.28 : Math.sin(phase * Math.PI) * 0.62;
         });
-        worldMarkers.forEach(({ container, groundGlow, label, labelBoard, marker, pulse }, index) => {
+        worldMarkers.forEach(({ accessory, container, groundGlow, label, labelBoard, marker, pulse, statusSparks }, index) => {
           const selected = marker.kind !== "DEPOT" && selectedStopRef.current === marker.sequence;
           const markerScale = Math.max(0.66, Math.min(1.08, width / 900)) * (showAllLabels ? 1.08 : 1) * (selected ? 1.08 : 1);
           container.scale.set(markerScale);
           container.y = marker.point.y * height;
-          groundGlow.alpha = 0.12 + (Math.sin(elapsed / 360 + index) + 1) * 0.08;
-          pulse.alpha = selected ? 0.42 + (Math.sin(elapsed / 230) + 1) * 0.2 : 0.16;
-          pulse.scale.set(selected ? 1 + (Math.sin(elapsed / 260) + 1) * 0.08 : 1);
+          const lively = marker.state === "HARVEST_READY" || marker.state === "OPEN";
+          const breathe = reducedMotion.matches ? 0 : (Math.sin(elapsed / 360 + index) + 1) * 0.08;
+          groundGlow.alpha = (lively ? 0.2 : 0.1) + breathe;
+          pulse.alpha = selected ? 0.42 + (reducedMotion.matches ? 0 : (Math.sin(elapsed / 230) + 1) * 0.2) : lively ? 0.2 + breathe * 0.7 : 0.1;
+          pulse.scale.set(selected && !reducedMotion.matches ? 1 + (Math.sin(elapsed / 260) + 1) * 0.08 : 1);
+          accessory.y = marker.state === "OPEN" && !reducedMotion.matches ? Math.sin(elapsed / 430 + index) * 1.5 : 0;
+          statusSparks.forEach((spark, sparkIndex) => {
+            spark.alpha = reducedMotion.matches ? 0.9 : 0.42 + (Math.sin(elapsed / 280 + sparkIndex * 1.9) + 1) * 0.28;
+            spark.scale.set(reducedMotion.matches ? 0.9 : 0.82 + Math.sin(elapsed / 320 + sparkIndex) * 0.15);
+          });
           label.alpha = showAllLabels || selected ? 1 : 0;
           labelBoard.alpha = showAllLabels || selected ? 1 : 0;
         });

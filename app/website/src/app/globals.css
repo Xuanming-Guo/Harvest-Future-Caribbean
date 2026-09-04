@@ -547,8 +547,11 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .open-world-stage { border-radius: 20px; }
 .open-world-surface.is-game-ready .world-location-fallback { opacity: 0; }
 .world-location-hit { position: absolute; z-index: 7; display: grid; width: 76px; height: 76px; place-items: center; padding: 0; border: 0; border-radius: 50%; color: #315140; background: transparent; transform: translate(-50%, -50%); cursor: pointer; }
-.world-location-hit:focus-visible { outline: 5px solid #ffe45f; outline-offset: 3px; }
-.world-location-hit:hover { background: rgba(255,238,115,.2); }
+.world-location-hit::before { content: ""; position: absolute; inset: 7px 1px 2px; border-radius: 50%; opacity: 0; background: radial-gradient(ellipse,rgba(255,239,119,.52),rgba(255,239,119,0) 69%); transform: scale(.72); transition: opacity .18s ease, transform .2s cubic-bezier(.2,.8,.3,1); }
+.world-location-hit:focus-visible { outline: 4px solid #ffe45f; outline-offset: 3px; }
+.world-location-hit:hover::before, .world-location-hit.is-selected::before, .world-location-hit.is-route-focus::before { opacity: 1; transform: scale(1.25); }
+.world-location-hit.is-harvest-ready::before, .world-location-hit.is-open::before { opacity: .46; animation: world-place-glow 1.9s ease-in-out var(--marker-delay) infinite alternate; }
+@keyframes world-place-glow { to { opacity: .82; transform: scale(1.16); } }
 .world-location-fallback { display: grid; gap: 3px; min-width: 52px; min-height: 52px; place-items: center; padding: 8px; border: 3px solid #fff4bc; border-radius: 50%; color: white; background: #35835b; box-shadow: 0 5px 0 #1b5a3c, 0 8px 14px rgba(20,70,47,.3); transition: opacity .18s ease; animation: route-marker-float 1.9s ease-in-out var(--marker-delay) infinite alternate; }
 .world-location-hit.is-hotel .world-location-fallback { background: #d95d45; box-shadow: 0 5px 0 #9b392b, 0 8px 14px rgba(91,39,31,.28); }
 .world-location-fallback b { display: block; max-width: 92px; overflow: hidden; font-size: 8px; line-height: 1.05; text-overflow: ellipsis; white-space: nowrap; }
@@ -597,6 +600,8 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .world-place-header h2 { margin-top: 1px; font-size: clamp(19px,3vw,27px); }
 .world-place-header small { color: #6e654e; font-size: 9px; font-weight: 700; }
 .world-place-content { position: relative; z-index: 4; width: min(760px, calc(100% - 36px)); margin: 16px auto 28px; }
+.world-farm-scene .farm-field-crops { transform: translateY(10%); }
+.world-farm-scene .world-place-content { position: absolute; right: 18px; bottom: 18px; width: min(520px, calc(100% - 36px)); max-height: 42%; margin: 0; overflow: auto; scrollbar-width: thin; }
 .world-crop-grid { width: 100%; }
 .world-supply-board, .world-private-place { display: grid; gap: 12px; justify-items: start; padding: 18px; border: 4px solid #f3ca76; border-radius: 19px; background: rgba(255,250,222,.95); box-shadow: 0 8px 0 rgba(114,69,30,.36),0 18px 34px rgba(31,65,45,.2); }
 .world-private-place { justify-items: center; margin: 9vh auto 0; text-align: center; }
@@ -612,10 +617,7 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .hotel-scene-sky span:nth-child(2) { top: 31%; left: 47%; width: 110px; animation-delay: -7s; }
 .hotel-scene-sky span:nth-child(3) { top: 11%; left: 68%; width: 80px; animation-delay: -12s; }
 @keyframes cloud-drift { to { translate: 55px 5px; } }
-.hotel-scene-building { position: absolute; z-index: 1; right: 7%; bottom: 22%; display: grid; width: clamp(180px,25vw,300px); height: clamp(150px,24vw,250px); grid-template-columns: repeat(2,1fr); gap: 18px; padding: 48px 28px 24px; border: 6px solid #f2d293; border-radius: 28px 28px 8px 8px; background: linear-gradient(120deg,#fff3c7,#e7bd79); box-shadow: 0 14px 0 #9e653d,0 24px 30px rgba(55,64,38,.27); }
-.hotel-scene-building > i { position: absolute; top: -52px; left: 50%; width: 122px; height: 66px; border: 6px solid #f7d788; border-radius: 60px 60px 8px 8px; background: #dc5d48; transform: translateX(-50%); box-shadow: 0 7px 0 #97392d; }
-.hotel-scene-building > b { position: absolute; z-index: 1; top: -26px; left: 50%; color: #fff5c6; font-size: 15px; letter-spacing: .12em; transform: translateX(-50%); }
-.hotel-scene-building > span { border: 5px solid #fff0bd; border-radius: 8px; background: #54a7bf; box-shadow: inset 0 -12px 0 rgba(22,86,109,.25); }
+.hotel-scene-art { position: absolute; z-index: 1; top: 18%; right: 3%; width: clamp(250px,33vw,440px); height: auto; pointer-events: none; filter: drop-shadow(0 16px 10px rgba(57,63,36,.25)); user-select: none; }
 .hotel-order-board { width: min(700px,calc(100% - 36px)); margin-right: auto; margin-left: 5%; padding: 17px; border: 5px solid #8d552d; border-radius: 20px; background: linear-gradient(145deg,#f4d18a,#e8ad5f); box-shadow: 0 9px 0 #63371f,0 20px 35px rgba(40,53,30,.27); }
 .hotel-order-board-title { display: flex; align-items: center; gap: 10px; margin-bottom: 13px; color: #53321d; }
 .hotel-order-board-title span { display: grid; }
@@ -673,6 +675,8 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
   .map-main .world-hud-actions { margin-left: auto; }
   .map-main .world-hud-actions .island-world-count:first-child { display: none; }
   .open-world-shell, .world-place-scene { min-height: calc(100dvh - 84px); border-width: 3px; border-radius: 19px; }
+  .world-farm-scene .farm-field-crops { transform: translateY(13%); }
+  .world-farm-scene .world-place-content { right: 11px; bottom: 11px; width: calc(100% - 22px); max-height: 34%; }
   .world-directory-button { top: 11px; right: 10px; min-height: 39px; padding: 6px 8px; }
   .world-directory-button span { display: none; }
   .world-directory { position: fixed; top: auto; right: 10px; bottom: 10px; left: 10px; width: auto; max-height: min(70dvh,600px); border-radius: 21px; animation-name: route-drawer-mobile-arrive; }
@@ -683,7 +687,7 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
   .world-location-hit { width: 68px; height: 68px; }
   .world-place-header { align-items: flex-start; flex-direction: column; gap: 10px; padding: 13px; }
   .world-place-content { width: calc(100% - 22px); margin-top: 5px; }
-  .hotel-scene-building { right: -25px; bottom: 8%; opacity: .65; }
+  .hotel-scene-art { top: 20%; right: -34px; width: 270px; opacity: .92; }
   .hotel-order-board { width: calc(100% - 22px); margin-right: 11px; margin-left: 11px; }
   .hotel-order-ticket { grid-template-columns: 1fr; }
   .hotel-order-ticket .badge { position: absolute; top: 11px; right: 10px; }

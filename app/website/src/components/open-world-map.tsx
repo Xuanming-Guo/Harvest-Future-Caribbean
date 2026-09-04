@@ -4,10 +4,10 @@ import type { ApiSchema } from "@harvest/shared";
 import { ArrowLeft, ArrowRight, Building2, Check, ChevronDown, Hotel, ListFilter, MapPin, Maximize2, Minus, Move, PackageCheck, Plus, Search, Sprout, Store, Truck, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 
 import { CropProgressPlot, FarmFieldCrops, type DeliveryMissionView } from "@/components/delivery-world";
-import { IslandGameCanvas, type IslandPoint } from "@/components/island-game-canvas";
+import { IslandGameCanvas, type IslandMarkerState, type IslandPoint } from "@/components/island-game-canvas";
 import { Badge, EmptyState } from "@/components/ui";
 import { titleCase } from "@/lib/format";
 
@@ -15,7 +15,7 @@ export type WorldMapView = ApiSchema<"WorldMapView">;
 export type WorldMapLocation = ApiSchema<"WorldMapLocation">;
 type ProductRole = "FARMER" | "BUYER" | "TRANSPORTER" | "COORDINATOR";
 
-type WorldNode = {
+export type WorldNode = {
   id: string;
   kind: "FARM" | "HOTEL";
   label: string;
@@ -66,6 +66,14 @@ export function layoutWorldLocations(locations: WorldMapLocation[]): WorldNode[]
       point: worldSlots[slotIndex]!,
     };
   });
+}
+
+const cropStatePriority = ["HARVEST_READY", "GROWING", "PLANNED", "HARVESTED", "CLOSED"] as const;
+
+export function worldMarkerState(node: WorldNode): IslandMarkerState {
+  if (node.kind === "HOTEL") return node.members.some((location) => location.opportunities.length > 0) ? "OPEN" : "QUIET";
+  const cropStates = new Set(node.members.flatMap((location) => location.crops.map((crop) => crop.status)));
+  return cropStatePriority.find((state) => cropStates.has(state)) ?? "QUIET";
 }
 
 function locationHint(location: WorldMapLocation) {
@@ -164,7 +172,7 @@ function WorldHotelScene({ location, world, role, onBack }: { location: WorldMap
   return (
     <section className="world-place-scene world-hotel-scene" aria-label={`${location.displayName} hotel view`}>
       <div className="hotel-scene-sky" aria-hidden="true"><span /><span /><span /></div>
-      <div className="hotel-scene-building" aria-hidden="true"><i /><b>HOTEL</b><span /><span /><span /><span /></div>
+      <Image className="hotel-scene-art" src="/art/hotel-location-game.webp" alt="" width={512} height={341} priority />
       <div className="world-place-header">
         <button type="button" className="world-back-button" onClick={onBack}><ArrowLeft size={17} />Back to island</button>
         <div><span>{location.serviceZone}</span><h2>{location.displayName}</h2><small>{location.access === "BUYER_DEMAND" ? "Buyer requests you can help fill" : "Hotel delivery destination"}</small></div>
@@ -201,7 +209,15 @@ export function OpenWorldMap({ world, mission, role, onClearRoute, onSceneChange
   const [rendererReady, setRendererReady] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [mapView, setMapView] = useState({ x: 0, y: 0, zoom: 1 });
-  const gesture = useRef<{ pointerId: number; x: number; y: number } | undefined>(undefined);
+  const inertiaFrame = useRef<number | null>(null);
+  const gesture = useRef<{
+    pointers: Map<number, { x: number; y: number }>;
+    lastCenter: { x: number; y: number };
+    lastDistance?: number;
+    lastTime: number;
+    velocityX: number;
+    velocityY: number;
+  } | null>(null);
   const nodes = useMemo(() => layoutWorldLocations(world.locations), [world.locations]);
   const visibleLocations = world.locations.filter((location) => {
     const query = directoryQuery.trim().toLowerCase();
@@ -220,13 +236,30 @@ export function OpenWorldMap({ world, mission, role, onClearRoute, onSceneChange
     return hotelNode?.point ?? worldSlots[(index + 5) % worldSlots.length]!;
   })] : [];
   const gameMarkers = [
-    ...(mission ? [{ kind: "DEPOT" as const, label: "Driver depot", point: depotPoint, sequence: 0 }] : []),
-    ...nodes.map((node, index) => ({ kind: node.kind === "FARM" ? "PICKUP" as const : "DROPOFF" as const, label: node.label, point: node.point, sequence: index + 100 })),
+    ...(mission ? [{ kind: "DEPOT" as const, label: "Driver depot", point: depotPoint, sequence: 0, state: "DEPOT" as const, variant: 0 }] : []),
+    ...nodes.map((node, index) => ({
+      kind: node.kind === "FARM" ? "PICKUP" as const : "DROPOFF" as const,
+      label: node.label,
+      point: node.point,
+      sequence: index + 100,
+      state: worldMarkerState(node),
+      variant: hash(node.id) % 3,
+    })),
   ];
   const selectedNodeIndex = nodes.findIndex((node) => node.id === selectedNodeId);
-  const selectedSequence = selectedNodeIndex < 0 ? -1 : selectedNodeIndex + 100;
+  const routeFocusIndex = mission?.stops
+    .slice(Math.min(mission.currentStopSequence, mission.stops.length - 1))
+    .map((stop) => nodes.findIndex((node) => node.members.some((member) => (
+      stop.farmId ? member.locationId === stop.farmId : member.displayName === stop.displayName
+    ))))
+    .find((index) => index >= 0) ?? -1;
+  const selectedSequence = selectedNodeIndex >= 0 ? selectedNodeIndex + 100 : routeFocusIndex >= 0 ? routeFocusIndex + 100 : -1;
   const moving = mission?.status === "IN_TRANSIT" && mission.currentStopSequence < mission.stops.length;
   const worldStyle = { transform: `translate3d(${mapView.x}px, ${mapView.y}px, 0) scale(${mapView.zoom})` } as CSSProperties;
+
+  useEffect(() => () => {
+    if (inertiaFrame.current !== null) cancelAnimationFrame(inertiaFrame.current);
+  }, []);
 
   function clampView(x: number, y: number, zoom: number) {
     const boundedZoom = Math.min(2, Math.max(1, zoom));
@@ -244,6 +277,7 @@ export function OpenWorldMap({ world, mission, role, onClearRoute, onSceneChange
 
   function closeLocation() {
     setSelectedLocation(undefined);
+    setSelectedNodeId(undefined);
     onSceneChange?.(false);
   }
 
@@ -255,25 +289,93 @@ export function OpenWorldMap({ world, mission, role, onClearRoute, onSceneChange
     setMapView((current) => clampView(current.x + movement[0]!, current.y + movement[1]!, current.zoom));
   }
 
+  function pointerCenter(pointers: Map<number, { x: number; y: number }>) {
+    const points = [...pointers.values()];
+    return {
+      x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+      y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+    };
+  }
+
+  function pointerDistance(pointers: Map<number, { x: number; y: number }>) {
+    const points = [...pointers.values()];
+    if (points.length < 2) return undefined;
+    return Math.hypot(points[0]!.x - points[1]!.x, points[0]!.y - points[1]!.y);
+  }
+
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if ((event.target as HTMLElement).closest("button")) return;
-    gesture.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+    if (inertiaFrame.current !== null) {
+      cancelAnimationFrame(inertiaFrame.current);
+      inertiaFrame.current = null;
+    }
+    const point = { x: event.clientX, y: event.clientY };
+    if (!gesture.current) {
+      gesture.current = {
+        pointers: new Map([[event.pointerId, point]]),
+        lastCenter: point,
+        lastTime: event.timeStamp,
+        velocityX: 0,
+        velocityY: 0,
+      };
+    } else {
+      gesture.current.pointers.set(event.pointerId, point);
+      gesture.current.lastCenter = pointerCenter(gesture.current.pointers);
+      gesture.current.lastDistance = pointerDistance(gesture.current.pointers);
+      gesture.current.lastTime = event.timeStamp;
+    }
     setDragging(true);
     event.currentTarget.setPointerCapture?.(event.pointerId);
   }
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!gesture.current || gesture.current.pointerId !== event.pointerId) return;
-    const deltaX = event.clientX - gesture.current.x;
-    const deltaY = event.clientY - gesture.current.y;
-    gesture.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
-    setMapView((current) => clampView(current.x + deltaX, current.y + deltaY, current.zoom));
+    const currentGesture = gesture.current;
+    if (!currentGesture?.pointers.has(event.pointerId)) return;
+    currentGesture.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const center = pointerCenter(currentGesture.pointers);
+    const distance = pointerDistance(currentGesture.pointers);
+    const deltaX = center.x - currentGesture.lastCenter.x;
+    const deltaY = center.y - currentGesture.lastCenter.y;
+    const elapsed = Math.max(8, event.timeStamp - currentGesture.lastTime);
+
+    setMapView((current) => clampView(
+      current.x + deltaX,
+      current.y + deltaY,
+      current.zoom * (distance && currentGesture.lastDistance ? distance / currentGesture.lastDistance : 1),
+    ));
+    currentGesture.velocityX = deltaX * 16 / elapsed;
+    currentGesture.velocityY = deltaY * 16 / elapsed;
+    currentGesture.lastCenter = center;
+    currentGesture.lastDistance = distance;
+    currentGesture.lastTime = event.timeStamp;
   }
 
   function stopPointer(event: ReactPointerEvent<HTMLDivElement>) {
-    if (gesture.current?.pointerId !== event.pointerId) return;
-    gesture.current = undefined;
+    const currentGesture = gesture.current;
+    if (!currentGesture?.pointers.has(event.pointerId)) return;
+    currentGesture.pointers.delete(event.pointerId);
+    if (currentGesture.pointers.size) {
+      currentGesture.lastCenter = pointerCenter(currentGesture.pointers);
+      currentGesture.lastDistance = pointerDistance(currentGesture.pointers);
+      currentGesture.lastTime = event.timeStamp;
+      return;
+    }
+    gesture.current = null;
     setDragging(false);
+    if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    let velocityX = currentGesture.velocityX;
+    let velocityY = currentGesture.velocityY;
+    const glide = () => {
+      velocityX *= 0.9;
+      velocityY *= 0.9;
+      if (Math.abs(velocityX) < 0.2 && Math.abs(velocityY) < 0.2) {
+        inertiaFrame.current = null;
+        return;
+      }
+      setMapView((current) => clampView(current.x + velocityX, current.y + velocityY, current.zoom));
+      inertiaFrame.current = requestAnimationFrame(glide);
+    };
+    if (Math.abs(velocityX) >= 0.2 || Math.abs(velocityY) >= 0.2) inertiaFrame.current = requestAnimationFrame(glide);
   }
 
   if (selectedLocation) return selectedLocation.kind === "FARM"
@@ -285,7 +387,7 @@ export function OpenWorldMap({ world, mission, role, onClearRoute, onSceneChange
       <div
         className={`island-stage open-world-stage ${dragging ? "is-dragging" : ""}`}
         tabIndex={0}
-        aria-label="Interactive Saint Lucia world map. Drag to move, use arrow keys, or activate a farm or hotel."
+        aria-label="Interactive Saint Lucia world map. Drag or pinch to move, use arrow keys, or activate a farm or hotel."
         onKeyDown={onMapKeyDown}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -308,8 +410,10 @@ export function OpenWorldMap({ world, mission, role, onClearRoute, onSceneChange
             {nodes.map((node, index) => (
               <button
                 type="button"
-                className={`world-location-hit is-${node.kind.toLowerCase()} ${selectedNodeId === node.id ? "is-selected" : ""}`}
+                className={`world-location-hit is-${node.kind.toLowerCase()} is-${worldMarkerState(node).toLowerCase().replaceAll("_", "-")} ${selectedNodeId === node.id ? "is-selected" : ""} ${routeFocusIndex === index ? "is-route-focus" : ""}`}
                 style={{ left: `${node.point.x * 100}%`, top: `${node.point.y * 100}%`, "--marker-delay": `${index * -.13}s` } as CSSProperties}
+                aria-current={routeFocusIndex === index ? "location" : undefined}
+                data-world-state={worldMarkerState(node)}
                 aria-label={node.members.length === 1 ? `${node.kind === "FARM" ? "Farm" : "Hotel"}: ${node.label}. ${locationHint(node.members[0]!)}` : `Open ${node.label}`}
                 onClick={() => node.members.length === 1 ? openLocation(node.members[0]!, node.id) : (setDirectoryQuery(node.members[0]!.serviceZone), setKindFilter(node.kind), setDirectoryOpen(true), setSelectedNodeId(node.id))}
                 onPointerEnter={() => setSelectedNodeId(node.id)}
@@ -330,7 +434,7 @@ export function OpenWorldMap({ world, mission, role, onClearRoute, onSceneChange
           <button type="button" onClick={() => setMapView({ x: 0, y: 0, zoom: 1 })} aria-label="Reset map view"><Maximize2 size={17} /></button>
         </div>
         <button className="world-directory-button" type="button" aria-label={`${world.locations.length} island places. Browse farms and hotels`} aria-expanded={directoryOpen} onClick={() => setDirectoryOpen((open) => !open)}><ListFilter size={17} /><span>Places</span><b>{world.locations.length}</b></button>
-        <div className="world-map-hint"><Move size={15} /><span>{nodes.length > 6 ? "Tap a place · drag to explore" : "Living island · drag to explore"}</span></div>
+        <div className="world-map-hint"><Move size={15} /><span>{nodes.length > 6 ? "Tap a place · drag or pinch" : "Living island · drag or pinch"}</span></div>
         {!mission && activeRequests > 0 && (
           <button className="world-demand-signal" type="button" onClick={() => { setDirectoryQuery(""); setKindFilter("HOTEL"); setDirectoryOpen(true); }}>
             <Store size={21} />

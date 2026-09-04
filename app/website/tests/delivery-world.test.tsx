@@ -9,7 +9,7 @@ import {
   type DeliveryMissionView,
   VehiclePicker,
 } from "@/components/delivery-world";
-import { layoutWorldLocations, OpenWorldMap, type WorldMapView } from "@/components/open-world-map";
+import { layoutWorldLocations, OpenWorldMap, worldMarkerState, type WorldMapView } from "@/components/open-world-map";
 
 const mission: DeliveryMissionView = {
   missionId: "23232323-2323-4323-8323-232323232323",
@@ -161,7 +161,7 @@ describe("delivery world", () => {
     };
     const { container } = render(<OpenWorldMap world={populatedWorld} role="FARMER" />);
 
-    expect(container.querySelector(".world-map-hint")).toHaveTextContent("Tap a place · drag to explore");
+    expect(container.querySelector(".world-map-hint")).toHaveTextContent("Tap a place · drag or pinch");
     const firstPlace = screen.getByRole("button", { name: /Island place 1/ });
     fireEvent.focus(firstPlace);
     expect(firstPlace).toHaveClass("is-selected");
@@ -169,12 +169,24 @@ describe("delivery world", () => {
     expect(firstPlace).not.toHaveClass("is-selected");
   });
 
+  it("turns crop stages and buyer demand into scalable world signals", () => {
+    const nodes = layoutWorldLocations(world.locations);
+    expect(worldMarkerState(nodes.find((node) => node.kind === "FARM")!)).toBe("HARVEST_READY");
+    expect(worldMarkerState(nodes.find((node) => node.kind === "HOTEL")!)).toBe("OPEN");
+
+    const { container } = render(<OpenWorldMap world={world} role="FARMER" />);
+    expect(container.querySelector('[data-world-state="HARVEST_READY"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-world-state="OPEN"]')).toBeInTheDocument();
+    expect(container.querySelector(".world-location-hit b")).not.toHaveTextContent("1");
+  });
+
   it("keeps delivery roads as an optional layer over the open world", () => {
-    const { rerender } = render(<OpenWorldMap world={world} role="FARMER" />);
+    const { container, rerender } = render(<OpenWorldMap world={world} role="FARMER" />);
     expect(screen.queryByText("Route layer")).not.toBeInTheDocument();
     rerender(<OpenWorldMap world={world} mission={mission} role="FARMER" />);
     expect(screen.getByText("Route layer")).toBeInTheDocument();
     expect(screen.getByText(/20 kg Cucumber → Bay Gardens Hotel/)).toBeInTheDocument();
+    expect(container.querySelector('button[aria-label^="Hotel: Bay Gardens Hotel"]')).toHaveAttribute("aria-current", "location");
   });
 
   it("selects tactile delivery tickets from the board", () => {
