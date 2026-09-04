@@ -125,10 +125,10 @@ $run | Select-Object runId, status, policy, decisionMode,
 ```
 
 Expected engine values for seed `42`, re-recorded from a real run after
-realised weather (#37). These move whenever the engine or the Product API
-changes, so the connected-run test checks determinism, outcome arithmetic, and
-the cause vocabulary rather than pinning these counts; this document is where the
-counts themselves are kept:
+recorded weather (#90) replaced the synthetic realised series (#37). These move
+whenever the engine or the Product API changes, so the connected-run test checks
+determinism, outcome arithmetic, and the cause vocabulary rather than pinning
+these counts; this document is where the counts themselves are kept:
 
 ```text
 status            COMPLETED
@@ -139,20 +139,26 @@ estimationMode    DETERMINISTIC_FALLBACK
 frameCount        110
 eventsProcessed    72
 totalDemandedKg   2183
-totalAcceptedKg   838.94
+totalAcceptedKg   852.55
 ```
 
 `metrics.weather` records what the sky did to this run, as a counterfactual
 against the same run in mild weather:
 
 ```text
-wetDays                    10
-stormDays                   4
-readinessDelayDays       9.72
-qualityLost              1.12
-weatherSpoilageKg      311.03
-weatherDelayedMissions      2
+wetDays                     4
+stormDays                   0
+readinessDelayDays       2.76
+qualityLost              0.28
+weatherSpoilageKg      186.24
+weatherDelayedMissions      0
 ```
+
+Recorded Saint Lucian days are milder than the synthetic generator's draw for
+this seed, which is the point of the change rather than a side effect of it: the
+generator was tuned for plausibility and drew four storms into a twenty-two-day
+September window, where the recorded September the seed selects has none. The
+run is easier as a result, and the numbers below are the easier run's.
 
 `metrics.productActions` must also exist with positive attempted, succeeded and
 domain-event counts. For the deterministic seed-`42` run, expect:
@@ -179,7 +185,8 @@ read_weather actions      36
 roles                     FARMER, COORDINATOR, TRANSPORTER
 island-days stored        22
 frames carrying weather   110 of 110
-realised conditions       CLEAR 3, CLOUD 9, RAIN 6, STORM 4
+realised conditions       CLEAR 11, CLOUD 7, RAIN 4, STORM 0
+evidence type             PUBLIC_REFERENCE on all 22 island-days
 ```
 
 Every stored island-day is a day that had already occurred when it was written,
@@ -242,24 +249,26 @@ failure.
 Every figure above is read from a real run, never edited by hand. The five
 columns show what each change to the fulfilment path moved:
 
-| Value | Before the #53 fixes | After readiness/expiry/re-match | After safe partial commitment | After the horizon clamp | After payment tracking | After realised weather |
-|---|---|---|---|---|---|---|
-| `frameCount` | 130 | 119 | 127 | 117 | 119 | 110 |
-| `eventsProcessed` | 82 | 76 | 80 | 76 | 76 | 72 |
-| `productActions.attempted` | 154 | 140 | 151 | 123 | 125 | 113 |
-| `productActions.domainEventsCreated` | 242 | 222 | 238 | 199 | 201 | 184 |
-| `activeListings` | 7 | 3 | 3 | 5 | 5 | 5 |
-| total orders | 11 | 11 | 11 | 8 | 8 | 8 |
-| fulfilled | 2 | 3 | 4 | 3 | 3 | 2 |
-| partially fulfilled | 0 | 2 | 2 | 1 | 1 | 1 |
-| unfulfilled | 8 | 5 | 5 | 4 | 4 | 5 |
-| pending | 1 | 1 | 0 | 0 | 0 | 0 |
-| approved commitments | 8 | 5 | 7 | 5 | 5 | 3 |
-| completed missions | 8 | 5 | 7 | 5 | 5 | 3 |
-| `deliveryAcceptedKg` | 359 | 1387.75 | 1545.13 | 1000.63 | 1000.63 | 838.94 |
-| overdue payments at run end | n/a | n/a | n/a | n/a | 0 | 0 |
-| frames showing an overdue payment | n/a | n/a | n/a | n/a | 19 | 16 |
-| `read_weather` actions | n/a | n/a | n/a | n/a | n/a | 36 |
+| Value | Before the #53 fixes | After readiness/expiry/re-match | After safe partial commitment | After the horizon clamp | After payment tracking | After synthetic realised weather | After recorded weather |
+|---|---|---|---|---|---|---|---|
+| `frameCount` | 130 | 119 | 127 | 117 | 119 | 110 | 110 |
+| `eventsProcessed` | 82 | 76 | 80 | 76 | 76 | 72 | 72 |
+| `productActions.attempted` | 154 | 140 | 151 | 123 | 125 | 113 | 113 |
+| `productActions.domainEventsCreated` | 242 | 222 | 238 | 199 | 201 | 184 | 184 |
+| `activeListings` | 7 | 3 | 3 | 5 | 5 | 5 | 5 |
+| total orders | 11 | 11 | 11 | 8 | 8 | 8 | 8 |
+| fulfilled | 2 | 3 | 4 | 3 | 3 | 2 | 2 |
+| partially fulfilled | 0 | 2 | 2 | 1 | 1 | 1 | 1 |
+| unfulfilled | 8 | 5 | 5 | 4 | 4 | 5 | 5 |
+| pending | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
+| approved commitments | 8 | 5 | 7 | 5 | 5 | 3 | 3 |
+| completed missions | 8 | 5 | 7 | 5 | 5 | 3 | 3 |
+| `deliveryAcceptedKg` | 359 | 1387.75 | 1545.13 | 1000.63 | 1000.63 | 838.94 | 852.55 |
+| overdue payments at run end | n/a | n/a | n/a | n/a | 0 | 0 | 0 |
+| frames showing an overdue payment | n/a | n/a | n/a | n/a | 19 | 16 | 16 |
+| `read_weather` actions | n/a | n/a | n/a | n/a | n/a | 36 | 36 |
+| storm days | n/a | n/a | n/a | n/a | n/a | 4 | 0 |
+| `weatherSpoilageKg` | n/a | n/a | n/a | n/a | n/a | 311.03 | 186.24 |
 
 The first column is the pre-#53 baseline this document recorded before the
 readiness fixes, when unready crop was still listable, so eight commitments
@@ -285,22 +294,32 @@ No physical outcome moves, because recording a payment mutates no world state,
 and giving the synthetic buyers 7-day terms changes none of these totals
 either: it changes only which payment status those same orders report.
 
-The last column is realised weather, and it is the second column after the
-horizon clamp that changes the world rather than how the world is handled. The
-same eight orders are raised, but the crop underneath them is harder to deliver:
-ten of the run's twenty-two days are wet, four of them storms, ripening slips
-9.7 batch-days in total and the weather adds 311 kg of spoilage. Two commitments
-that previously reached delivery no longer do, so `deliveryAcceptedKg` falls
-from 1,000.63 kg to 838.94 kg and one fulfilled order becomes unfulfilled.
-Read that column as a harder world rather than as a regression in the workflow:
-every simulated action still succeeds, and the ten paired benchmark seeds in
+The sixth column is synthetic realised weather, and it is the second column
+after the horizon clamp that changes the world rather than how the world is
+handled. The same eight orders are raised, but the crop underneath them is
+harder to deliver: ten of the run's twenty-two days are wet, four of them storms,
+ripening slips 9.7 batch-days in total and the weather adds 311 kg of spoilage.
+Two commitments that previously reached delivery no longer do, so
+`deliveryAcceptedKg` falls from 1,000.63 kg to 838.94 kg and one fulfilled order
+becomes unfulfilled. Read that column as a harder world rather than as a
+regression in the workflow: every simulated action still succeeds.
+
+The last column swaps that synthetic series for **recorded** Saint Lucian days
+(#90) and changes nothing else. Every count above it is identical, which is the
+useful result: the weather source is a world input, not a change to the
+fulfilment path, so only the physical consequences move. The September this seed
+selects had no storm and four wet days against the generator's ten, so spoilage
+the weather is responsible for falls from 311 kg to 186 kg and
+`deliveryAcceptedKg` recovers from 838.94 kg to 852.55 kg — still well below the
+1,000.63 kg of the mild-weather column. The order that became unfulfilled under
+synthetic weather stays unfulfilled. The ten paired benchmark seeds in
 [`simulation/benchmarks/README.md`](../simulation/benchmarks/README.md) show the
-same effect and what it costs the policy comparison.
+same effect across seeds and what it costs the policy comparison.
 
 `deliveryAcceptedKg` is the sum of the three immutable delivery acceptances,
 not the engine's `totalAcceptedKg`. The control room uses this Product API
 quantity for its Harvest **Delivered** card. For seed `42`, both values are
-`838.94 kg` because the engine applies the Product API delivery acceptances back
+`852.55 kg` because the engine applies the Product API delivery acceptances back
 to physical state as each mission arrives.
 
 The `runId` is a fresh UUID. All evidence is explicitly labelled synthetic and
@@ -678,9 +697,11 @@ than silently running a local substitute.
 
 ## Boundaries
 
-- The regional scenario contains independent synthetic local systems for all
-  current UN M49 Caribbean areas. It does not model inter-island orders,
-  shipping, ports, customs, or currency conversion.
+- The regional scenario contains synthetic local systems for all current UN M49
+  Caribbean areas. Since #40 they are no longer independent: a scoped run models
+  inter-island orders, sailings, ports and customs between the islands in scope,
+  on the synthetic maritime network in `simulation/src/world/maritime.ts`. Costs
+  are quoted in XCD and no currency conversion is performed.
 - No mobile app.
 - No benchmark, Model Lab, Data Room or Judge page is added here.
 - Simulated approvals are synthetic decisions; real commitments still require
