@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const productApiUrl = process.env.NEXT_PUBLIC_PRODUCT_API_URL ?? "http://localhost:3001";
+const productApiUrl = process.env.HARVEST_E2E_API_URL ?? process.env.NEXT_PUBLIC_PRODUCT_API_URL ?? "http://localhost:3001";
 const OBSERVATIONS_PATH = "/v1/crop-observations";
 
 async function signIn(page: Page, persona: RegExp) {

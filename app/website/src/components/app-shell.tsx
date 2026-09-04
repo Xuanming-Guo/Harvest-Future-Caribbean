@@ -3,7 +3,6 @@
 import {
   ClipboardCheck,
   Compass,
-  LayoutGrid,
   Leaf,
   LogOut,
   Map as MapIcon,
@@ -29,7 +28,6 @@ const navigation = {
   FARMER: [
     ["/farmer", "My farm", Sprout],
     ["/map", "Map", MapIcon],
-    ["/farmer/farm", "Farm map", LayoutGrid],
     ["/orders", "Orders", PackageCheck],
   ],
   BUYER: [
