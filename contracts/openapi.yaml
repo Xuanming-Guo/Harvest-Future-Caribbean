@@ -677,6 +677,31 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MaritimeShipmentPage'}
         default: {$ref: '#/components/responses/Problem'}
+  /v1/maritime-shipments/{shipmentId}/updates:
+    post:
+      tags: [Delivery]
+      operationId: updateMaritimeShipment
+      summary: Record what actually happened to a cross-island consignment
+      description: >-
+        Sailing, customs clearance, weather delay, arrival, delivery or failure.
+        Every value is SYNTHETIC and comes from the physical simulation; nothing
+        here is a vessel-tracking feed, and no live service is called. A status
+        may only move forward, and a `FAILED` consignment is terminal.
+      parameters:
+        - $ref: '#/components/parameters/MaritimeShipmentId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MaritimeShipmentUpdate'}
+      responses:
+        '200':
+          description: Shipment record updated.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MaritimeShipment'}
+        default: {$ref: '#/components/responses/Problem'}
   /v1/maritime-network:
     get:
       tags: [Delivery]
@@ -1365,6 +1390,11 @@ components:
       schema: {type: string, format: uuid}
     ApprovalId:
       name: approvalId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    MaritimeShipmentId:
+      name: shipmentId
       in: path
       required: true
       schema: {type: string, format: uuid}
@@ -2701,6 +2731,19 @@ components:
         networkProvenance: {const: PUBLIC_REFERENCE}
         operationsProvenance: {const: SYNTHETIC}
         createdAt: {type: string, format: date-time}
+    MaritimeShipmentUpdate:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: {enum: [SCHEDULED, DEPARTED, DELAYED, ARRIVED, DELIVERED, FAILED]}
+        loadedKg: {type: number, minimum: 0}
+        actualDepartureAt: {type: string, format: date-time}
+        actualArrivalAt: {type: string, format: date-time}
+        deliveredAt: {type: string, format: date-time}
+        failureReason: {type: string, maxLength: 1000}
+        weatherDelayHours: {type: number, minimum: 0}
+        customs: {$ref: '#/components/schemas/CustomsCheckpoint'}
     MaritimeShipmentPage:
       type: object
       additionalProperties: false

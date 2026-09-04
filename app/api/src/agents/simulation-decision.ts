@@ -26,7 +26,10 @@ const toolsByRole: Record<SimulationParticipant["role"], string[]> = {
   FARMER: ["submit_crop_observation", "publish_listing", "decide_approval"],
   BUYER: ["create_buyer_demand", "place_order", "decide_approval", "record_delivery_acceptance", "confirm_payment"],
   TRANSPORTER: ["accept_delivery_mission", "report_mission_progress", "report_exception"],
-  COORDINATOR: ["verify_observation", "decide_approval"],
+  // The coordinator is the only role that proposes moving produce between
+  // islands, and booking the sailing is a separate tool because it is a
+  // separate decision that only becomes available once every approval lands.
+  COORDINATOR: ["verify_observation", "decide_approval", "propose_inter_island_commitment", "book_maritime_shipment", "report_shipment_progress"],
 };
 
 interface Decision {

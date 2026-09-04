@@ -29,7 +29,7 @@ import { RandomSource } from './core/random.js';
 import { DAY_MS, HOUR_MS, MINUTE_MS, formatDate, formatInstant, parseInstant, type SimulationInstant } from './core/time.js';
 import { baselinePolicy } from './policy/baseline.js';
 import { harvestPolicy } from './policy/harvest.js';
-import type { CoordinationPolicy, DecisionRecord, PolicyContext } from './policy/types.js';
+import type { CoordinationPolicy, DecisionRecord, InterIslandFill, PolicyContext } from './policy/types.js';
 import { requireScenario, haversineKm, ROAD_WINDING_FACTOR } from './scenario/saint-lucia-demo-v1.js';
 import { CARIBBEAN_ISLANDS_V1 } from './scenario/caribbean-islands-manifest-v1.js';
 import type { Scenario } from './scenario/types.js';
@@ -143,12 +143,50 @@ export type ProductSimulationEffect =
   | (ProductEffectEnvelope & {
       type: 'ALLOCATION_INVALIDATED' | 'ORDER_CANCELLED';
       demandId: string;
+    })
+  /**
+   * Every human approval on one inter-island commitment has been granted.
+   *
+   * This is the only route by which a connected run can put produce on a boat.
+   * The engine proposes; the Product API collects the approvals; and until this
+   * effect arrives there is no commitment and no shipment, so an inter-island
+   * promise cannot bind anyone by any other path.
+   */
+  | (ProductEffectEnvelope & {
+      type: 'INTER_ISLAND_COMMITMENT_APPROVED';
+      proposalId: string;
     });
 
 export interface ProductEffectResult {
   applied: boolean;
   reason: 'APPLIED' | 'DUPLICATE' | 'PHYSICAL_ECHO' | 'IGNORED' | 'REJECTED';
   simulationMissionId?: string;
+  simulationShipmentId?: string;
+}
+
+/**
+ * A cross-island fill the engine wants, before anybody has approved it.
+ *
+ * Deliberately not world state. It carries no commitment id and no shipment,
+ * because nothing exists yet: it is a request for a decision, and the decision
+ * is a human one taken through the Product API.
+ */
+export interface InterIslandProposalView {
+  proposalId: string;
+  demandId: string;
+  buyerId: string;
+  originIslandId: string;
+  destinationIslandId: string;
+  linkId: string;
+  originPortId: string;
+  destinationPortId: string;
+  operator: string;
+  seaLegHours: number;
+  journeyHoursSource: 'PUBLIC_TIMETABLE' | 'SYNTHETIC_DEFAULT';
+  lines: Array<{ batchId: string; farmId: string; quantityKg: number }>;
+  quantityKg: number;
+  rationale: string;
+  proposedAt: SimulationInstant;
 }
 
 /** Observable causal link used by the connected Product API bridge. */
@@ -424,6 +462,14 @@ const MAX_STORM_TRAVEL_DELAY_MS = 4 * HOUR_MS;
 const MAX_CROP_DAMAGE_FRACTION = 0.3;
 
 /**
+ * How often a connected run looks for supply on another island.
+ *
+ * Once a day rather than on every order, because a sailing is a slow, lumpy
+ * decision and re-asking hourly would fill the trace with the same answer.
+ */
+const INTER_ISLAND_REVIEW_INTERVAL_MS = DAY_MS;
+
+/**
  * Provenance labels carried by everything the maritime layer emits.
  *
  * Two labels rather than one, because a shipment record mixes two kinds of
@@ -486,6 +532,17 @@ export class SimulationEngine {
   private customsInspections = 0;
   /** Which of a commitment's allocations travel by sea, decided once at proposal time. */
   private readonly seaBatchIdsByCommitment = new Map<string, string[]>();
+  /**
+   * Cross-island fills waiting on a human decision, in connected mode.
+   *
+   * Held here rather than in the observed world because they are not yet part
+   * of the world: no commitment, no mission, no shipment. A proposal that is
+   * never approved leaves no trace beyond the decision record that says it was
+   * asked for and refused.
+   */
+  private readonly interIslandProposals = new Map<string, { view: InterIslandProposalView; fill: InterIslandFill }>();
+  /** Demands an inter-island fill has already been proposed for, so review does not loop. */
+  private readonly interIslandProposedDemandIds = new Set<string>();
   /**
    * Whether each booked sailing is going to fail, drawn once when it is booked.
    *
@@ -594,6 +651,19 @@ export class SimulationEngine {
     return this.buildScene();
   }
 
+  /**
+   * Cross-island consignments as a replay frame would carry them.
+   *
+   * The connected bridge needs the legs and the customs checkpoint to store a
+   * Product API record, and it must be the *same* projection a replay frame
+   * uses or the two would be able to disagree. Sharing the builder is what
+   * makes "the Product record and the replay frame agree" a property rather
+   * than a coincidence.
+   */
+  get observableShipments(): ControlRoomShipment[] {
+    return this.createShipmentFrame();
+  }
+
   /** Scenario horizon for deterministic day stepping. */
   get horizon(): { startsAt: SimulationInstant; endsAt: SimulationInstant } {
     return { startsAt: this.startsAt, endsAt: this.endsAt };
@@ -645,6 +715,14 @@ export class SimulationEngine {
     for (const buyer of [...this.world.buyers.values()].sort((a, b) => a.buyerId.localeCompare(b.buyerId))) {
       const firstOffset = demandStream.int(0, 3) * DAY_MS + demandStream.int(6, 10) * HOUR_MS;
       this.schedule(this.startsAt + firstOffset, 'BUYER_DEMAND', Priority.Actor, { buyerId: buyer.buyerId });
+    }
+
+    // In connected mode the Product API owns local matching, so the regional
+    // decision needs an occasion of its own. Scheduled only when the scoped
+    // network actually has a sailing to offer, which is why a one-island run
+    // gains no event, processes no extra work, and is bit-for-bit unchanged.
+    if (this.coordinationMode === 'EXTERNAL_PRODUCT_API' && this.world.maritime.links.length > 0) {
+      this.schedule(this.startsAt + INTER_ISLAND_REVIEW_INTERVAL_MS, 'INTER_ISLAND_REVIEW', Priority.Actor, {});
     }
 
     // Disruptions become observable when they start, not before.
@@ -750,6 +828,8 @@ export class SimulationEngine {
         return this.onShipmentSail((event.payload as { missionId: string }).missionId);
       case 'SHIPMENT_CLEAR':
         return this.onShipmentClear((event.payload as { missionId: string }).missionId);
+      case 'INTER_ISLAND_REVIEW':
+        return this.onInterIslandReview();
       case 'DISRUPTION_START':
         return this.onDisruptionStart((event.payload as { disruptionId: string }).disruptionId);
       case 'DISRUPTION_END':
@@ -1927,6 +2007,8 @@ export class SimulationEngine {
         return this.applyMissionDelayed(effect);
       case 'DELIVERY_ACCEPTED':
         return this.applyDeliveryAccepted(effect);
+      case 'INTER_ISLAND_COMMITMENT_APPROVED':
+        return this.applyInterIslandApproved(effect);
       case 'ALLOCATION_INVALIDATED':
       case 'ORDER_CANCELLED':
         return this.cancelDemandWork(effect.demandId);
@@ -2651,6 +2733,188 @@ export class SimulationEngine {
         networkProvenance: MARITIME_NETWORK_PROVENANCE,
         operationsProvenance: MARITIME_OPERATIONS_PROVENANCE,
       }));
+  }
+
+  /**
+   * Cross-island fills waiting on a human decision.
+   *
+   * The connected Product API bridge reads this, raises a real
+   * `INTER_ISLAND_COMMITMENT` approval for each one, and hands back an
+   * `INTER_ISLAND_COMMITMENT_APPROVED` effect only if every approver agrees.
+   * Nothing here is world state, so a proposal nobody approves simply expires.
+   */
+  get pendingInterIslandProposals(): readonly InterIslandProposalView[] {
+    return [...this.interIslandProposals.values()]
+      .map((entry) => ({ ...entry.view, lines: entry.view.lines.map((line) => ({ ...line })) }))
+      .sort((a, b) => a.proposedAt - b.proposedAt || a.proposalId.localeCompare(b.proposalId));
+  }
+
+  /**
+   * Looks for supply on another in-scope island for orders the local island has
+   * not covered.
+   *
+   * Connected mode only. In internal-policy mode the same decision is taken
+   * inside `planAllocation`, where local and regional supply are weighed
+   * together; here local matching belongs to the Product API, so the regional
+   * question is asked separately and its answer is a proposal rather than a
+   * commitment.
+   */
+  private onInterIslandReview(): void {
+    // Keep the daily cadence going regardless of what this pass finds.
+    this.schedule(this.clock + INTER_ISLAND_REVIEW_INTERVAL_MS, 'INTER_ISLAND_REVIEW', Priority.Actor, {});
+
+    const planner = this.policy.planInterIslandFill;
+    if (!planner || !this.policy.capabilities.coordinatesAcrossIslands) return;
+    if (this.world.maritime.links.length === 0) return;
+
+    const demands = [...this.world.observed.demands.values()]
+      .filter((demand) => demand.status === 'PENDING' || demand.status === 'COMMITTED')
+      .filter((demand) => demand.neededBy > this.clock)
+      .filter((demand) => !this.interIslandProposedDemandIds.has(demand.demandId))
+      .sort((a, b) => a.demandId.localeCompare(b.demandId));
+
+    for (const demand of demands) {
+      const buyer = this.world.buyers.get(demand.buyerId);
+      if (!buyer) continue;
+
+      // Whatever the Product API has already committed locally counts against
+      // the order, so a sailing is only ever proposed for the genuine gap.
+      let committedKg = 0;
+      for (const commitment of this.world.observed.commitments.values()) {
+        if (commitment.demandId !== demand.demandId || commitment.status === 'CANCELLED') continue;
+        committedKg += commitment.allocations.reduce((total, allocation) => total + allocation.quantityKg, 0);
+      }
+      const shortfallKg = demand.quantity.value - committedKg;
+      if (shortfallKg <= 0) continue;
+
+      const fill = planner(this.policyContext(), demand, buyer.islandId, shortfallKg);
+      if (!fill) {
+        this.recordNoPublicRouteIfNeeded(demand, committedKg);
+        continue;
+      }
+
+      const route = this.validateInterIslandRoute(demand, fill.proposal.originIslandId, fill.proposal.route);
+      if (!route) continue;
+
+      const quantityKg = Number(fill.allocations.reduce((total, line) => total + line.quantityKg, 0).toFixed(2));
+      if (quantityKg <= 0) continue;
+
+      const proposalId = this.ids.next();
+      this.interIslandProposals.set(proposalId, {
+        fill,
+        view: {
+          proposalId,
+          demandId: demand.demandId,
+          buyerId: demand.buyerId,
+          originIslandId: route.originIslandId,
+          destinationIslandId: route.destinationIslandId,
+          linkId: route.linkId,
+          originPortId: route.originPortId,
+          destinationPortId: route.destinationPortId,
+          operator: route.operator,
+          seaLegHours: route.seaLegHours,
+          journeyHoursSource: route.journeyHoursSource,
+          lines: fill.allocations.map((allocation) => ({ ...allocation })),
+          quantityKg,
+          rationale: fill.proposal.rationale,
+          proposedAt: this.clock,
+        },
+      });
+      this.interIslandProposedDemandIds.add(demand.demandId);
+      this.shipmentsProposed += 1;
+
+      this.decisions.push({
+        at: this.clock,
+        kind: 'HARVEST_PROPOSE_INTER_ISLAND',
+        summary:
+          `Local supply left ${shortfallKg.toFixed(0)} kg short, so ${quantityKg.toFixed(0)} kg was proposed from ` +
+          `${route.originIslandId} on ${route.operator}, pending inter-island approval.`,
+        evidence: {
+          demandId: demand.demandId,
+          proposalId,
+          originIslandId: route.originIslandId,
+          destinationIslandId: route.destinationIslandId,
+          linkId: route.linkId,
+          originPortId: route.originPortId,
+          destinationPortId: route.destinationPortId,
+          seaLegHours: route.seaLegHours,
+          journeyHoursSource: route.journeyHoursSource,
+          quantityKg,
+          rationale: fill.proposal.rationale,
+          approvalSubjectType: 'INTER_ISLAND_COMMITMENT',
+        },
+      });
+    }
+  }
+
+  /**
+   * Turns an approved proposal into a real commitment and a real sailing.
+   *
+   * The commitment is created already approved, because the approval it needed
+   * has just happened outside the engine, through the Product API, from named
+   * human participants. Anything short of that never reaches here.
+   */
+  private applyInterIslandApproved(
+    effect: Extract<ProductSimulationEffect, { type: 'INTER_ISLAND_COMMITMENT_APPROVED' }>,
+  ): ProductEffectResult {
+    const entry = this.interIslandProposals.get(effect.proposalId);
+    if (!entry) return { applied: false, reason: 'REJECTED' };
+    const demand = this.world.observed.demands.get(entry.view.demandId);
+    if (!demand || demand.status === 'FULFILLED' || demand.status === 'UNMET') {
+      return { applied: false, reason: 'REJECTED' };
+    }
+    const route = this.validateInterIslandRoute(demand, entry.view.originIslandId, entry.fill.proposal.route);
+    if (!route) return { applied: false, reason: 'REJECTED' };
+
+    // Revalidate the quantities exactly as the internal path does. An approval
+    // decided two hours ago is not a licence to promise crop that has since
+    // been picked.
+    const validated: Commitment['allocations'] = [];
+    for (const allocation of entry.fill.allocations) {
+      const batch = this.world.observed.batches.get(allocation.batchId);
+      if (!batch) continue;
+      const alreadyCommitted = this.committedKgForBatch(allocation.batchId);
+      const latest = batch.observations.at(-1);
+      const observedCeiling = latest ? latest.estimatedYieldKg : batch.areaHectares * 1_500;
+      const headroom = Math.max(0, observedCeiling - alreadyCommitted - batch.confirmedHarvestedKg);
+      const granted = Math.min(allocation.quantityKg, headroom);
+      if (granted <= 0) continue;
+      validated.push({ batchId: allocation.batchId, farmId: allocation.farmId, quantityKg: Number(granted.toFixed(2)) });
+    }
+    if (validated.length === 0) return { applied: false, reason: 'REJECTED' };
+
+    this.interIslandProposals.delete(effect.proposalId);
+
+    const interIsland: InterIslandCommitmentDetail = {
+      originIslandId: route.originIslandId,
+      destinationIslandId: route.destinationIslandId,
+      route,
+      approvalSubjectType: 'INTER_ISLAND_COMMITMENT',
+    };
+    const commitment: Commitment = {
+      commitmentId: this.ids.next(),
+      demandId: demand.demandId,
+      allocations: validated,
+      committedAt: this.clock,
+      approvedAt: this.clock,
+      status: 'APPROVED',
+      interIsland,
+    };
+    this.world.observed.commitments.set(commitment.commitmentId, commitment);
+    this.commitmentsProposed += 1;
+    this.commitmentsApproved += 1;
+    this.shipmentsApproved += 1;
+    this.totalPromisedKg += validated.reduce((total, allocation) => total + allocation.quantityKg, 0);
+    this.seaBatchIdsByCommitment.set(commitment.commitmentId, validated.map((allocation) => allocation.batchId));
+    if (demand.status === 'PENDING') demand.status = 'COMMITTED';
+
+    this.planMaritimeShipment(commitment, interIsland, validated);
+
+    const shipment = [...this.world.observed.shipments.values()].find(
+      (candidate) => candidate.commitmentId === commitment.commitmentId,
+    );
+    if (!shipment) return { applied: false, reason: 'REJECTED' };
+    return { applied: true, reason: 'APPLIED', simulationMissionId: shipment.missionId, simulationShipmentId: shipment.shipmentId };
   }
 
   // ------------------------------------------------------------------

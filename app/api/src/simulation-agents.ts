@@ -138,6 +138,20 @@ interface IslandWeatherDto {
   forecast: WeatherForecastDayDto[];
 }
 
+interface MaritimeShipmentDto {
+  shipmentId: string;
+  status: string;
+  simulationShipmentId: string | null;
+}
+
+interface InterIslandCommitmentDto {
+  commitmentId: string;
+  orderId: string;
+  status: string;
+  boundAt: string | null;
+  shipmentId: string | null;
+}
+
 interface VerificationTaskDto {
   taskId: string;
   status: string;
@@ -631,6 +645,15 @@ class ProductTools {
       ? { decision, reason: "Synthetic participant approved this feasible run-scoped proposal." }
       : { decision, reason: "Synthetic participant declined this proposal.", ...SYNTHETIC_REJECTION_REASON }, summary);
   }
+  proposeInterIslandCommitment(participant: ProductParticipant, at: string, payload: JsonObject, summary: string) {
+    return this.mutate<InterIslandCommitmentDto>(participant, at, "propose_inter_island_commitment", "/v1/inter-island-commitments", payload, summary);
+  }
+  bookMaritimeShipment(participant: ProductParticipant, at: string, commitmentId: string, payload: JsonObject, summary: string) {
+    return this.mutate<MaritimeShipmentDto>(participant, at, "book_maritime_shipment", `/v1/inter-island-commitments/${commitmentId}/shipments`, payload, summary);
+  }
+  updateMaritimeShipment(participant: ProductParticipant, at: string, shipmentId: string, payload: JsonObject, summary: string) {
+    return this.mutate<MaritimeShipmentDto>(participant, at, "report_shipment_progress", `/v1/maritime-shipments/${shipmentId}/updates`, payload, summary);
+  }
   acceptMission(participant: ProductParticipant, at: string, missionId: string, vehicleId: string, quantityKg: number) {
     return this.mutate<MissionDto>(participant, at, "accept_delivery_mission", `/v1/delivery-missions/${missionId}/acceptance`, {
       decision: "ACCEPT",
@@ -696,6 +719,10 @@ class ProductEventProjector {
   private readonly productMissionByOrder = new Map<string, string>();
   private readonly productMissionBySimulation = new Map<string, string>();
   private readonly simulationActorByProduct = new Map<string, string>();
+  /** Product commitment id to the engine proposal it was raised for. */
+  private readonly proposalByCommitment = new Map<string, string>();
+  /** Product commitment id to the engine shipment its approval created. */
+  private readonly shipmentByCommitment = new Map<string, string>();
 
   constructor(
     private readonly engine: SimulationEngine,
@@ -709,6 +736,15 @@ class ProductEventProjector {
   bindOrder(productOrderId: string, simulationDemandId: string, buyerProductId: string) {
     this.productOrderToDemand.set(productOrderId, simulationDemandId);
     this.buyerByOrder.set(productOrderId, buyerProductId);
+  }
+
+  bindInterIslandCommitment(productCommitmentId: string, proposalId: string) {
+    this.proposalByCommitment.set(productCommitmentId, proposalId);
+  }
+
+  /** The engine shipment an approved commitment created, once it has one. */
+  shipmentForCommitment(productCommitmentId: string) {
+    return this.shipmentByCommitment.get(productCommitmentId);
   }
 
   productMissionForSimulation(simulationMissionId: string) {
@@ -735,6 +771,12 @@ class ProductEventProjector {
           this.productMissionBySimulation.set(result.simulationMissionId, effect.productMissionId);
         }
       }
+      // The approval is what created the sailing, so this is the first moment a
+      // Product commitment and an engine shipment can be tied together.
+      if (effect.type === "INTER_ISLAND_COMMITMENT_APPROVED" && result.simulationShipmentId) {
+        const commitmentId = textValue(asRecord(event.payload).commitmentId);
+        if (commitmentId) this.shipmentByCommitment.set(commitmentId, result.simulationShipmentId);
+      }
     }
   }
 
@@ -751,6 +793,16 @@ class ProductEventProjector {
     const base = this.base(event);
     if (event.eventType === "CROP_OBSERVATION_SUBMITTED") return { ...base, type: "OBSERVATION_BOUND" };
     if (event.eventType === "ORDER_REQUESTED") return { ...base, type: "ORDER_BOUND" };
+
+    // The only route by which a connected run puts produce on a boat. Every
+    // human approval on the commitment has landed by the time the Product API
+    // emits this, so the engine may create the commitment already approved.
+    if (event.eventType === "INTER_ISLAND_COMMITMENT_APPROVED") {
+      const commitmentId = textValue(payload.commitmentId);
+      const proposalId = commitmentId ? this.proposalByCommitment.get(commitmentId) : undefined;
+      if (proposalId) return { ...base, type: "INTER_ISLAND_COMMITMENT_APPROVED", proposalId };
+      return { ...base, type: "NO_PHYSICAL_EFFECT" };
+    }
 
     if (event.eventType === "ALLOCATION_APPROVED") {
       const orderId = textValue(payload.orderId);
@@ -1000,6 +1052,7 @@ async function processDemandFrame(
   actions: SimulationAgentAction[],
   projector: ProductEventProjector,
   acceptanceThresholds: Map<string, number>,
+  orderByDemand: Map<string, string>,
 ) {
   for (const demand of [...frame.demands].sort((a, b) => a.demandId.localeCompare(b.demandId))) {
     if (demanded.has(demand.demandId)) continue;
@@ -1031,11 +1084,149 @@ async function processDemandFrame(
       paymentTermsDays: SIMULATED_PAYMENT_TERMS_DAYS,
     }, `Placed an order for ${demand.quantityKg.toFixed(2)} kg of ${demand.crop}, accepting at least ${Math.round(minimumAcceptableFraction * 100)}% on ${SIMULATED_PAYMENT_TERMS_DAYS}-day payment terms.`);
     actions.push(order.action);
-    if (order.ok) projector.bindOrder(order.data.orderId, demand.demandId, buyer.actor.id);
+    if (order.ok) {
+      projector.bindOrder(order.data.orderId, demand.demandId, buyer.actor.id);
+      orderByDemand.set(demand.demandId, order.data.orderId);
+    }
     projector.consume(order.events);
   }
   await decideApprovals(tools, participants, frame.at, actions, projector);
   await acceptAvailableMissions(tools, participants, frame.at, actions, projector);
+}
+
+/**
+ * Runs the cross-island half of the coordination loop for one frame (#40).
+ *
+ * Three stages, deliberately separate, because they are three different
+ * decisions with a human one in the middle:
+ *
+ *   1. The coordinator proposes a fill the engine has scored and validated
+ *      against the scoped public-reference network.
+ *   2. The buyer and the far-island growers approve or refuse it through the
+ *      ordinary approval endpoint. Until the last one agrees, nothing binds.
+ *   3. Only then is the sailing booked, and the shipment the engine created is
+ *      stored with the same identity, legs and ports the replay frame carries.
+ */
+async function processInterIslandFrame(
+  tools: ProductTools,
+  participants: ProductParticipant[],
+  coordinator: ProductParticipant,
+  engine: SimulationEngine,
+  frame: ControlRoomFrame,
+  batchIds: Map<string, string>,
+  orderByDemand: Map<string, string>,
+  proposed: Map<string, string>,
+  booked: Set<string>,
+  productShipmentBySimulation: Map<string, string>,
+  reportedShipmentStatus: Map<string, string>,
+  actions: SimulationAgentAction[],
+  projector: ProductEventProjector,
+) {
+  for (const proposal of engine.pendingInterIslandProposals) {
+    if (proposed.has(proposal.proposalId)) continue;
+    const orderId = orderByDemand.get(proposal.demandId);
+    if (!orderId) continue;
+    const lines = proposal.lines
+      .map((line) => ({ cropBatchId: batchIds.get(line.batchId), quantity: kilograms(line.quantityKg) }))
+      .filter((line): line is { cropBatchId: string; quantity: QuantityDto } => typeof line.cropBatchId === "string");
+    if (lines.length !== proposal.lines.length) continue;
+
+    const result = await tools.proposeInterIslandCommitment(coordinator, frame.at, {
+      orderId,
+      originIslandId: proposal.originIslandId,
+      destinationIslandId: proposal.destinationIslandId,
+      linkId: proposal.linkId,
+      lines,
+    }, `Proposed moving ${proposal.quantityKg.toFixed(2)} kg from ${proposal.originIslandId} on ${proposal.operator}; nothing binds until every approval lands.`);
+    recordResult(result, actions, projector);
+    if (!result.ok) continue;
+    proposed.set(proposal.proposalId, result.data.commitmentId);
+    projector.bindInterIslandCommitment(result.data.commitmentId, proposal.proposalId);
+  }
+
+  if (proposed.size === 0) return;
+
+  // The approval gate. Ordinary participants, ordinary endpoint: an
+  // inter-island commitment gets no special path around it.
+  await decideApprovals(tools, participants, frame.at, actions, projector);
+
+  for (const commitmentId of proposed.values()) {
+    if (booked.has(commitmentId)) continue;
+    const commitment = await tools.query<InterIslandCommitmentDto>(coordinator, `/v1/inter-island-commitments/${commitmentId}`);
+    if (commitment.status !== "APPROVED" || commitment.boundAt === null) continue;
+
+    const shipmentId = projector.shipmentForCommitment(commitmentId);
+    if (!shipmentId) continue;
+    const shipment = engine.observableShipments.find((candidate) => candidate.shipmentId === shipmentId);
+    if (!shipment) continue;
+
+    const result = await tools.bookMaritimeShipment(coordinator, frame.at, commitmentId, {
+      legs: shipment.legs.map((leg) => ({
+        kind: leg.kind,
+        fromLabel: leg.fromLabel,
+        toLabel: leg.toLabel,
+        from: leg.from,
+        to: leg.to,
+        startsAt: new Date(leg.startsAt).toISOString(),
+        endsAt: new Date(leg.endsAt).toISOString(),
+        ...(leg.journeyHoursSource ? { journeyHoursSource: leg.journeyHoursSource } : {}),
+      })),
+      customs: {
+        ...shipment.customs,
+        clearedAt: shipment.customs.clearedAt === null ? null : new Date(shipment.customs.clearedAt).toISOString(),
+      },
+      scheduledDepartureAt: new Date(shipment.scheduledDepartureAt).toISOString(),
+      scheduledArrivalAt: new Date(shipment.scheduledArrivalAt).toISOString(),
+      capacityKg: shipment.capacityKg,
+      loadedKg: shipment.loadedKg,
+      simulationShipmentId: shipment.shipmentId,
+    }, `Booked ${shipment.loadedKg.toFixed(2)} kg onto the ${shipment.operator} sailing after every inter-island approval was granted.`);
+    recordResult(result, actions, projector);
+    if (result.ok) {
+      booked.add(commitmentId);
+      productShipmentBySimulation.set(shipment.shipmentId, result.data.shipmentId);
+      reportedShipmentStatus.set(shipment.shipmentId, shipment.status);
+    }
+  }
+}
+
+/**
+ * Keeps the Product record of a consignment honest as the sailing happens.
+ *
+ * Without this the stored record would say `SCHEDULED` for ever while the
+ * physical run departed, was slowed by weather, cleared a checkpoint, arrived,
+ * delivered or was lost. Every value posted here comes from the engine; there
+ * is no vessel tracker and no live service anywhere behind it.
+ */
+async function reportShipmentProgress(
+  tools: ProductTools,
+  coordinator: ProductParticipant,
+  engine: SimulationEngine,
+  frame: ControlRoomFrame,
+  productShipmentBySimulation: Map<string, string>,
+  reportedShipmentStatus: Map<string, string>,
+  actions: SimulationAgentAction[],
+  projector: ProductEventProjector,
+) {
+  for (const shipment of engine.observableShipments) {
+    const productShipmentId = productShipmentBySimulation.get(shipment.shipmentId);
+    if (!productShipmentId) continue;
+    if (reportedShipmentStatus.get(shipment.shipmentId) === shipment.status) continue;
+    reportedShipmentStatus.set(shipment.shipmentId, shipment.status);
+
+    const iso = (value: number | null) => (value === null ? undefined : new Date(value).toISOString());
+    const result = await tools.updateMaritimeShipment(coordinator, frame.at, productShipmentId, {
+      status: shipment.status,
+      loadedKg: shipment.loadedKg,
+      weatherDelayHours: shipment.weatherDelayHours,
+      customs: { ...shipment.customs, clearedAt: shipment.customs.clearedAt === null ? null : iso(shipment.customs.clearedAt) },
+      ...(iso(shipment.actualDepartureAt) ? { actualDepartureAt: iso(shipment.actualDepartureAt) } : {}),
+      ...(iso(shipment.actualArrivalAt) ? { actualArrivalAt: iso(shipment.actualArrivalAt) } : {}),
+      ...(iso(shipment.deliveredAt) ? { deliveredAt: iso(shipment.deliveredAt) } : {}),
+      ...(shipment.failureReason ? { failureReason: shipment.failureReason } : {}),
+    }, `Recorded the ${shipment.operator} consignment as ${shipment.status.toLowerCase()}.`);
+    recordResult(result, actions, projector);
+  }
 }
 
 async function processDisruptionImpacts(
@@ -1269,6 +1460,16 @@ export async function runConnectedHarvest(
   );
   const handledDisruptionImpacts = new Set<string>();
   const pendingPayments = new Map<string, PendingPayment>();
+  /** Simulation demand id to the Product order raised for it. */
+  const orderByDemand = new Map<string, string>();
+  /** Engine proposal id to the Product commitment raised for it. */
+  const interIslandProposed = new Map<string, string>();
+  /** Product commitments already booked onto a sailing. */
+  const interIslandBooked = new Set<string>();
+  /** Engine shipment id to the Product shipment record standing for it. */
+  const productShipmentBySimulation = new Map<string, string>();
+  /** The last status reported for each shipment, so a status is posted once. */
+  const reportedShipmentStatus = new Map<string, string>();
   const allActions: SimulationAgentAction[] = [];
   /**
    * Weather reads waiting to be attached to the next checkpoint.
@@ -1313,12 +1514,15 @@ export async function runConnectedHarvest(
       if (frame.eventType === "FARMER_OBSERVATION") {
         await processObservationFrame(tools, participants, batchIds, frame, observed, actions, reads, projector, coordinator);
       } else if (frame.eventType === "BUYER_DEMAND") {
-        await processDemandFrame(tools, participants, frame, demanded, actions, projector, acceptanceThresholds);
+        await processDemandFrame(tools, participants, frame, demanded, actions, projector, acceptanceThresholds, orderByDemand);
+      } else if (frame.eventType === "INTER_ISLAND_REVIEW") {
+        await processInterIslandFrame(tools, participants, coordinator, engine, frame, batchIds, orderByDemand, interIslandProposed, interIslandBooked, productShipmentBySimulation, reportedShipmentStatus, actions, projector);
       } else if (frame.eventType === "MISSION_DEPART") {
         await processMissionDeparture(tools, participants, frame, previousFrame, actions, reads, projector);
       } else if (frame.eventType === "MISSION_ARRIVE") {
         await processMissionArrival(tools, participants, frame, previousFrame, actions, projector, pendingPayments);
       }
+      await reportShipmentProgress(tools, coordinator, engine, frame, productShipmentBySimulation, reportedShipmentStatus, actions, projector);
       await processDuePayments(tools, participants, frame, pendingPayments, actions, projector);
       await processDisruptionImpacts(
         tools,

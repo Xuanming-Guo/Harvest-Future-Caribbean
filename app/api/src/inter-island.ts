@@ -538,3 +538,71 @@ export async function createMaritimeShipment(input: {
 
   return { shipment, commitment: { ...commitment, status: "SHIPPED" } };
 }
+
+/**
+ * Order in which a consignment may move.
+ *
+ * A status may only go forward, and `FAILED` is terminal, so a late or
+ * duplicated update cannot resurrect a lost sailing or rewind a delivered one.
+ */
+const SHIPMENT_STATUS_ORDER = ["SCHEDULED", "DEPARTED", "DELAYED", "ARRIVED", "DELIVERED", "FAILED"] as const;
+export type ShipmentStatus = (typeof SHIPMENT_STATUS_ORDER)[number];
+
+/** DELAYED sits beside DEPARTED rather than after it: it is still at sea. */
+const SHIPMENT_STAGE: Record<ShipmentStatus, number> = {
+  SCHEDULED: 0,
+  DEPARTED: 1,
+  DELAYED: 1,
+  ARRIVED: 2,
+  DELIVERED: 3,
+  FAILED: 3,
+};
+
+export function isShipmentStatus(value: unknown): value is ShipmentStatus {
+  return typeof value === "string" && (SHIPMENT_STATUS_ORDER as readonly string[]).includes(value);
+}
+
+/**
+ * Records what actually happened to a consignment.
+ *
+ * Everything written here is SYNTHETIC and comes from the physical simulation.
+ * There is no vessel tracker behind it, and the endpoint over it says so.
+ */
+export async function updateMaritimeShipment(input: {
+  shipmentId: string;
+  actorId: string;
+  status: ShipmentStatus;
+  loadedKg?: number;
+  actualDepartureAt?: Date;
+  actualArrivalAt?: Date;
+  deliveredAt?: Date;
+  failureReason?: string;
+  weatherDelayHours?: number;
+  customs?: unknown;
+}): Promise<{ shipment: MaritimeShipment; commitment: InterIslandCommitment }> {
+  const existing = await prisma.maritimeShipment.findUnique({ where: { id: input.shipmentId } });
+  if (!existing) throw httpError(404, "MARITIME_SHIPMENT_NOT_FOUND", "The shipment was not found.");
+  if (existing.status === "FAILED") {
+    throw httpError(409, "SHIPMENT_TERMINAL", "A failed sailing cannot be updated further.");
+  }
+  const current = isShipmentStatus(existing.status) ? existing.status : "SCHEDULED";
+  if (SHIPMENT_STAGE[input.status] < SHIPMENT_STAGE[current]) {
+    throw httpError(409, "SHIPMENT_STATUS_REGRESSION", `A shipment cannot move from ${current} back to ${input.status}.`);
+  }
+
+  const commitment = await prisma.interIslandCommitment.findUniqueOrThrow({ where: { id: existing.commitmentId } });
+  const shipment = await prisma.maritimeShipment.update({
+    where: { id: input.shipmentId },
+    data: {
+      status: input.status,
+      ...(input.loadedKg === undefined ? {} : { loadedKg: input.loadedKg }),
+      ...(input.actualDepartureAt ? { actualDepartureAt: input.actualDepartureAt } : {}),
+      ...(input.actualArrivalAt ? { actualArrivalAt: input.actualArrivalAt } : {}),
+      ...(input.deliveredAt ? { deliveredAt: input.deliveredAt } : {}),
+      ...(input.failureReason ? { failureReason: input.failureReason } : {}),
+      ...(input.weatherDelayHours === undefined ? {} : { weatherDelayHours: input.weatherDelayHours }),
+      ...(input.customs === undefined ? {} : { customs: input.customs as Prisma.InputJsonValue }),
+    },
+  });
+  return { shipment, commitment };
+}

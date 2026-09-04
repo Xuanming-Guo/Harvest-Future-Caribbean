@@ -11,6 +11,7 @@
 export { SimulationEngine, UNMET_CAUSES, runScenario } from './engine.js';
 export type {
   CoordinationMode,
+  InterIslandProposalView,
   MaritimeEffectMetrics,
   DisruptionMissionImpact,
   EngineOptions,
@@ -112,7 +113,7 @@ export type { Scenario, ScenarioContext } from './scenario/types.js';
 
 export { baselinePolicy } from './policy/baseline.js';
 export { MIN_INTER_ISLAND_SHIPMENT_KG, harvestPolicy, interIslandTransitHours } from './policy/harvest.js';
-export type { CoordinationPolicy, DecisionRecord, PolicyCapabilities, PolicyContext } from './policy/types.js';
+export type { CoordinationPolicy, DecisionRecord, InterIslandFill, InterIslandProposal, PolicyCapabilities, PolicyContext } from './policy/types.js';
 
 export { assertNoTruthLeak, toObservableWorld, worldDigest } from './world/observable.js';
 export type { ObservableWorldView } from './world/observable.js';

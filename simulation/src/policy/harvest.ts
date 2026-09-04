@@ -27,7 +27,8 @@
 import type {
   AllocationProposal,
   CoordinationPolicy,
-  InterIslandProposal,
+  InterIslandFill,
+
   PolicyContext,
   RecoveryProposal,
 } from './types.js';
@@ -313,6 +314,11 @@ export const harvestPolicy: CoordinationPolicy = {
     };
   },
 
+  // Exposed on the policy so the connected Product API flow can ask for the
+  // regional decision alone, without also asking for local matching that the
+  // Product API owns in that mode.
+  planInterIslandFill,
+
   approveCommitment(context: PolicyContext, commitment: Commitment): boolean {
     // The approver's job is to re-check the promise against current evidence,
     // not to rubber-stamp it. Between proposal and approval a report may have
@@ -476,9 +482,8 @@ const REFERENCE_COST_PER_KG_XCD = FREIGHT_PER_KG_XCD * 2;
 /** Extra risk carried by a route whose sea-leg duration nobody published. */
 const UNPUBLISHED_JOURNEY_RISK = 0.15;
 
-interface InterIslandFill {
-  proposal: InterIslandProposal;
-  allocations: Array<{ batchId: string; farmId: string; quantityKg: number }>;
+/** One island's offer, ranked. `shippedKg` and `score` are ranking working. */
+interface RankedInterIslandFill extends InterIslandFill {
   shippedKg: number;
   score: number;
 }
@@ -507,7 +512,7 @@ function planInterIslandFill(
   demand: BuyerDemand,
   destinationIslandId: string,
   shortfallKg: number,
-): InterIslandFill | null {
+): RankedInterIslandFill | null {
   if (shortfallKg < MIN_INTER_ISLAND_SHIPMENT_KG) return null;
   if (context.maritime.links.length === 0) return null;
 
@@ -517,7 +522,7 @@ function planInterIslandFill(
   const reachable = reachableIslandIds(context.maritime, destinationIslandId);
   if (reachable.length === 0) return null;
 
-  let best: InterIslandFill | null = null;
+  let best: RankedInterIslandFill | null = null;
 
   for (const originIslandId of reachable) {
     const route = bestRouteBetween(context.maritime, originIslandId, destinationIslandId);
@@ -587,7 +592,7 @@ function planInterIslandFill(
       `${(cost.totalXcd / shippedKg).toFixed(2)} XCD/kg, ` +
       `${route.journeyHoursSource === 'PUBLIC_TIMETABLE' ? 'published' : 'synthetic-default'} sailing time.`;
 
-    const candidateFill: InterIslandFill = {
+    const candidateFill: RankedInterIslandFill = {
       proposal: {
         originIslandId,
         destinationIslandId,

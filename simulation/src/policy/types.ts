@@ -138,6 +138,12 @@ export interface AllocationProposal {
   interIsland?: InterIslandProposal;
 }
 
+/** A cross-island fill: the route chosen, and the allocations that ride on it. */
+export interface InterIslandFill {
+  proposal: InterIslandProposal;
+  allocations: Array<{ batchId: string; farmId: string; quantityKg: number }>;
+}
+
 export interface InterIslandProposal {
   originIslandId: string;
   destinationIslandId: string;
@@ -227,4 +233,21 @@ export interface CoordinationPolicy {
 
   /** Called when a commitment reaches its approval gate, if it has one. */
   approveCommitment(context: PolicyContext, commitment: Commitment): boolean;
+
+  /**
+   * Chooses a source island and a published sailing for the part of an order
+   * the buyer's own island cannot cover.
+   *
+   * Optional because it is a capability rather than an obligation: a policy
+   * that declares `coordinatesAcrossIslands: false` does not implement it, and
+   * the engine never asks. Separated from `planAllocation` so that the
+   * connected Product API flow, where local matching belongs to the Product API
+   * and not to this policy, can ask for the regional decision on its own.
+   */
+  planInterIslandFill?(
+    context: PolicyContext,
+    demand: BuyerDemand,
+    destinationIslandId: string,
+    shortfallKg: number,
+  ): InterIslandFill | null;
 }

@@ -18,6 +18,8 @@ import { CARIBBEAN_ISLAND_IDS, SAILING_CAPACITY_KG } from "@harvest/simulation";
 import {
   createMaritimeShipment,
   interIslandCommitmentDto,
+  isShipmentStatus,
+  updateMaritimeShipment,
   maritimeNetworkDto,
   maritimeShipmentDto,
   proposeInterIslandCommitment,
@@ -1074,6 +1076,26 @@ export async function buildServer() {
       capacityKg: typeof body.capacityKg === "number" && body.capacityKg > 0 ? body.capacityKg : SAILING_CAPACITY_KG,
       loadedKg: typeof body.loadedKg === "number" && body.loadedKg >= 0 ? body.loadedKg : 0,
       ...(typeof body.simulationShipmentId === "string" ? { simulationShipmentId: body.simulationShipmentId } : {}),
+    });
+    return maritimeShipmentDto(shipment, commitment);
+  }));
+
+  server.post("/v1/maritime-shipments/:shipmentId/updates", async (request, reply) => idempotent(request, reply, 200, async () => {
+    const actor = requireRole(request, ["TRANSPORTER", "COORDINATOR", "OPERATIONS", "ADMIN"]);
+    const { shipmentId } = request.params as { shipmentId: string };
+    const body = assertObjectBody(request.body ?? {}, ["status", "loadedKg", "actualDepartureAt", "actualArrivalAt", "deliveredAt", "failureReason", "weatherDelayHours", "customs"], ["status"]);
+    if (!isShipmentStatus(body.status)) throw httpError(422, "INVALID_SHIPMENT_STATUS", "status is not a shipment status.");
+    const { shipment, commitment } = await updateMaritimeShipment({
+      shipmentId,
+      actorId: actor.id,
+      status: body.status,
+      ...(typeof body.loadedKg === "number" ? { loadedKg: body.loadedKg } : {}),
+      ...(body.actualDepartureAt === undefined ? {} : { actualDepartureAt: asDate(body.actualDepartureAt, "actualDepartureAt") }),
+      ...(body.actualArrivalAt === undefined ? {} : { actualArrivalAt: asDate(body.actualArrivalAt, "actualArrivalAt") }),
+      ...(body.deliveredAt === undefined ? {} : { deliveredAt: asDate(body.deliveredAt, "deliveredAt") }),
+      ...(typeof body.failureReason === "string" ? { failureReason: body.failureReason } : {}),
+      ...(typeof body.weatherDelayHours === "number" ? { weatherDelayHours: body.weatherDelayHours } : {}),
+      ...(body.customs === undefined ? {} : { customs: body.customs }),
     });
     return maritimeShipmentDto(shipment, commitment);
   }));
