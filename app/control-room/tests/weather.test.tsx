@@ -7,14 +7,15 @@
  * a day the replay has not reached.
  */
 
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { runScenario } from "@harvest/simulation";
 import type { ControlRoomFrame, ControlRoomScene } from "@harvest/simulation";
 import React from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import Masthead from "@/components/panels/Masthead";
 import { islandWeatherAt, weatherHeadline } from "@/lib/run";
+import { buildWeatherOverlay, weatherDetailRows } from "@/lib/weather-overlay";
 
 const timeline = runScenario({
   scenarioId: "saint-lucia-demo-v1",
@@ -25,6 +26,8 @@ const timeline = runScenario({
 
 const scene = timeline?.scene as ControlRoomScene;
 const frames = (timeline?.frames ?? []) as ControlRoomFrame[];
+
+afterEach(cleanup);
 
 describe("weather evidence saved with a replay", () => {
   it("publishes the legend once on the scene rather than on every frame", () => {
@@ -67,5 +70,27 @@ describe("weather evidence saved with a replay", () => {
     render(<Masthead scene={scene} frame={frames.at(-1) as ControlRoomFrame} />);
     expect(screen.getByText("Synthetic simulation")).toBeInTheDocument();
     expect(screen.getByText(/storm|rain|settled/)).toBeInTheDocument();
+  });
+
+  it("keeps the provenance caveat on the masthead pill itself (#39)", () => {
+    // The overlay put the weather on the globe, where a screenshot can crop
+    // the panels away. The claim and its caveat therefore stay in one element.
+    render(<Masthead scene={scene} frame={frames.at(-1) as ControlRoomFrame} />);
+    const pill = screen.getByText(/storm|rain|settled/);
+    expect(pill.getAttribute("title")).toMatch(/[Ss]ynthetic/);
+    expect(pill.getAttribute("title")).toMatch(/forecasts are model predictions/);
+  });
+
+  it("draws the same weather on the globe that the masthead and panel word (#39)", () => {
+    for (const frame of frames.slice(0, 40)) {
+      const descriptors = buildWeatherOverlay(scene, frame, { atMs: frame.atMs, animated: false });
+      const rows = weatherDetailRows(frame, scene.weatherLegend);
+      // One overlay descriptor per island the run placed, and the words on
+      // screen come from the same reading the globe is drawing.
+      expect(descriptors.map((entry) => entry.condition))
+        .toEqual(rows.filter((row) => descriptors.some((entry) => entry.islandId === row.islandId)).map((row) => row.condition));
+      const stormy = descriptors.some((entry) => entry.condition === "STORM");
+      expect(stormy).toBe((weatherHeadline(frame) ?? "").startsWith("storm over"));
+    }
   });
 });
