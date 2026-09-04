@@ -11,6 +11,7 @@
 export { SimulationEngine, UNMET_CAUSES, runScenario } from './engine.js';
 export type {
   CoordinationMode,
+  MaritimeEffectMetrics,
   DisruptionMissionImpact,
   EngineOptions,
   InjectedDisruption,
@@ -23,13 +24,14 @@ export type {
   UnmetCause,
 } from './engine.js';
 
-export { compactReplayTimeline, frameAt, interpolateAlongPath, missionPositionAt } from './replay.js';
+export { compactReplayTimeline, frameAt, interpolateAlongPath, missionPositionAt, vesselPositionAt } from './replay.js';
 export type {
   ControlRoomBatch,
   ControlRoomDemand,
   ControlRoomFrame,
   ControlRoomMission,
   ControlRoomScene,
+  ControlRoomShipment,
   ControlRoomTotals,
   ControlRoomWeather,
   ReplayTimeline,
@@ -54,6 +56,46 @@ export {
 } from './world/weather.js';
 export type { ForecastDay, RealisedWeather, TempBand, WeatherCondition, WeatherLegend, WeatherReading } from './world/weather.js';
 
+export {
+  COMPARISON_CURRENCY,
+  CUSTOMS_BASE_DELAY_HOURS,
+  CUSTOMS_DISCLAIMER,
+  CUSTOMS_FIXED_FEE_XCD,
+  CUSTOMS_INSPECTION_EXTRA_HOURS,
+  CUSTOMS_INSPECTION_PROBABILITY,
+  FREIGHT_PER_KG_XCD,
+  MARITIME_NETWORK_V1,
+  MARITIME_SYNTHETIC_DISCLAIMER,
+  PORT_HANDLING_HOURS,
+  SAILING_CAPACITY_KG,
+  SAILING_FAILURE_PROBABILITY,
+  SYNTHETIC_SEA_LEG_HOURS,
+  bestRouteBetween,
+  findPort,
+  findRate,
+  maritimeAttributions,
+  portPosition,
+  portsForIsland,
+  reachableIslandIds,
+  routesBetween,
+  scopeMaritimeNetwork,
+  seaLegHours,
+  shipmentCostXcd,
+  toDualCurrency,
+} from './world/maritime.js';
+export type {
+  DualCurrencyAmount,
+  MaritimeAttribution,
+  MaritimeExchangeRate,
+  MaritimeLink,
+  MaritimeNetworkFile,
+  MaritimePort,
+  MaritimeReference,
+  MaritimeRoute,
+  ScopedMaritimeNetwork,
+  ShipmentCostLines,
+} from './world/maritime.js';
+
 export { EventQueue, Priority } from './core/queue.js';
 export type { ScheduledEvent } from './core/queue.js';
 export { RandomSource } from './core/random.js';
@@ -69,7 +111,7 @@ export { CARIBBEAN_REFERENCE_PLACES_V1, CARIBBEAN_REFERENCE_DATA_SOURCES_V1, ref
 export type { Scenario, ScenarioContext } from './scenario/types.js';
 
 export { baselinePolicy } from './policy/baseline.js';
-export { harvestPolicy } from './policy/harvest.js';
+export { MIN_INTER_ISLAND_SHIPMENT_KG, harvestPolicy, interIslandTransitHours } from './policy/harvest.js';
 export type { CoordinationPolicy, DecisionRecord, PolicyCapabilities, PolicyContext } from './policy/types.js';
 
 export { assertNoTruthLeak, toObservableWorld, worldDigest } from './world/observable.js';

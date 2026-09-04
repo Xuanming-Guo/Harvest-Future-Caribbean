@@ -7,6 +7,7 @@ import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { recordEvent } from "./events.js";
 import { httpError, type DecisionReason } from "./http.js";
+import { decideInterIslandApproval } from "./inter-island.js";
 import { commitmentValue } from "./payments.js";
 
 const kilograms = (value: number) => ({ value, unit: "kg" });
@@ -589,6 +590,11 @@ export async function approveAllocation(
       if (!approval) throw httpError(404, "APPROVAL_NOT_FOUND", "Approval was not found.");
       if (approval.status !== "PENDING") throw httpError(409, "APPROVAL_ALREADY_DECIDED", "This approval already has a final decision.");
       if (approval.requestedFromActorId !== actorId) throw httpError(403, "APPROVAL_FORBIDDEN", "This decision belongs to another participant.");
+      // An inter-island commitment has its own gate and its own consequence:
+      // clearing the last approval is what makes it bookable at all.
+      if (approval.subjectType === "INTER_ISLAND_COMMITMENT") {
+        return decideInterIslandApproval(tx, approval, actorId, "APPROVE", reason, decisionReasonColumns(decisionReason));
+      }
       if (approval.subjectType !== "ALLOCATION") {
         return approveRecovery(tx, approval, actorId, reason, decisionReason);
       }
@@ -826,6 +832,12 @@ export async function rejectApproval(approvalId: string, actorId: string, reason
     if (!approval) throw httpError(404, "APPROVAL_NOT_FOUND", "Approval was not found.");
     if (approval.status !== "PENDING") throw httpError(409, "APPROVAL_ALREADY_DECIDED", "This approval already has a final decision.");
     if (approval.requestedFromActorId !== actorId) throw httpError(403, "APPROVAL_FORBIDDEN", "This decision belongs to another participant.");
+    // A rejected inter-island commitment stops there: the commitment is marked
+    // rejected, every other pending approval on it is cancelled, and no sailing
+    // can ever be booked against it.
+    if (approval.subjectType === "INTER_ISLAND_COMMITMENT") {
+      return decideInterIslandApproval(tx, approval, actorId, "REJECT", reason, decisionReasonColumns(decisionReason));
+    }
     const decidedAt = operationNow();
     const updated = await tx.approval.update({ where: { id: approvalId }, data: { status: "REJECTED", decidedBy: actorId, decidedAt, reason, ...decisionReasonColumns(decisionReason) } });
     if (approval.subjectType === "ALLOCATION") {

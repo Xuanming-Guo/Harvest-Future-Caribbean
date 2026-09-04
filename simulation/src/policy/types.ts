@@ -18,6 +18,7 @@
 import type { RandomStream } from '../core/random.js';
 import type { IdFactory } from '../core/ids.js';
 import type { SimulationInstant } from '../core/time.js';
+import type { MaritimeRoute, ScopedMaritimeNetwork } from '../world/maritime.js';
 import type {
   Buyer,
   BuyerDemand,
@@ -68,6 +69,17 @@ export interface PolicyContext {
    * decision; it never changes what the crop does.
    */
   readonly weather: ObservableWeatherAccess;
+  /**
+   * Ports, published links and exchange rates, already restricted to this run's
+   * island scope.
+   *
+   * A policy cannot widen the scope through this object: everything outside it
+   * was filtered out before the network was built, so a two-island run holds no
+   * port belonging to a third island and there is nothing to reach for. An
+   * empty `links` array is the ordinary answer for a one-island run, and for a
+   * pair of islands the reviewed dataset records no published service between.
+   */
+  readonly maritime: ScopedMaritimeNetwork;
   /** Records a decision for the trace. */
   record(decision: Omit<DecisionRecord, 'at'>): void;
   /**
@@ -109,6 +121,31 @@ export interface AllocationProposal {
    * reality, where a grower says yes on the phone and nobody records anything.
    */
   requiresApproval: boolean;
+  /**
+   * Set when part of this proposal is sourced from another island.
+   *
+   * Carried explicitly rather than inferred from the allocations' farms,
+   * because the route was chosen against the scoped network at proposal time
+   * and re-deriving it later would let a different network answer the same
+   * question. `batchIds` names exactly which allocations travel by sea, so the
+   * engine splits the commitment into a road mission and a sailing without
+   * guessing.
+   *
+   * A proposal carrying this block requires the `INTER_ISLAND_COMMITMENT`
+   * approval subject rather than the ordinary `ALLOCATION` one, and `AGENTS.md`
+   * requires that gate before it binds anybody.
+   */
+  interIsland?: InterIslandProposal;
+}
+
+export interface InterIslandProposal {
+  originIslandId: string;
+  destinationIslandId: string;
+  route: MaritimeRoute;
+  /** Allocations in this proposal that must cross by sea. */
+  batchIds: string[];
+  /** Why this island and this sailing won, as a readable line. */
+  rationale: string;
 }
 
 /** How a policy responds to an observed disruption. */
@@ -153,6 +190,16 @@ export interface PolicyCapabilities {
    * hidden inside an `if (policy.name === ...)`.
    */
   readonly readsForecast: boolean;
+  /**
+   * Look for supply on other in-scope islands when the local island cannot
+   * cover an order.
+   *
+   * Declared for the same reason as the levers above. A fragmented market has
+   * nobody who can see a ready crop on the next island, let alone book it onto
+   * a boat, so this belongs to the coordinated arm alone — and the reason it
+   * does is written here rather than discovered inside a name check.
+   */
+  readonly coordinatesAcrossIslands: boolean;
 }
 
 export interface CoordinationPolicy {

@@ -14,6 +14,15 @@ import { prisma } from "./db.js";
 import { recordEvent } from "./events.js";
 import { assertObjectBody, decisionReasonKeys, httpError, idempotent, readDecisionReason, readLocation, readQuantity, requireDecisionReason, sendProblem, type DecisionReasonCode } from "./http.js";
 import { acceptedValue } from "./payments.js";
+import { CARIBBEAN_ISLAND_IDS, SAILING_CAPACITY_KG } from "@harvest/simulation";
+import {
+  createMaritimeShipment,
+  interIslandCommitmentDto,
+  maritimeNetworkDto,
+  maritimeShipmentDto,
+  proposeInterIslandCommitment,
+  readCommitmentLines,
+} from "./inter-island.js";
 import { registerSimulationRoutes } from "./simulation-routes.js";
 import { readAsOfDate, readIslandId, readIslandWeather, weatherRunScope } from "./weather.js";
 import { batchStatusForStage, isReadyStatus } from "./workflows.js";
@@ -246,6 +255,18 @@ function summarizeApprovals(rows: Array<{ id: string; status: string; requestedF
     rejected: rows.filter((row) => row.status === "REJECTED").length,
     ...(mine ? { myApprovalId: mine.id, myApprovalStatus: mine.status } : {}),
   };
+}
+
+/** Approval progress for one inter-island commitment, in the shared shape. */
+async function commitmentApprovalSummary(commitmentId: string, actorId: string) {
+  const rows = await prisma.approval.findMany({ where: { subjectType: "INTER_ISLAND_COMMITMENT", subjectId: commitmentId } });
+  return summarizeApprovals(rows, actorId);
+}
+
+/** The sailing booked against a commitment, or null while it is still a promise. */
+async function shipmentIdFor(commitmentId: string): Promise<string | null> {
+  const row = await prisma.maritimeShipment.findFirst({ where: { commitmentId }, select: { id: true } });
+  return row?.id ?? null;
 }
 
 async function approvalContext(row: { subjectType: string; subjectId: string; requestedFromActorId: string }) {
@@ -814,12 +835,21 @@ export async function buildServer() {
     const approvals = allocation ? await prisma.approval.findMany({ where: { subjectType: "ALLOCATION", subjectId: allocation.id } }) : [];
     const mission = await prisma.deliveryMission.findFirst({ where: { orderId }, orderBy: { deadline: "desc" } });
     const acceptance = await prisma.deliveryAcceptance.findUnique({ where: { orderId } });
+    // A cross-island order carries a second promise with its own approval gate,
+    // and once that gate is clear, a sailing. Both are additive: an order with
+    // neither is exactly the shape it was before issue #40.
+    const commitment = await prisma.interIslandCommitment.findFirst({ where: { orderId }, orderBy: { createdAt: "desc" } });
+    const shipment = commitment ? await prisma.maritimeShipment.findFirst({ where: { commitmentId: commitment.id } }) : null;
     return {
       ...orderDto(row, orderPaymentDto(row, acceptance?.acceptedAt ?? null, operationNow())),
       ...(allocation ? { allocation: { allocationId: allocation.id, status: allocation.status, lines: summarizedLines } } : {}),
       approvalSummary: summarizeApprovals(approvals, actor.id),
       ...(mission ? { deliveryMission: missionDto(mission) } : {}),
       ...(acceptance ? { deliveryAcceptance: deliveryAcceptanceDto(acceptance) } : {}),
+      ...(commitment
+        ? { interIslandCommitment: interIslandCommitmentDto(commitment, await commitmentApprovalSummary(commitment.id, actor.id), shipment?.id ?? null) }
+        : {}),
+      ...(commitment && shipment ? { maritimeShipment: maritimeShipmentDto(shipment, commitment) } : {}),
     };
   });
 
@@ -929,6 +959,152 @@ export async function buildServer() {
     const row = await agentCoordinator.decideApproval(approvalId, actor.id, decision, reason, decisionReason);
     return approvalDto(row, await approvalContext(row));
   }));
+
+  // ------------------------------------------------------------------
+  // Scoped inter-island trade (#40)
+  //
+  // The commitment and the sailing are two endpoints rather than one, because
+  // they are two different things: the first is a promise that opens an
+  // approval gate, and the second may only be created once that gate is clear.
+  // ------------------------------------------------------------------
+
+  server.get("/v1/maritime-network", async (request) => {
+    requireRole(request, [...productRoles]);
+    const { islandIds } = request.query as { islandIds?: string };
+    const requested = asString(islandIds, "islandIds")
+      .split(",")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+    if (requested.length === 0) throw httpError(400, "VALIDATION_FAILED", "islandIds must name at least one island.");
+    const unknown = requested.filter((islandId) => !CARIBBEAN_ISLAND_IDS.has(islandId));
+    if (unknown.length > 0) {
+      throw httpError(422, "UNKNOWN_ISLAND", `Unknown island id(s): ${unknown.join(", ")}.`);
+    }
+    return maritimeNetworkDto(requested);
+  });
+
+  server.get("/v1/inter-island-commitments", async (request) => {
+    const actor = requireRole(request, [...productRoles]);
+    const { orderId, status, limit } = request.query as { orderId?: string; status?: string; limit?: string };
+    const orderIds = await visibleOrderIds(actor);
+    const rows = await prisma.interIslandCommitment.findMany({
+      where: {
+        ...(orderIds === null ? {} : { orderId: { in: orderIds } }),
+        ...(orderId ? { orderId } : {}),
+        ...(status ? { status } : {}),
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: queryLimit(limit),
+    });
+    const items = await Promise.all(rows.map(async (row) => interIslandCommitmentDto(row, await commitmentApprovalSummary(row.id, actor.id), await shipmentIdFor(row.id))));
+    return { items, pageInfo };
+  });
+
+  server.get("/v1/inter-island-commitments/:commitmentId", async (request) => {
+    const actor = requireRole(request, [...productRoles]);
+    const { commitmentId } = request.params as { commitmentId: string };
+    const row = await prisma.interIslandCommitment.findUnique({ where: { id: commitmentId } });
+    if (!row || !(await canAccessOrder(actor, row.orderId))) {
+      throw httpError(404, "INTER_ISLAND_COMMITMENT_NOT_FOUND", "The inter-island commitment was not found.");
+    }
+    return interIslandCommitmentDto(row, await commitmentApprovalSummary(row.id, actor.id), await shipmentIdFor(row.id));
+  });
+
+  server.post("/v1/inter-island-commitments", async (request, reply) => idempotent(request, reply, 201, async () => {
+    // Coordination is a coordinator's job. A buyer or farmer approves one of
+    // these; neither proposes one on the other's behalf.
+    const actor = requireRole(request, ["COORDINATOR", "OPERATIONS", "ADMIN"]);
+    const body = assertObjectBody(request.body ?? {}, ["orderId", "originIslandId", "destinationIslandId", "linkId", "lines", "simulationShipmentId"], ["orderId", "originIslandId", "destinationIslandId", "linkId", "lines"]);
+    const orderId = asString(body.orderId, "orderId");
+    const originIslandId = asString(body.originIslandId, "originIslandId");
+    const destinationIslandId = asString(body.destinationIslandId, "destinationIslandId");
+    const linkId = asString(body.linkId, "linkId");
+    for (const [field, islandId] of [["originIslandId", originIslandId], ["destinationIslandId", destinationIslandId]] as const) {
+      if (!CARIBBEAN_ISLAND_IDS.has(islandId)) throw httpError(422, "UNKNOWN_ISLAND", `${field} '${islandId}' is not a manifest island.`);
+    }
+    const lines = readCommitmentLines(body.lines);
+
+    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw httpError(404, "ORDER_NOT_FOUND", "Order was not found.");
+
+    // Everybody the promise would bind gets a say: the buyer who receives it,
+    // and every grower on the far island whose crop it commits.
+    const batches = await prisma.cropBatch.findMany({ where: { id: { in: lines.map((line) => line.cropBatchId) } } });
+    if (batches.length !== new Set(lines.map((line) => line.cropBatchId)).size) {
+      throw httpError(404, "CROP_BATCH_NOT_FOUND", "At least one crop batch on this commitment was not found.");
+    }
+    const farms = await prisma.farm.findMany({ where: { id: { in: [...new Set(batches.map((batch) => batch.farmId))] } } });
+    const approverActorIds = [order.buyerId, ...farms.map((farm) => farm.farmerId)];
+
+    const commitment = await proposeInterIslandCommitment({
+      orderId,
+      originIslandId,
+      destinationIslandId,
+      linkId,
+      lines,
+      actorId: actor.id,
+      approverActorIds,
+      simulationRunId: order.simulationRunId,
+      ...(typeof body.simulationShipmentId === "string" ? { simulationShipmentId: body.simulationShipmentId } : {}),
+    });
+    return interIslandCommitmentDto(commitment, await commitmentApprovalSummary(commitment.id, actor.id), null);
+  }));
+
+  server.post("/v1/inter-island-commitments/:commitmentId/shipments", async (request, reply) => idempotent(request, reply, 201, async () => {
+    const actor = requireRole(request, ["COORDINATOR", "OPERATIONS", "ADMIN"]);
+    const { commitmentId } = request.params as { commitmentId: string };
+    const body = assertObjectBody(request.body ?? {}, ["legs", "customs", "scheduledDepartureAt", "scheduledArrivalAt", "capacityKg", "loadedKg", "simulationShipmentId"], ["legs", "customs", "scheduledDepartureAt", "scheduledArrivalAt"]);
+    if (!Array.isArray(body.legs) || body.legs.length !== 3) {
+      throw httpError(400, "VALIDATION_FAILED", "legs must contain the pickup, sea and delivery legs.");
+    }
+    const customs = body.customs as JsonObject;
+    if (!customs || typeof customs !== "object" || typeof customs.disclaimer !== "string") {
+      // The disclaimer is required rather than defaulted: a customs record that
+      // travels without one is a record that can be mistaken for a real border
+      // procedure, and this is not one.
+      throw httpError(422, "CUSTOMS_DISCLAIMER_REQUIRED", "A synthetic customs checkpoint must carry its disclaimer.");
+    }
+    const { shipment, commitment } = await createMaritimeShipment({
+      commitmentId,
+      actorId: actor.id,
+      legs: body.legs,
+      customs,
+      scheduledDepartureAt: asDate(body.scheduledDepartureAt, "scheduledDepartureAt"),
+      scheduledArrivalAt: asDate(body.scheduledArrivalAt, "scheduledArrivalAt"),
+      capacityKg: typeof body.capacityKg === "number" && body.capacityKg > 0 ? body.capacityKg : SAILING_CAPACITY_KG,
+      loadedKg: typeof body.loadedKg === "number" && body.loadedKg >= 0 ? body.loadedKg : 0,
+      ...(typeof body.simulationShipmentId === "string" ? { simulationShipmentId: body.simulationShipmentId } : {}),
+    });
+    return maritimeShipmentDto(shipment, commitment);
+  }));
+
+  server.get("/v1/maritime-shipments", async (request) => {
+    const actor = requireRole(request, [...productRoles]);
+    const { orderId, status, limit } = request.query as { orderId?: string; status?: string; limit?: string };
+    const orderIds = await visibleOrderIds(actor);
+    const rows = await prisma.maritimeShipment.findMany({
+      where: {
+        ...(orderIds === null ? {} : { orderId: { in: orderIds } }),
+        ...(orderId ? { orderId } : {}),
+        ...(status ? { status } : {}),
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: queryLimit(limit),
+    });
+    const commitments = new Map(
+      (await prisma.interIslandCommitment.findMany({ where: { id: { in: [...new Set(rows.map((row) => row.commitmentId))] } } }))
+        .map((row) => [row.id, row] as const),
+    );
+    return {
+      items: rows
+        .map((row) => {
+          const commitment = commitments.get(row.commitmentId);
+          return commitment ? maritimeShipmentDto(row, commitment) : null;
+        })
+        .filter((item): item is JsonObject => item !== null),
+      pageInfo,
+    };
+  });
 
   server.get("/v1/delivery-missions", async (request) => {
     const actor = requireRole(request, [...productRoles]);
