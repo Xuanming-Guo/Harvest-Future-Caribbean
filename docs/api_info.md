@@ -697,6 +697,17 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
   run status and `readOnly` flag.
 - Consumers: website session bootstrap and replay banner/routing.
 
+#### `GET /v1/world-map`
+
+- Callers: every authenticated Product API role.
+- Response: role-filtered farm and hotel locations with safe crop summaries or
+  actionable open demand where the caller is allowed to see it.
+- Product state/simulation effect: none; this is a read-only projection.
+- Consumers: the website island world and its farm/hotel zoom views.
+- Rules/failures: exact private coordinates, unrelated crop progress and private
+  orders are omitted. Website marker placement is deterministic but explicitly
+  illustrative; new accessible farms and hotels appear without UI changes.
+
 #### `POST /v1/paired-runs`
 
 - Callers: operations/admin/benchmark operator.

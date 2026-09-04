@@ -158,6 +158,9 @@ function unwrap<T>(result: { data?: T; error?: unknown; response: Response }): T
 }
 
 export const api = {
+  async worldMap() {
+    return unwrap(await client.GET("/v1/world-map"));
+  },
   async cropBatches() {
     return unwrap(await client.GET("/v1/crop-batches"));
   },

@@ -18,6 +18,7 @@ type IslandGameCanvasProps = {
   onReady?: () => void;
   points: IslandPoint[];
   selectedStop: number;
+  showAllLabels?: boolean;
 };
 
 type Curve = {
@@ -56,7 +57,7 @@ function curveDirection(curve: Curve, progress: number) {
   return { x: after.x - before.x, y: after.y - before.y };
 }
 
-export function IslandGameCanvas({ activeSegment, delivered, markers, moving, onReady, points, selectedStop }: IslandGameCanvasProps) {
+export function IslandGameCanvas({ activeSegment, delivered, markers, moving, onReady, points, selectedStop, showAllLabels = false }: IslandGameCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const onReadyRef = useRef(onReady);
@@ -220,10 +221,10 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
       }) : [];
 
       const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-      const normalizedPoints = pointKey.split(";").map((value) => {
+      const normalizedPoints = pointKey ? pointKey.split(";").map((value) => {
         const [x, y] = value.split(",").map(Number);
         return { x: x!, y: y! };
-      });
+      }) : [];
       let elapsed = 0;
       let width = 0;
       let height = 0;
@@ -294,23 +295,27 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
 
         const segmentIndex = Math.min(Math.max(activeSegment, 0), Math.max(curves.length - 1, 0));
         const curve = curves[segmentIndex];
-        if (!curve) return;
         const arrivalProgress = delivered ? 1 : moving ? 0.5 : 0;
         const entrance = reducedMotion.matches ? 1 : Math.min(elapsed / 4300, 1);
         const easedEntrance = 1 - (1 - entrance) ** 3;
         const progress = arrivalProgress * easedEntrance;
-        const point = curvePoint(curve, progress);
-        const direction = curveDirection(curve, progress);
+        const point = curve ? curvePoint(curve, progress) : undefined;
+        const direction = curve ? curveDirection(curve, progress) : { x: 1, y: 0 };
         const suspension = reducedMotion.matches ? 0 : Math.sin(elapsed / 115) * (moving && entrance < 1 ? 2.4 : 0.8);
         const truckWidth = Math.max(72, Math.min(118, width * 0.12));
         const scale = truckWidth / truckTexture.width;
 
-        truckLayer.position.set(point.x, point.y + suspension);
-        truck.scale.set(direction.x >= 0 ? -scale : scale, scale);
-        truck.rotation = Math.max(-0.09, Math.min(0.09, Math.atan2(direction.y, Math.abs(direction.x)) * 0.13));
-        truckShadow.scale.set(truckWidth / 105, truckWidth / 105);
-        truckShadow.position.set(0, 5 - suspension * 0.3);
-        drawActiveTrail(curve, progress);
+        truckLayer.visible = Boolean(point);
+        if (curve && point) {
+          truckLayer.position.set(point.x, point.y + suspension);
+          truck.scale.set(direction.x >= 0 ? -scale : scale, scale);
+          truck.rotation = Math.max(-0.09, Math.min(0.09, Math.atan2(direction.y, Math.abs(direction.x)) * 0.13));
+          truckShadow.scale.set(truckWidth / 105, truckWidth / 105);
+          truckShadow.position.set(0, 5 - suspension * 0.3);
+          drawActiveTrail(curve, progress);
+        } else {
+          activeTrail.clear();
+        }
 
         routeLine.alpha = 0.78 + Math.sin(elapsed / 420) * 0.12;
         shimmers.forEach((shimmer, index) => {
@@ -333,24 +338,24 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
         });
         worldMarkers.forEach(({ container, groundGlow, label, labelBoard, marker, pulse }, index) => {
           const selected = marker.kind !== "DEPOT" && selectedStopRef.current === marker.sequence;
-          const markerScale = Math.max(0.66, Math.min(1.08, width / 900)) * (selected ? 1.08 : 1);
+          const markerScale = Math.max(0.66, Math.min(1.08, width / 900)) * (showAllLabels ? 1.08 : 1) * (selected ? 1.08 : 1);
           container.scale.set(markerScale);
           container.y = marker.point.y * height + (reducedMotion.matches ? 0 : Math.sin(elapsed / 420 + index * 1.4) * 3);
           groundGlow.alpha = 0.12 + (Math.sin(elapsed / 360 + index) + 1) * 0.08;
           pulse.alpha = selected ? 0.42 + (Math.sin(elapsed / 230) + 1) * 0.2 : 0.16;
           pulse.scale.set(selected ? 1 + (Math.sin(elapsed / 260) + 1) * 0.08 : 1);
-          label.alpha = selected ? 1 : 0;
-          labelBoard.alpha = selected ? 1 : 0;
+          label.alpha = showAllLabels || selected ? 1 : 0;
+          labelBoard.alpha = showAllLabels || selected ? 1 : 0;
         });
 
         dust.forEach((puff, index) => {
           const phase = (elapsed / 760 + index / dust.length) % 1;
           const travelling = moving && entrance < 1;
-          puff.visible = travelling && !reducedMotion.matches;
+          puff.visible = Boolean(point) && travelling && !reducedMotion.matches;
           puff.alpha = (1 - phase) * 0.42;
           puff.scale.set(0.35 + phase * 1.15);
           const behind = direction.x >= 0 ? -1 : 1;
-          puff.position.set(point.x + behind * (truckWidth * 0.34 + phase * 31), point.y + 11 - phase * 19 + (index % 2 ? 5 : -3));
+          if (point) puff.position.set(point.x + behind * (truckWidth * 0.34 + phase * 31), point.y + 11 - phase * 19 + (index % 2 ? 5 : -3));
         });
 
         if (delivered && confetti.length) {
@@ -387,7 +392,7 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
       cancelled = true;
       cleanup();
     };
-  }, [activeSegment, delivered, markerPayload, moving, pointKey]);
+  }, [activeSegment, delivered, markerPayload, moving, pointKey, showAllLabels]);
 
   return (
     <div

@@ -37,6 +37,18 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/CurrentActor'}
         default: {$ref: '#/components/responses/Problem'}
+  /v1/world-map:
+    get:
+      tags: [Operations]
+      operationId: getWorldMap
+      summary: Read role-safe farms, hotels, and market interactions for the island world
+      responses:
+        '200':
+          description: A role-filtered world projection. Map placement is illustrative and exact private coordinates are not returned.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorldMapView'}
+        default: {$ref: '#/components/responses/Problem'}
   /v1/crop-observation-intakes:
     post:
       tags: [Crop]
@@ -1235,6 +1247,45 @@ components:
         provenance: {$ref: './common.schema.json#/$defs/Provenance'}
         traceId: {type: string, format: uuid}
         intakeId: {type: string, format: uuid}
+    WorldMapCrop:
+      type: object
+      additionalProperties: false
+      required: [cropType]
+      properties:
+        cropBatchId: {type: string, format: uuid}
+        cropType: {type: string, minLength: 1}
+        status: {enum: [PLANNED, GROWING, HARVEST_READY, HARVESTED, CLOSED]}
+        quantity: {$ref: './common.schema.json#/$defs/Quantity'}
+    WorldMapOpportunity:
+      type: object
+      additionalProperties: false
+      required: [opportunityId, cropType, quantity, neededBy, status]
+      properties:
+        opportunityId: {type: string, format: uuid}
+        cropType: {type: string, minLength: 1}
+        quantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        neededBy: {type: string, format: date-time}
+        status: {enum: [OPEN, MATCHING]}
+        maxUnitPrice: {$ref: './common.schema.json#/$defs/Money'}
+    WorldMapLocation:
+      type: object
+      additionalProperties: false
+      required: [locationId, kind, displayName, serviceZone, access, crops, opportunities]
+      properties:
+        locationId: {type: string, format: uuid}
+        kind: {enum: [FARM, HOTEL]}
+        displayName: {type: string, minLength: 1}
+        serviceZone: {type: string, minLength: 1}
+        access: {enum: [CROP_PROGRESS, PUBLIC_SUPPLY, BUYER_DEMAND, OWN_ORDERS, LOGISTICS]}
+        crops: {type: array, items: {$ref: '#/components/schemas/WorldMapCrop'}}
+        opportunities: {type: array, items: {$ref: '#/components/schemas/WorldMapOpportunity'}}
+    WorldMapView:
+      type: object
+      additionalProperties: false
+      required: [region, locations]
+      properties:
+        region: {type: string, minLength: 1}
+        locations: {type: array, items: {$ref: '#/components/schemas/WorldMapLocation'}}
     CropBatch:
       type: object
       additionalProperties: false

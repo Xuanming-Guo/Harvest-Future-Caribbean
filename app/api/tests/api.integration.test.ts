@@ -88,6 +88,33 @@ describe("participant Product API", () => {
     expect(farmerTasks.statusCode).toBe(403);
   });
 
+  it("builds the island world from newly accessible farms and actionable hotel demand", async () => {
+    const farmId = randomUUID();
+    const batchId = randomUUID();
+    await prisma.farm.create({ data: { id: farmId, name: "Canaries Hillside Plot", farmerId: "a0000000-0000-4000-8000-000000000001", latitude: 13.90, longitude: -61.07, productionZone: "Canaries" } });
+    await prisma.cropBatch.create({ data: { id: batchId, farmId, cropType: "DASHEEN", status: "GROWING", availableToPromise: 9, provenance: "OBSERVED" } });
+
+    try {
+      const farmer = await server.inject({ method: "GET", url: "/v1/world-map", headers: auth("farmer-ana") });
+      expect(farmer.statusCode).toBe(200);
+      expect(farmer.json()).toMatchObject({ region: "Saint Lucia" });
+      expect(farmer.json().locations).toEqual(expect.arrayContaining([
+        expect.objectContaining({ locationId: farmId, kind: "FARM", displayName: "Canaries Hillside Plot", access: "CROP_PROGRESS", crops: [expect.objectContaining({ cropBatchId: batchId, cropType: "DASHEEN", status: "GROWING" })] }),
+        expect.objectContaining({ kind: "HOTEL", displayName: "Bay Gardens Hotel", access: "BUYER_DEMAND", opportunities: [expect.objectContaining({ cropType: "CUCUMBER", quantity: { value: 20, unit: "kg" } })] }),
+      ]));
+      expect(farmer.body).not.toContain("13.9");
+      expect(farmer.body).not.toContain("-61.07");
+
+      const transporter = await server.inject({ method: "GET", url: "/v1/world-map", headers: auth("transporter-daniel") });
+      expect(transporter.statusCode).toBe(200);
+      expect(transporter.json().locations.every((location: { crops: unknown[]; opportunities: unknown[] }) => !location.crops.length && !location.opportunities.length)).toBe(true);
+      expect(transporter.body).not.toContain(farmId);
+    } finally {
+      await prisma.cropBatch.delete({ where: { id: batchId } });
+      await prisma.farm.delete({ where: { id: farmId } });
+    }
+  });
+
   it("returns safe delivery labels when enrichment records are incomplete", async () => {
     const orderId = randomUUID();
     const missionId = randomUUID();

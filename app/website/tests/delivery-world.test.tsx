@@ -9,6 +9,7 @@ import {
   type DeliveryMissionView,
   VehiclePicker,
 } from "@/components/delivery-world";
+import { layoutWorldLocations, OpenWorldMap, type WorldMapView } from "@/components/open-world-map";
 
 const mission: DeliveryMissionView = {
   missionId: "23232323-2323-4323-8323-232323232323",
@@ -73,7 +74,66 @@ const mission: DeliveryMissionView = {
   ],
 };
 
+const world: WorldMapView = {
+  region: "Saint Lucia",
+  locations: [
+    {
+      locationId: "14141414-1414-4414-8414-141414141414",
+      kind: "FARM",
+      displayName: "Roseau Valley Farm",
+      serviceZone: "Roseau Valley",
+      access: "CROP_PROGRESS",
+      crops: [{ cropBatchId: "11111111-1111-4111-8111-111111111111", cropType: "CUCUMBER", status: "HARVEST_READY", quantity: { value: 14, unit: "kg" } }],
+      opportunities: [],
+    },
+    {
+      locationId: "a0000000-0000-4000-8000-000000000002",
+      kind: "HOTEL",
+      displayName: "Bay Gardens Hotel",
+      serviceZone: "Castries",
+      access: "BUYER_DEMAND",
+      crops: [],
+      opportunities: [{ opportunityId: "18181818-1818-4818-8818-181818181818", cropType: "CUCUMBER", quantity: { value: 20, unit: "kg" }, neededBy: "2026-09-05T15:00:00Z", status: "OPEN" }],
+    },
+  ],
+};
+
 describe("delivery world", () => {
+  it("lays out new world locations from data and lets a farmer open a hotel order board", () => {
+    const newFarm = { ...world.locations[0]!, locationId: "99999999-9999-4999-8999-999999999999", displayName: "New Community Farm" };
+    expect(layoutWorldLocations([...world.locations, newFarm]).flatMap((node) => node.members).map((location) => location.displayName)).toContain("New Community Farm");
+
+    render(<OpenWorldMap world={world} role="FARMER" />);
+    fireEvent.click(screen.getByRole("button", { name: /Hotel: Bay Gardens Hotel.*buyer request/i }));
+    expect(screen.getByText("Produce wanted")).toBeInTheDocument();
+    expect(screen.getByText("20 kg Cucumber")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Open crop to offer/i })).toHaveAttribute("href", "/crops/11111111-1111-4111-8111-111111111111");
+    fireEvent.click(screen.getByRole("button", { name: /Back to island/i }));
+    expect(screen.getByRole("button", { name: /Farm: Roseau Valley Farm.*crop progress/i })).toBeInTheDocument();
+  });
+
+  it("clusters dense world data by zone without losing places from the directory model", () => {
+    const denseLocations = Array.from({ length: 24 }, (_, index) => ({
+      ...world.locations[0]!,
+      locationId: `${String(index).padStart(8, "0")}-1111-4111-8111-111111111111`,
+      displayName: `Farm ${index + 1}`,
+      serviceZone: index < 12 ? "Roseau Valley" : "Mabouya Valley",
+    }));
+    const nodes = layoutWorldLocations(denseLocations);
+
+    expect(nodes).toHaveLength(2);
+    expect(nodes.flatMap((node) => node.members)).toHaveLength(24);
+    expect(nodes.every((node) => node.label.includes("12 farms"))).toBe(true);
+  });
+
+  it("keeps delivery roads as an optional layer over the open world", () => {
+    const { rerender } = render(<OpenWorldMap world={world} role="FARMER" />);
+    expect(screen.queryByText("Route layer")).not.toBeInTheDocument();
+    rerender(<OpenWorldMap world={world} mission={mission} role="FARMER" />);
+    expect(screen.getByText("Route layer")).toBeInTheDocument();
+    expect(screen.getByText(/20 kg Cucumber → Bay Gardens Hotel/)).toBeInTheDocument();
+  });
+
   it("selects tactile delivery tickets from the board", () => {
     const onSelect = vi.fn();
     render(<DeliveryBoard missions={[mission, { ...mission, missionId: "33333333-3333-4333-8333-333333333333", status: "AVAILABLE" }]} selectedMissionId={mission.missionId} onSelect={onSelect} />);

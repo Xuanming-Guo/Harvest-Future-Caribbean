@@ -180,14 +180,14 @@ function PlantArt({ cropType, status }: { cropType: string; status: NonNullable<
   );
 }
 
-export function CropProgressPlot({ cargo }: { cargo: DeliveryCargo }) {
+export function CropProgressPlot({ cargo, quantityLabel = "committed" }: { cargo: DeliveryCargo; quantityLabel?: string }) {
   const status = cargo.cropStatus ?? "PLANNED";
   const currentStage = cropStages.indexOf(status);
   return (
     <article className="crop-progress-plot" data-crop={cargo.cropType.toLowerCase()} data-stage={status.toLowerCase()}>
       <PlantArt cropType={cargo.cropType} status={status} />
       <div className="crop-progress-copy">
-        <div><Badge>{status}</Badge><strong>{cargo.quantity.value} kg committed</strong></div>
+        <div><Badge>{status}</Badge><strong>{cargo.quantity.value} kg {quantityLabel}</strong></div>
         <h4>{cropLabel(cargo.cropType)} field</h4>
         <div className="crop-stage-track" aria-label={`${cropLabel(cargo.cropType)} growth progress`}>
           {cropStages.map((stage, index) => (

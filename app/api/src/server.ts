@@ -12,6 +12,7 @@ import { operationNow, registerOperationClock } from "./clock.js";
 import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { deliveryMissionView, deliveryMissionViews } from "./delivery-view.js";
+import { worldMapView } from "./world-map-view.js";
 import { recordEvent } from "./events.js";
 import { assertObjectBody, httpError, idempotent, readLocation, readQuantity, sendProblem } from "./http.js";
 import { registerSimulationRoutes } from "./simulation-routes.js";
@@ -212,6 +213,11 @@ export async function buildServer() {
     });
     const statuses = await verificationStatuses(rows.map((row) => row.id));
     return { items: rows.map((row) => cropBatchDto(row, statuses.get(row.id))), pageInfo };
+  });
+
+  server.get("/v1/world-map", async (request) => {
+    const actor = requireRole(request, [...productRoles]);
+    return worldMapView(actor);
   });
 
   server.get("/v1/crop-batches/:cropBatchId", async (request) => {
