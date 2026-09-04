@@ -545,6 +545,12 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .world-location-fallback b { display: block; max-width: 92px; overflow: hidden; font-size: 8px; line-height: 1.05; text-overflow: ellipsis; white-space: nowrap; }
 .world-directory-button { position: absolute; z-index: 15; top: 17px; right: 18px; display: flex; min-height: 44px; align-items: center; gap: 7px; padding: 8px 11px; border: 3px solid #fff1b2; border-radius: 14px; color: white; background: #2b7953; box-shadow: 0 5px 0 #17583b, 0 9px 16px rgba(20,59,42,.28); font-size: 11px; font-weight: 900; cursor: pointer; }
 .world-directory-button b { display: grid; min-width: 21px; height: 21px; place-items: center; border-radius: 999px; color: #72501f; background: #ffe36e; font-size: 10px; }
+.world-demand-signal { position: absolute; z-index: 14; right: 18px; bottom: 17px; display: grid; grid-template-columns: auto minmax(0,1fr) auto; width: min(390px,calc(100% - 36px)); align-items: center; gap: 10px; padding: 9px 11px; border: 3px solid #fff0ad; border-radius: 15px; color: #315442; text-align: left; background: rgba(255,247,209,.95); box-shadow: 0 6px 0 rgba(110,65,29,.56),0 14px 25px rgba(34,62,43,.2); cursor: pointer; backdrop-filter: blur(9px); }
+.world-demand-signal:hover, .world-demand-signal:focus-visible { border-color: #ffe45f; transform: translateY(-2px); }
+.world-demand-signal > svg:first-child { color: #d05740; }
+.world-demand-signal > span { display: grid; }
+.world-demand-signal small { color: #a35437; font-size: 8px; font-weight: 900; letter-spacing: .09em; text-transform: uppercase; }
+.world-demand-signal strong { font-size: 11px; }
 .world-route-ribbon { position: absolute; z-index: 14; right: 18px; bottom: 17px; display: grid; grid-template-columns: auto minmax(0,1fr) auto auto auto; width: min(550px, calc(100% - 36px)); align-items: center; gap: 10px; padding: 9px 10px; border: 3px solid #fff0ad; border-radius: 15px; color: #315442; background: rgba(255,247,209,.95); box-shadow: 0 6px 0 rgba(110,65,29,.56), 0 14px 25px rgba(34,62,43,.2); backdrop-filter: blur(9px); }
 .world-route-ribbon > svg { color: #c95b3f; }
 .world-route-ribbon > span { display: grid; min-width: 0; }
@@ -560,9 +566,12 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .world-kind-filter button { min-height: 32px; border: 2px solid #daa65e; border-radius: 9px; color: #695034; background: rgba(255,248,211,.72); font-size: 9px; font-weight: 900; cursor: pointer; }
 .world-kind-filter button.is-selected { border-color: #2b7752; color: white; background: #36825e; box-shadow: 0 3px 0 #19583d; }
 .world-directory-list { display: grid; gap: 7px; overflow: auto; }
-.world-directory-list > button { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 9px; border: 2px solid #ddb170; border-radius: 12px; color: #384c3e; text-align: left; background: rgba(255,253,227,.92); box-shadow: 0 3px 0 rgba(114,68,30,.18); cursor: pointer; }
-.world-directory-list > button:hover, .world-directory-list > button:focus-visible { border-color: #4f875f; transform: translateY(-1px); }
-.world-directory-list > button > span:nth-child(2) { display: grid; min-width: 0; }
+.world-directory-zone { display: grid; gap: 6px; }
+.world-directory-zone h3 { display: flex; align-items: center; gap: 5px; margin: 4px 3px 0; color: #704526; font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
+.world-directory-zone h3 b { display: grid; min-width: 18px; height: 18px; margin-left: auto; place-items: center; border-radius: 999px; color: #fff7cf; background: #a36537; font-size: 8px; }
+.world-directory-zone > button { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 9px; border: 2px solid #ddb170; border-radius: 12px; color: #384c3e; text-align: left; background: rgba(255,253,227,.92); box-shadow: 0 3px 0 rgba(114,68,30,.18); cursor: pointer; }
+.world-directory-zone > button:hover, .world-directory-zone > button:focus-visible { border-color: #4f875f; transform: translateY(-1px); }
+.world-directory-zone > button > span:nth-child(2) { display: grid; min-width: 0; }
 .world-directory-list strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .world-directory-list small { color: #7a684f; font-size: 8px; }
 .world-place-kind { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 10px; color: white; background: #35835b; }
@@ -611,6 +620,17 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .hotel-order-ticket h4 { grid-column: 1; font-size: 16px; }
 .hotel-order-ticket p, .hotel-order-ticket > strong { color: #75664e; font-size: 9px; }
 .hotel-order-ticket .button { grid-column: 2; grid-row: 2 / span 2; align-self: center; min-height: 35px; font-size: 9px; }
+.hotel-crop-matches { grid-column: 1 / -1; margin-top: 7px; }
+.hotel-crop-matches > button { display: grid; grid-template-columns: auto minmax(0,1fr) auto; width: 100%; min-height: 38px; align-items: center; gap: 7px; padding: 7px 9px; border: 2px solid #87ad61; border-radius: 10px; color: #326045; text-align: left; background: #eff7d2; box-shadow: 0 3px 0 #6f8d4f; font-size: 9px; font-weight: 900; cursor: pointer; }
+.hotel-crop-matches > button:hover, .hotel-crop-matches > button:focus-visible { border-color: #47805a; background: #f5fbdc; }
+.hotel-crop-matches > button svg:last-child { transition: transform .18s ease; }
+.hotel-crop-matches > button svg:last-child.is-open { transform: rotate(180deg); }
+.hotel-crop-match-list { display: grid; gap: 5px; margin-top: 8px; }
+.hotel-crop-match-list a { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 8px; padding: 8px 9px; border: 2px solid #dcc486; border-radius: 9px; color: #3b5844; background: rgba(255,253,226,.88); }
+.hotel-crop-match-list a:hover, .hotel-crop-match-list a:focus-visible { border-color: #5e8b62; transform: translateX(2px); }
+.hotel-crop-match-list a span { display: grid; }
+.hotel-crop-match-list a strong { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.hotel-crop-match-list a small { color: #79684f; font-size: 8px; }
 
 @media (max-width: 1120px) {
   .delivery-workspace-grid { grid-template-columns: minmax(250px, .62fr) minmax(0, 1.38fr); }
@@ -648,6 +668,7 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
   .world-directory-button span { display: none; }
   .world-directory { position: fixed; top: auto; right: 10px; bottom: 10px; left: 10px; width: auto; max-height: min(70dvh,600px); border-radius: 21px; animation-name: route-drawer-mobile-arrive; }
   .world-route-ribbon { right: 9px; bottom: 10px; width: calc(100% - 18px); grid-template-columns: auto minmax(0,1fr) auto auto; gap: 7px; padding: 8px; }
+  .world-demand-signal { right: 9px; bottom: 10px; width: calc(100% - 18px); }
   .world-route-ribbon .badge { display: none; }
   .world-route-ribbon strong { font-size: 9px; }
   .world-location-hit { width: 68px; height: 68px; }

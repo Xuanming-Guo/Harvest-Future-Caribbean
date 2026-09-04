@@ -100,16 +100,30 @@ const world: WorldMapView = {
 
 describe("delivery world", () => {
   it("lays out new world locations from data and lets a farmer open a hotel order board", () => {
-    const newFarm = { ...world.locations[0]!, locationId: "99999999-9999-4999-8999-999999999999", displayName: "New Community Farm" };
-    expect(layoutWorldLocations([...world.locations, newFarm]).flatMap((node) => node.members).map((location) => location.displayName)).toContain("New Community Farm");
+    const newFarm: WorldMapView["locations"][number] = {
+      ...world.locations[0]!,
+      locationId: "99999999-9999-4999-8999-999999999999",
+      displayName: "New Community Farm",
+      serviceZone: "Canaries",
+      crops: [{ ...world.locations[0]!.crops[0]!, cropBatchId: "99999999-9999-4999-8999-999999999998", status: "GROWING" }],
+    };
+    const growingWorld = { ...world, locations: [...world.locations, newFarm] };
+    expect(layoutWorldLocations(growingWorld.locations).flatMap((node) => node.members).map((location) => location.displayName)).toContain("New Community Farm");
 
-    render(<OpenWorldMap world={world} role="FARMER" />);
+    render(<OpenWorldMap world={growingWorld} role="FARMER" />);
+    expect(screen.getByRole("button", { name: /1 open request across 1 hotel/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Hotel: Bay Gardens Hotel.*buyer request/i }));
     expect(screen.getByText("Produce wanted")).toBeInTheDocument();
     expect(screen.getByText("20 kg Cucumber")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Open crop to offer/i })).toHaveAttribute("href", "/crops/11111111-1111-4111-8111-111111111111");
+    fireEvent.click(screen.getByRole("button", { name: "2 matching fields" }));
+    expect(screen.getByRole("link", { name: /Open Cucumber at Roseau Valley Farm/i })).toHaveAttribute("href", "/crops/11111111-1111-4111-8111-111111111111");
+    expect(screen.getByRole("link", { name: /Open Cucumber at New Community Farm/i })).toHaveAttribute("href", "/crops/99999999-9999-4999-8999-999999999998");
     fireEvent.click(screen.getByRole("button", { name: /Back to island/i }));
     expect(screen.getByRole("button", { name: /Farm: Roseau Valley Farm.*crop progress/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /3 island places/i }));
+    expect(screen.getByRole("region", { name: "Canaries places" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Castries places" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Roseau Valley places" })).toBeInTheDocument();
   });
 
   it("clusters dense world data by zone without losing places from the directory model", () => {
@@ -124,6 +138,23 @@ describe("delivery world", () => {
     expect(nodes).toHaveLength(2);
     expect(nodes.flatMap((node) => node.members)).toHaveLength(24);
     expect(nodes.every((node) => node.label.includes("12 farms"))).toBe(true);
+  });
+
+  it("uses semantic zoom to keep a populated island legible", () => {
+    const populatedWorld = {
+      ...world,
+      locations: Array.from({ length: 9 }, (_, index) => ({
+        ...world.locations[index % world.locations.length]!,
+        locationId: `${String(index).padStart(8, "0")}-2222-4222-8222-222222222222`,
+        displayName: `Island place ${index + 1}`,
+      })),
+    };
+    const { container } = render(<OpenWorldMap world={populatedWorld} role="FARMER" />);
+
+    expect(container.querySelector(".world-map-hint")).toHaveTextContent("Zoom in to reveal place names");
+    fireEvent.click(container.querySelector('button[aria-label="Zoom in"]')!);
+    fireEvent.click(container.querySelector('button[aria-label="Zoom in"]')!);
+    expect(container.querySelector(".world-map-hint")).toHaveTextContent("Living island · drag to explore");
   });
 
   it("keeps delivery roads as an optional layer over the open world", () => {

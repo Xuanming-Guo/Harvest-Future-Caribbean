@@ -40,6 +40,7 @@ export default function IslandMapPage() {
 
   const farms = world.data.locations.filter((location) => location.kind === "FARM").length;
   const hotels = world.data.locations.filter((location) => location.kind === "HOTEL").length;
+  const zones = new Set(world.data.locations.map((location) => location.serviceZone)).size;
 
   return (
     <div className="island-world-page">
@@ -50,7 +51,7 @@ export default function IslandMapPage() {
           <p>{roleCopy[actor.role]}</p>
         </div>
         <div className="world-hud-actions">
-          <div className="island-world-count"><MapIcon size={18} /><strong>{farms} + {hotels}</strong><span>farms and hotels</span></div>
+          <div className="island-world-count"><MapIcon size={18} /><strong>{farms} farms · {hotels} hotels</strong><span>{zones} island zone{zones === 1 ? "" : "s"} connected</span></div>
           <button className="island-world-count is-action" type="button" aria-label={`${missions.data.items.length} visible delivery route${missions.data.items.length === 1 ? "" : "s"}. ${selected ? "Change route layer" : "Show a route layer"}`} aria-expanded={routePickerOpen} aria-controls={routePickerId} onClick={() => setRoutePickerOpen((open) => !open)}>
             <Route size={18} /><strong>{missions.data.items.length}</strong><span>{selected ? "Change route layer" : "Show a route layer"}</span>
           </button>

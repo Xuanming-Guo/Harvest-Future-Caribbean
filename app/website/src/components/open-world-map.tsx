@@ -1,7 +1,7 @@
 "use client";
 
 import type { ApiSchema } from "@harvest/shared";
-import { ArrowLeft, ArrowRight, Building2, Check, Hotel, ListFilter, MapPin, Maximize2, Minus, Move, PackageCheck, Plus, Search, Sprout, Store, Truck, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Building2, Check, ChevronDown, Hotel, ListFilter, MapPin, Maximize2, Minus, Move, PackageCheck, Plus, Search, Sprout, Store, Truck, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
@@ -116,6 +116,47 @@ function WorldFarmScene({ location, onBack }: { location: WorldMapLocation; onBa
   );
 }
 
+type HotelCropMatch = {
+  crop: WorldMapLocation["crops"][number];
+  farm: WorldMapLocation;
+};
+
+function HotelOpportunityTicket({ index, matches, opportunity, role }: {
+  index: number;
+  matches: HotelCropMatch[];
+  opportunity: WorldMapLocation["opportunities"][number];
+  role: ProductRole;
+}) {
+  const [matchesOpen, setMatchesOpen] = useState(false);
+  const matchListId = `hotel-matches-${opportunity.opportunityId}`;
+
+  return (
+    <article className={`hotel-order-ticket ticket-${index % 3}`}>
+      <span className="ticket-pin" aria-hidden="true" />
+      <Badge>{opportunity.status}</Badge>
+      <h4>{opportunity.quantity.value} kg {titleCase(opportunity.cropType)}</h4>
+      <p>Needed {dueLabel(opportunity.neededBy)}</p>
+      {opportunity.maxUnitPrice && <strong>Up to {opportunity.maxUnitPrice.currency} {opportunity.maxUnitPrice.amount}/kg</strong>}
+      {(role === "FARMER" || role === "COORDINATOR") && matches.length > 0 && (
+        <div className="hotel-crop-matches">
+          <button type="button" aria-expanded={matchesOpen} aria-controls={matchListId} onClick={() => setMatchesOpen((open) => !open)}>
+            <Sprout size={16} /><span>{matches.length} matching field{matches.length === 1 ? "" : "s"}</span><ChevronDown className={matchesOpen ? "is-open" : ""} size={16} />
+          </button>
+          {matchesOpen && (
+            <div className="hotel-crop-match-list" id={matchListId}>
+              {matches.map(({ crop, farm }) => (
+                <Link href={`/crops/${crop.cropBatchId}`} aria-label={`Open ${titleCase(crop.cropType)} at ${farm.displayName}`} key={crop.cropBatchId}>
+                  <span><strong>{farm.displayName}</strong><small>{crop.quantity?.value ?? "—"} kg · {crop.status ? titleCase(crop.status) : "Status unavailable"}</small></span><ArrowRight size={15} />
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </article>
+  );
+}
+
 function WorldHotelScene({ location, world, role, onBack }: { location: WorldMapLocation; world: WorldMapView; role: ProductRole; onBack: () => void }) {
   return (
     <section className="world-place-scene world-hotel-scene" aria-label={`${location.displayName} hotel view`}>
@@ -128,17 +169,10 @@ function WorldHotelScene({ location, world, role, onBack }: { location: WorldMap
       <div className="world-place-content hotel-order-board">
         <div className="hotel-order-board-title"><Store size={23} /><span><small>Order board</small><h3>{location.opportunities.length ? "Produce wanted" : "Hotel deliveries"}</h3></span></div>
         {location.opportunities.length ? location.opportunities.map((opportunity, index) => {
-          const matchingCrop = world.locations.flatMap((item) => item.kind === "FARM" && item.access === "CROP_PROGRESS" ? item.crops : []).find((crop) => crop.cropType === opportunity.cropType && crop.cropBatchId);
-          return (
-            <article className={`hotel-order-ticket ticket-${index % 3}`} key={opportunity.opportunityId}>
-              <span className="ticket-pin" aria-hidden="true" />
-              <Badge>{opportunity.status}</Badge>
-              <h4>{opportunity.quantity.value} kg {titleCase(opportunity.cropType)}</h4>
-              <p>Needed {dueLabel(opportunity.neededBy)}</p>
-              {opportunity.maxUnitPrice && <strong>Up to {opportunity.maxUnitPrice.currency} {opportunity.maxUnitPrice.amount}/kg</strong>}
-              {role === "FARMER" && matchingCrop?.cropBatchId && <Link className="button" href={`/crops/${matchingCrop.cropBatchId}`}>Open crop to offer<ArrowRight size={15} /></Link>}
-            </article>
-          );
+          const matches = world.locations.flatMap((farm) => farm.kind === "FARM" && farm.access === "CROP_PROGRESS"
+            ? farm.crops.filter((crop) => crop.cropType === opportunity.cropType && crop.cropBatchId).map((crop) => ({ crop, farm }))
+            : []);
+          return <HotelOpportunityTicket index={index} matches={matches} opportunity={opportunity} role={role} key={opportunity.opportunityId} />;
         }) : location.access === "OWN_ORDERS" ? (
           <div className="world-private-place"><PackageCheck size={30} /><h3>Your hotel journey board</h3><p>Open an order to follow its farms and delivery route.</p><Link className="button" href="/orders">View orders<ArrowRight size={16} /></Link></div>
         ) : (
@@ -170,6 +204,12 @@ export function OpenWorldMap({ world, mission, role, onClearRoute, onSceneChange
     const query = directoryQuery.trim().toLowerCase();
     return (kindFilter === "ALL" || location.kind === kindFilter) && (!query || [location.displayName, location.serviceZone, ...location.crops.map((crop) => crop.cropType)].some((value) => value.toLowerCase().includes(query)));
   });
+  const visibleZoneGroups = [...visibleLocations.reduce((groups, location) => {
+    groups.set(location.serviceZone, [...(groups.get(location.serviceZone) ?? []), location]);
+    return groups;
+  }, new Map<string, WorldMapLocation[]>()).entries()].sort(([left], [right]) => left.localeCompare(right));
+  const activeRequests = world.locations.reduce((total, location) => total + location.opportunities.length, 0);
+  const visibleHotelCount = world.locations.filter((location) => location.kind === "HOTEL").length;
   const nodeByFarmId = new Map(nodes.flatMap((node) => node.members.map((member) => [member.locationId, node] as const)));
   const routePoints = mission ? [depotPoint, ...mission.stops.map((stop, index) => {
     if (stop.farmId && nodeByFarmId.has(stop.farmId)) return nodeByFarmId.get(stop.farmId)!.point;
@@ -260,7 +300,7 @@ export function OpenWorldMap({ world, mission, role, onClearRoute, onSceneChange
               onReady={() => setRendererReady(true)}
               points={routePoints}
               selectedStop={selectedSequence}
-              showAllLabels
+              showAllLabels={nodes.length <= 6 || mapView.zoom >= 1.4}
             />
             {nodes.map((node, index) => (
               <button
@@ -283,7 +323,14 @@ export function OpenWorldMap({ world, mission, role, onClearRoute, onSceneChange
           <button type="button" onClick={() => setMapView({ x: 0, y: 0, zoom: 1 })} aria-label="Reset map view"><Maximize2 size={17} /></button>
         </div>
         <button className="world-directory-button" type="button" aria-label={`${world.locations.length} island places. Browse farms and hotels`} aria-expanded={directoryOpen} onClick={() => setDirectoryOpen((open) => !open)}><ListFilter size={17} /><span>Places</span><b>{world.locations.length}</b></button>
-        <div className="world-map-hint"><Move size={15} /><span>Living island · drag to explore</span></div>
+        <div className="world-map-hint"><Move size={15} /><span>{nodes.length > 6 && mapView.zoom < 1.4 ? "Zoom in to reveal place names" : "Living island · drag to explore"}</span></div>
+        {!mission && activeRequests > 0 && (
+          <button className="world-demand-signal" type="button" onClick={() => { setDirectoryQuery(""); setKindFilter("HOTEL"); setDirectoryOpen(true); }}>
+            <Store size={21} />
+            <span><small>Live hotel boards</small><strong>{activeRequests} open request{activeRequests === 1 ? "" : "s"} across {visibleHotelCount} hotel{visibleHotelCount === 1 ? "" : "s"}</strong></span>
+            <ArrowRight size={17} />
+          </button>
+        )}
         {mission && (
           <div className="world-route-ribbon">
             <Truck size={20} />
@@ -303,7 +350,12 @@ export function OpenWorldMap({ world, mission, role, onClearRoute, onSceneChange
             {(["ALL", "FARM", "HOTEL"] as const).map((kind) => <button type="button" className={kindFilter === kind ? "is-selected" : ""} aria-pressed={kindFilter === kind} onClick={() => setKindFilter(kind)} key={kind}>{kind === "ALL" ? "All" : kind === "FARM" ? "Farms" : "Hotels"}</button>)}
           </div>
           <div className="world-directory-list">
-            {visibleLocations.map((location) => <button type="button" onClick={() => openLocation(location)} key={location.locationId}><span className={`world-place-kind is-${location.kind.toLowerCase()}`}>{location.kind === "FARM" ? <Sprout size={17} /> : <Hotel size={17} />}</span><span><strong>{location.displayName}</strong><small>{location.serviceZone} · {locationHint(location)}</small></span>{location.access !== "LOGISTICS" && <Check size={16} />}</button>)}
+            {visibleZoneGroups.map(([zone, locations]) => (
+              <section className="world-directory-zone" aria-label={`${zone} places`} key={zone}>
+                <h3><MapPin size={13} />{zone}<b>{locations.length}</b></h3>
+                {locations.map((location) => <button type="button" onClick={() => openLocation(location)} key={location.locationId}><span className={`world-place-kind is-${location.kind.toLowerCase()}`}>{location.kind === "FARM" ? <Sprout size={17} /> : <Hotel size={17} />}</span><span><strong>{location.displayName}</strong><small>{locationHint(location)}</small></span>{location.access !== "LOGISTICS" && <Check size={16} />}</button>)}
+              </section>
+            ))}
             {!visibleLocations.length && <EmptyState title="No places match" detail="Try another place, zone, or crop." />}
           </div>
         </aside>

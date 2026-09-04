@@ -60,8 +60,9 @@ describe("participant Product API", () => {
 
     const ana = await server.inject({ method: "GET", url: "/v1/crop-batches", headers: auth("farmer-ana") });
     expect(ana.statusCode).toBe(200);
-    expect(ana.json().items).toHaveLength(1);
-    expect(ana.json().items[0].verificationStatus).toBe("OPEN");
+    expect(ana.json().items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ cropBatchId: "11111111-1111-4111-8111-111111111111", verificationStatus: "OPEN" }),
+    ]));
     const unrelated = await server.inject({ method: "GET", url: "/v1/crop-batches/11111111-1111-4111-8111-111111111111", headers: auth("farmer-marcus") });
     expect(unrelated.statusCode).toBe(404);
 
@@ -101,6 +102,8 @@ describe("participant Product API", () => {
       expect(farmer.json().locations).toEqual(expect.arrayContaining([
         expect.objectContaining({ locationId: farmId, kind: "FARM", displayName: "Canaries Hillside Plot", access: "CROP_PROGRESS", crops: [expect.objectContaining({ cropBatchId: batchId, cropType: "DASHEEN", status: "GROWING" })] }),
         expect.objectContaining({ kind: "HOTEL", displayName: "Bay Gardens Hotel", access: "BUYER_DEMAND", opportunities: [expect.objectContaining({ cropType: "CUCUMBER", quantity: { value: 20, unit: "kg" } })] }),
+        expect.objectContaining({ kind: "FARM", displayName: "Choiseul Roots Cooperative", serviceZone: "Choiseul", access: "CROP_PROGRESS", crops: [expect.objectContaining({ cropType: "DASHEEN", status: "HARVEST_READY" })] }),
+        expect.objectContaining({ kind: "HOTEL", displayName: "Piton Lantern Hotel", serviceZone: "Soufrière", access: "BUYER_DEMAND", opportunities: [expect.objectContaining({ cropType: "DASHEEN", quantity: { value: 24, unit: "kg" } })] }),
       ]));
       expect(farmer.body).not.toContain("13.9");
       expect(farmer.body).not.toContain("-61.07");

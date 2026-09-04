@@ -158,24 +158,27 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
         const container = new Container();
         const labelSide = marker.point.x < 0.42 ? "right" : marker.point.x > 0.58 ? "left" : "center";
         const markerColor = marker.kind === "PICKUP" ? 0x55c982 : marker.kind === "DROPOFF" ? 0xff8262 : 0xffca52;
-        const groundGlow = new Graphics().ellipse(0, 6, 31, 18).fill({ color: markerColor, alpha: 0.15 });
-        const pulse = new Graphics().circle(0, 0, 25).stroke({ color: markerColor, width: 4, alpha: 0.8 });
-        const innerGlow = new Graphics().circle(0, 0, 17).fill({ color: 0xfff4be, alpha: 0.62 }).stroke({ color: markerColor, width: 3, alpha: 0.95 });
+        const groundGlow = new Graphics().ellipse(0, 12, 35, 14).fill({ color: markerColor, alpha: 0.18 });
+        const pulse = new Graphics().ellipse(0, 6, 31, 23).stroke({ color: markerColor, width: 4, alpha: 0.8 });
         const symbol = new Graphics();
         if (marker.kind === "PICKUP") {
-          symbol.moveTo(0, 9).lineTo(0, -7).stroke({ color: 0x236845, width: 3 });
-          symbol.ellipse(-6, -6, 7, 4).fill({ color: 0x2e8a5e });
-          symbol.ellipse(6, -1, 7, 4).fill({ color: 0x43a96f });
+          symbol.roundRect(-23, -10, 46, 28, 6).fill({ color: 0xa86f3d }).stroke({ color: 0xffe6a0, width: 2 });
+          for (const x of [-13, 0, 13]) {
+            symbol.moveTo(x - 5, -5).lineTo(x + 5, 12).stroke({ color: 0x754623, width: 2, alpha: 0.78 });
+            symbol.ellipse(x - 3, 0, 6, 3).fill({ color: 0x2f8b55 });
+            symbol.ellipse(x + 3, 6, 6, 3).fill({ color: 0x56b96f });
+          }
+          symbol.roundRect(13, -18, 14, 14, 2).fill({ color: 0xf1c56f }).stroke({ color: 0x7e4827, width: 2 });
+          symbol.poly([11, -18, 20, -25, 29, -18]).fill({ color: 0xd95d3f }).stroke({ color: 0x893827, width: 2 });
         } else if (marker.kind === "DROPOFF") {
-          symbol.roundRect(-9, -8, 18, 18, 2).fill({ color: 0xd9563f });
-          symbol.poly([-12, -8, 0, -16, 12, -8]).fill({ color: 0x9d382d });
-          symbol.rect(-5, -3, 4, 4).fill({ color: 0xffe49a });
-          symbol.rect(3, -3, 4, 4).fill({ color: 0xffe49a });
-          symbol.rect(-2, 4, 5, 6).fill({ color: 0x7c4030 });
+          symbol.roundRect(-20, -14, 40, 34, 5).fill({ color: 0xffe1a1 }).stroke({ color: 0x9c5732, width: 2.5 });
+          symbol.poly([-24, -14, 0, -29, 24, -14]).fill({ color: 0xd9563f }).stroke({ color: 0x8d3527, width: 2.5 });
+          for (const x of [-11, 2]) for (const y of [-7, 3]) symbol.roundRect(x, y, 8, 7, 1).fill({ color: 0x58a8bd }).stroke({ color: 0xfff0bd, width: 1.5 });
+          symbol.roundRect(-4, 9, 8, 11, 2).fill({ color: 0x81503a });
         } else {
-          symbol.roundRect(-10, -7, 20, 17, 2).fill({ color: 0xf0a83c });
-          symbol.poly([-13, -7, 0, -16, 13, -7]).fill({ color: 0xb85c31 });
-          symbol.roundRect(-5, 1, 10, 9, 2).fill({ color: 0x4e7658 });
+          symbol.roundRect(-19, -12, 38, 31, 4).fill({ color: 0xeaa43d }).stroke({ color: 0x784527, width: 2.5 });
+          symbol.poly([-23, -12, 0, -27, 23, -12]).fill({ color: 0xb85431 }).stroke({ color: 0x784527, width: 2.5 });
+          symbol.roundRect(-6, 5, 12, 14, 2).fill({ color: 0x4e7658 });
         }
         const label = new Text({
           text: marker.label,
@@ -198,7 +201,7 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
           .roundRect(boardX, 24, labelWidth, label.height + 10, 7)
           .fill({ color: 0xfff5c9, alpha: 0.96 })
           .stroke({ color: 0xb98943, width: 2 });
-        container.addChild(groundGlow, pulse, innerGlow, symbol, labelBoard, label);
+        container.addChild(groundGlow, pulse, symbol, labelBoard, label);
         markerLayer.addChild(container);
         return { container, groundGlow, label, labelBoard, marker, pulse, point: marker.point };
       });
