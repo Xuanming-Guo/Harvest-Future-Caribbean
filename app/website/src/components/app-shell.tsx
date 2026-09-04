@@ -3,9 +3,10 @@
 import {
   ClipboardCheck,
   Compass,
+  LayoutGrid,
   Leaf,
   LogOut,
-  Map,
+  Map as MapIcon,
   Menu,
   PackageCheck,
   ShoppingBasket,
@@ -27,33 +28,38 @@ import { useSession } from "./providers";
 const navigation = {
   FARMER: [
     ["/farmer", "My farm", Sprout],
-    ["/farmer/farm", "Farm map", Map],
+    ["/map", "Map", MapIcon],
+    ["/farmer/farm", "Farm map", LayoutGrid],
     ["/orders", "Orders", PackageCheck],
   ],
   BUYER: [
     ["/buyer", "Overview", Leaf],
+    ["/map", "Map", MapIcon],
     ["/marketplace", "Marketplace", ShoppingBasket],
     ["/orders", "Orders", PackageCheck],
   ],
   TRANSPORTER: [
+    ["/map", "Map", MapIcon],
     ["/transporter", "Delivery jobs", Truck],
   ],
   COORDINATOR: [
     ["/coordinator", "Coordination tasks", ClipboardCheck],
+    ["/map", "Map", MapIcon],
     ["/orders", "Orders", PackageCheck],
   ],
 } as const;
 
 function mayVisit(role: ProductRole, pathname: string) {
   if (pathname === "/") return true;
+  if (pathname === "/map") return true;
   if (pathname.startsWith("/orders/")) return role !== "TRANSPORTER";
   if (pathname.startsWith("/crops/")) return role === "FARMER" || role === "COORDINATOR";
   if (pathname.startsWith("/missions/")) return role === "TRANSPORTER" || role === "BUYER" || role === "FARMER" || role === "COORDINATOR";
   return {
-    FARMER: ["/farmer", "/orders"],
-    BUYER: ["/buyer", "/marketplace", "/orders"],
-    TRANSPORTER: ["/transporter"],
-    COORDINATOR: ["/coordinator", "/orders"],
+    FARMER: ["/farmer", "/map", "/orders"],
+    BUYER: ["/buyer", "/map", "/marketplace", "/orders"],
+    TRANSPORTER: ["/map", "/transporter"],
+    COORDINATOR: ["/coordinator", "/map", "/orders"],
   }[role].some((prefix) => pathname.startsWith(prefix));
 }
 
@@ -123,7 +129,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <LogOut size={17} />Sign out
           </button>
         </header>
-        <fieldset className="workspace-fieldset" disabled={Boolean(actor.readOnly)}><main>{children}</main></fieldset>
+        <fieldset className="workspace-fieldset" disabled={Boolean(actor.readOnly)}><main className={pathname === "/map" ? "map-main" : undefined}>{children}</main></fieldset>
       </div>
       {!actor.readOnly && <OnboardingGuide actor={actor} restartSignal={tutorialRequest} />}
       {actor.readOnly && <ActionPreviewController actor={actor} />}

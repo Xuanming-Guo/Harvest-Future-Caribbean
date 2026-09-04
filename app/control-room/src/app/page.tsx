@@ -336,7 +336,7 @@ export default function ControlRoomPage() {
       <ReferenceAttribution sources={scene.referenceDataSources} maritime={scene.maritimeAttributions ?? []} maritimeNote={scene.maritimeDisclaimer} />
       <div className="chrome">
         <div className="chrome-header">
-          <Masthead scene={scene} estimationMode={currentRun?.estimationMode} estimationModeUsed={currentRun?.policy !== "BASELINE"} />
+          <Masthead scene={scene} frame={frame} estimationMode={currentRun?.estimationMode} estimationModeUsed={currentRun?.policy !== "BASELINE"} />
           {setup}
           {error && <p className="run-error" role="alert">{error}</p>}
         </div>

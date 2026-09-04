@@ -22,6 +22,7 @@ export interface MastheadProps {
   estimationMode?: EstimationMode;
   /** Baseline runs record the choice but never request a harvest estimate. */
   estimationModeUsed?: boolean;
+  frame?: ControlRoomFrame;
 }
 
 const ESTIMATION_LABELS: Record<EstimationMode, string> = {
@@ -29,7 +30,11 @@ const ESTIMATION_LABELS: Record<EstimationMode, string> = {
   DETERMINISTIC_FALLBACK: "deterministic fallback",
 };
 
-export default function Masthead({ scene, estimationMode, estimationModeUsed = true }: MastheadProps): React.JSX.Element {
+export default function Masthead({ scene, frame, estimationMode, estimationModeUsed = true }: MastheadProps): React.JSX.Element {
+  // Weather comes off the saved frame rather than from a request, so scrubbing
+  // backwards shows the sky as it was, never as it is now. Absent on replays
+  // saved before issue #37, in which case the pill simply is not there.
+  const weather = frame ? weatherHeadline(frame) : null;
   return (
     <div className="masthead">
       <span className="masthead-mark" aria-hidden="true">

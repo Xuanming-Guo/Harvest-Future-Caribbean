@@ -76,6 +76,9 @@ function reading(overrides: Partial<ControlRoomWeather> = {}): ControlRoomWeathe
     cloudCoverFraction: 0.5,
     tempBand: "WARM" as TempBand,
     provenance: "SYNTHETIC",
+    // #90 made the physical inputs' origin explicit. This hand-built reading is
+    // generated, so it declares the synthetic evidence type.
+    evidenceType: "SYNTHETIC",
     forecastProvenance: "MODEL_PREDICTED",
     forecast: [
       {

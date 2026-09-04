@@ -22,7 +22,7 @@ function haversineKm(a: { latitude: number; longitude: number }, b: { latitude: 
 
 export const caribbeanIslandsV1: Scenario = {
   scenarioId: 'caribbean-islands-v1',
-  description: 'Manifest-generated independent Caribbean island food systems. Inter-island trade, shipping, ports, customs and currency conversion are intentionally excluded.',
+  description: 'Manifest-generated Caribbean island food systems. Since #40 a scoped run also models inter-island orders, sailings, ports and customs across the islands in scope, priced in XCD; currency conversion is still excluded.',
   availableIslandIds: CARIBBEAN_ISLANDS_V1.map((island) => island.islandId),
   startsAtIso: START_ISO,
   durationDays: DURATION_DAYS,

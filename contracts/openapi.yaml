@@ -37,6 +37,18 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/CurrentActor'}
         default: {$ref: '#/components/responses/Problem'}
+  /v1/world-map:
+    get:
+      tags: [Operations]
+      operationId: getWorldMap
+      summary: Read role-safe farms, hotels, and market interactions for the island world
+      responses:
+        '200':
+          description: A role-filtered world projection. Map placement is illustrative and exact private coordinates are not returned.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorldMapView'}
+        default: {$ref: '#/components/responses/Problem'}
   /v1/crop-observation-intakes:
     post:
       tags: [Crop]
@@ -750,11 +762,16 @@ paths:
                     orderId: 20202020-2020-4020-8020-202020202020
                     status: AVAILABLE
                     currentStopSequence: 0
+                    routeRegion: Saint Lucia
+                    buyerName: Bay Gardens Hotel
+                    cropType: CUCUMBER
+                    atRisk: false
                     quantity: {value: 120, unit: kg}
                     deadline: '2026-08-12T14:00:00Z'
                     stops:
-                      - {sequence: 1, kind: PICKUP, location: {latitude: 13.94, longitude: -60.96}}
-                      - {sequence: 2, kind: DROPOFF, location: {latitude: 13.9094, longitude: -60.9789}}
+                      - {sequence: 1, kind: PICKUP, displayName: Roseau Valley Farm, location: {latitude: 13.94, longitude: -60.96}}
+                      - {sequence: 2, kind: DROPOFF, displayName: Bay Gardens Hotel, location: {latitude: 13.9094, longitude: -60.9789}}
+                    cargo: []
                 pageInfo: {hasNextPage: false}
         default: {$ref: '#/components/responses/Problem'}
   /v1/delivery-missions/{missionId}:
@@ -769,18 +786,29 @@ paths:
           description: Mission visible to the caller.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/DeliveryMission'}
+              schema: {$ref: '#/components/schemas/DeliveryMissionView'}
               example:
                 missionId: 23232323-2323-4323-8323-232323232323
                 orderId: 20202020-2020-4020-8020-202020202020
                 status: ASSIGNED
                 currentStopSequence: 0
                 transporterId: 24242424-2424-4424-8424-242424242424
+                routeRegion: Saint Lucia
+                buyerName: Bay Gardens Hotel
+                cropType: CUCUMBER
+                atRisk: false
                 quantity: {value: 120, unit: kg}
                 deadline: '2026-08-12T14:00:00Z'
                 stops:
-                  - {sequence: 1, kind: PICKUP, location: {latitude: 13.94, longitude: -60.96}}
-                  - {sequence: 2, kind: DROPOFF, location: {latitude: 13.9094, longitude: -60.9789}}
+                  - {sequence: 1, kind: PICKUP, displayName: Roseau Valley Farm, location: {latitude: 13.94, longitude: -60.96}}
+                  - {sequence: 2, kind: DROPOFF, displayName: Bay Gardens Hotel, location: {latitude: 13.9094, longitude: -60.9789}}
+                cargo:
+                  - cropBatchId: 11111111-1111-4111-8111-111111111111
+                    farmId: 14141414-1414-4414-8414-141414141414
+                    farmName: Roseau Valley Farm
+                    cropType: CUCUMBER
+                    cropStatus: HARVEST_READY
+                    quantity: {value: 120, unit: kg}
         default: {$ref: '#/components/responses/Problem'}
   /v1/delivery-missions/{missionId}/acceptance:
     post:
@@ -1543,6 +1571,45 @@ components:
         provenance: {$ref: './common.schema.json#/$defs/Provenance'}
         traceId: {type: string, format: uuid}
         intakeId: {type: string, format: uuid}
+    WorldMapCrop:
+      type: object
+      additionalProperties: false
+      required: [cropType]
+      properties:
+        cropBatchId: {type: string, format: uuid}
+        cropType: {type: string, minLength: 1}
+        status: {enum: [PLANNED, GROWING, HARVEST_READY, HARVESTED, CLOSED]}
+        quantity: {$ref: './common.schema.json#/$defs/Quantity'}
+    WorldMapOpportunity:
+      type: object
+      additionalProperties: false
+      required: [opportunityId, cropType, quantity, neededBy, status]
+      properties:
+        opportunityId: {type: string, format: uuid}
+        cropType: {type: string, minLength: 1}
+        quantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        neededBy: {type: string, format: date-time}
+        status: {enum: [OPEN, MATCHING]}
+        maxUnitPrice: {$ref: './common.schema.json#/$defs/Money'}
+    WorldMapLocation:
+      type: object
+      additionalProperties: false
+      required: [locationId, kind, displayName, serviceZone, access, crops, opportunities]
+      properties:
+        locationId: {type: string, format: uuid}
+        kind: {enum: [FARM, HOTEL]}
+        displayName: {type: string, minLength: 1}
+        serviceZone: {type: string, minLength: 1}
+        access: {enum: [CROP_PROGRESS, PUBLIC_SUPPLY, BUYER_DEMAND, OWN_ORDERS, LOGISTICS]}
+        crops: {type: array, items: {$ref: '#/components/schemas/WorldMapCrop'}}
+        opportunities: {type: array, items: {$ref: '#/components/schemas/WorldMapOpportunity'}}
+    WorldMapView:
+      type: object
+      additionalProperties: false
+      required: [region, locations]
+      properties:
+        region: {type: string, minLength: 1}
+        locations: {type: array, items: {$ref: '#/components/schemas/WorldMapLocation'}}
     CropBatch:
       type: object
       additionalProperties: false
@@ -1986,7 +2053,7 @@ components:
           required: [approvalSummary]
           properties:
             approvalSummary: {$ref: '#/components/schemas/ApprovalSummary'}
-            deliveryMission: {$ref: '#/components/schemas/DeliveryMission'}
+            deliveryMission: {$ref: '#/components/schemas/DeliveryMissionView'}
             deliveryAcceptance: {$ref: '#/components/schemas/DeliveryAcceptance'}
             interIslandCommitment:
               description: Present only when part of this order is being sourced from another island.
@@ -2088,6 +2155,29 @@ components:
         cropBatchIds: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
         quantity: {$ref: './common.schema.json#/$defs/Quantity'}
         location: {$ref: './common.schema.json#/$defs/GeoPoint'}
+    DeliveryCargo:
+      type: object
+      additionalProperties: false
+      required: [cropBatchId, farmId, farmName, cropType, quantity]
+      properties:
+        cropBatchId: {type: string, format: uuid}
+        farmId: {type: string, format: uuid}
+        farmName: {type: string, minLength: 1}
+        cropType: {type: string, minLength: 1}
+        cropStatus: {enum: [PLANNED, GROWING, HARVEST_READY, HARVESTED, CLOSED]}
+        quantity: {$ref: './common.schema.json#/$defs/Quantity'}
+    DeliveryRouteStop:
+      type: object
+      additionalProperties: false
+      required: [sequence, kind, displayName, location]
+      properties:
+        sequence: {type: integer, minimum: 1}
+        kind: {enum: [PICKUP, DROPOFF]}
+        displayName: {type: string, minLength: 1}
+        farmId: {type: string, format: uuid}
+        cropBatchIds: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
+        quantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        location: {$ref: './common.schema.json#/$defs/GeoPoint'}
     DeliveryMission:
       type: object
       additionalProperties: false
@@ -2105,12 +2195,34 @@ components:
         estimatedDistanceKm: {type: number, minimum: 0}
         estimatedDurationMinutes: {type: integer, minimum: 0}
         estimatedArrival: {type: string, format: date-time}
+    DeliveryMissionView:
+      type: object
+      additionalProperties: false
+      required: [missionId, orderId, status, quantity, deadline, stops, currentStopSequence, routeRegion, buyerName, cropType, atRisk, cargo]
+      properties:
+        missionId: {type: string, format: uuid}
+        orderId: {type: string, format: uuid}
+        status: {$ref: '#/components/schemas/MissionStatus'}
+        transporterId: {type: string, format: uuid}
+        vehicleId: {type: string, format: uuid}
+        quantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        deadline: {type: string, format: date-time}
+        stops: {type: array, minItems: 2, items: {$ref: '#/components/schemas/DeliveryRouteStop'} }
+        currentStopSequence: {type: integer, minimum: 0}
+        estimatedDistanceKm: {type: number, minimum: 0}
+        estimatedDurationMinutes: {type: integer, minimum: 0}
+        estimatedArrival: {type: string, format: date-time}
+        routeRegion: {type: string, minLength: 1}
+        buyerName: {type: string, minLength: 1}
+        cropType: {type: string, minLength: 1}
+        atRisk: {type: boolean}
+        cargo: {type: array, items: {$ref: '#/components/schemas/DeliveryCargo'} }
     MissionPage:
       type: object
       additionalProperties: false
       required: [items, pageInfo]
       properties:
-        items: {type: array, items: {$ref: '#/components/schemas/DeliveryMission'}}
+        items: {type: array, items: {$ref: '#/components/schemas/DeliveryMissionView'}}
         pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
     MissionAcceptance:
       type: object
