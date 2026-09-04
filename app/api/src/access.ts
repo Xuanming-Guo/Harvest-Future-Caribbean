@@ -27,8 +27,17 @@ export async function visibleOrderIds(actor: AuthActor) {
     const batchIds = await visibleBatchIds(actor);
     if (!batchIds.length) return [];
     const allocationIds = (await prisma.allocationLine.findMany({ where: { cropBatchId: { in: batchIds }, ...actorRunScope(actor) }, select: { allocationId: true } })).map((row) => row.allocationId);
-    if (!allocationIds.length) return [];
-    return (await prisma.allocation.findMany({ where: { id: { in: allocationIds }, ...actorRunScope(actor) }, select: { orderId: true } })).map((row) => row.orderId);
+    const allocationOrderIds = allocationIds.length
+      ? (await prisma.allocation.findMany({ where: { id: { in: allocationIds }, ...actorRunScope(actor) }, select: { orderId: true } })).map((row) => row.orderId)
+      : [];
+    // A cross-island order has no local allocation line, so the allocation
+    // route above cannot see it. The grower whose crop it commits and the
+    // coordinator who proposed it are exactly the people who must (#40).
+    const visible = new Set(batchIds);
+    const crossIslandOrderIds = (await prisma.interIslandCommitment.findMany({ where: actorRunScope(actor), select: { orderId: true, lines: true } }))
+      .filter((row) => (row.lines as unknown as Array<{ cropBatchId?: unknown }>).some((line) => typeof line.cropBatchId === "string" && visible.has(line.cropBatchId)))
+      .map((row) => row.orderId);
+    return [...new Set([...allocationOrderIds, ...crossIslandOrderIds])];
   }
   return [];
 }

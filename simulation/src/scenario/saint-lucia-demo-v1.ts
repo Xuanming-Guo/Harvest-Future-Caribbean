@@ -21,6 +21,7 @@ import { DAY_MS, HOUR_MS, formatDate } from '../core/time.js';
 import type { Scenario, ScenarioContext } from './types.js';
 import { caribbeanIslandScenarios, caribbeanIslandsV1 } from './caribbean-islands-v1.js';
 import { referencePlacesByCategory, referencePlacesForIslands, referenceSourcesForPlaces } from './reference-places.js';
+import { scopeMaritimeNetwork } from '../world/maritime.js';
 import { WeatherModel } from '../world/weather.js';
 import type {
   Buyer,
@@ -358,12 +359,17 @@ export const saintLuciaDemoV1: Scenario = {
       roads,
       referencePlaces,
       referenceDataSources,
+      // One island, so the scoped network keeps Castries but no link: a link
+      // needs two in-scope ports on two different islands. This scenario stays
+      // exactly as local as it was before issue #40.
+      maritime: scopeMaritimeNetwork(['saint-lucia']),
       truth: { crops, disruptions, rainfallMmByDate, weather },
       observed: {
         batches,
         demands: new Map(),
         commitments: new Map(),
         missions: new Map(),
+        shipments: new Map(),
         disruptions: [],
         degradedRoadSegmentIds: new Set(),
       },

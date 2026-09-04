@@ -25,6 +25,14 @@ interface CliOptions {
   paired: boolean;
   json: boolean;
   showDecisions: boolean;
+  /**
+   * Manifest islands the run may use. Undefined keeps the scenario's own scope.
+   *
+   * The scope is what decides whether inter-island trade is possible at all: a
+   * one-island scope has no published link and therefore no shipment, which is
+   * why the Saint Lucia benchmark is unchanged by issue #40.
+   */
+  islandIds?: string[];
 }
 
 function parseArguments(argv: string[]): CliOptions {
@@ -63,6 +71,9 @@ function parseArguments(argv: string[]): CliOptions {
         break;
       case '--seeds':
         options.seeds = readValue().split(',').map((part) => parseSeed(part.trim()));
+        break;
+      case '--islands':
+        options.islandIds = readValue().split(',').map((part) => part.trim()).filter((part) => part.length > 0);
         break;
       case '--paired':
         options.paired = true;
@@ -104,6 +115,7 @@ function printUsage(): void {
       '  --policy <name>     BASELINE or HARVEST (default: HARVEST)',
       '  --seed <n>          Single seed (default: 8675309)',
       '  --seeds <a,b,c>     Several seeds',
+      '  --islands <a,b>     Manifest islands to scope the run to',
       '  --paired            Run BASELINE and HARVEST on the same world',
       '  --json              Emit JSON instead of a table',
       '  --decisions         Print the policy decision trace',
@@ -126,6 +138,19 @@ function formatCauses(result: RunResult): string {
   return `causes=${present.map(([cause, count]) => `${cause}:${count}`).join(',')}`;
 }
 
+/**
+ * The maritime column, printed only when the run's scope could ship anything.
+ *
+ * A one-island run has no published link, so the column is omitted entirely
+ * rather than shown as a row of zeros that invites the reader to wonder what
+ * went wrong.
+ */
+function formatMaritime(result: RunResult): string {
+  const maritime = result.metrics.maritime;
+  if (maritime.scopedLinks === 0) return '';
+  return `sailings=${maritime.shipmentsApproved}/${maritime.shipmentsProposed} delivered=${maritime.shipmentsDelivered} failed=${maritime.shipmentsFailed} shipped=${maritime.shippedKg.toFixed(0)}kg`;
+}
+
 function formatMetricsLine(result: RunResult): string {
   const { metrics } = result;
   return [
@@ -141,6 +166,7 @@ function formatMetricsLine(result: RunResult): string {
     `events=${String(metrics.eventsProcessed).padStart(5)}`,
     `digest=${result.digest}`,
     formatCauses(result),
+    formatMaritime(result),
   ].join('  ');
 }
 
@@ -153,10 +179,10 @@ function main(): void {
     if (options.paired) {
       // The paired runs share a scenario and a seed, so they face an identical
       // world. Any difference in the metrics is attributable to the policy.
-      results.push(runScenario({ scenarioId: options.scenarioId, policy: 'BASELINE', seed }));
-      results.push(runScenario({ scenarioId: options.scenarioId, policy: 'HARVEST', seed }));
+      results.push(runScenario({ scenarioId: options.scenarioId, islandIds: options.islandIds, policy: 'BASELINE', seed }));
+      results.push(runScenario({ scenarioId: options.scenarioId, islandIds: options.islandIds, policy: 'HARVEST', seed }));
     } else {
-      results.push(runScenario({ scenarioId: options.scenarioId, policy: options.policy, seed }));
+      results.push(runScenario({ scenarioId: options.scenarioId, islandIds: options.islandIds, policy: options.policy, seed }));
     }
   }
 
@@ -168,6 +194,7 @@ function main(): void {
   }
 
   process.stdout.write(`\nScenario: ${options.scenarioId}\n`);
+  if (options.islandIds) process.stdout.write(`Islands: ${options.islandIds.join(', ')}\n`);
   process.stdout.write(`${results[0]?.provenanceNote ?? ''}\n\n`);
 
   for (const result of results) {

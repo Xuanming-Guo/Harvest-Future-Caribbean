@@ -77,6 +77,11 @@ export const baselinePolicy: CoordinationPolicy = {
     // baseline is unchanged by the arrival of forecasts, which the tests assert
     // by digest rather than take on trust.
     readsForecast: false,
+    // Nobody in a fragmented market can see a ready crop on the next island,
+    // and nobody could book it onto a ferry if they could. The baseline stays
+    // strictly local, which is also what keeps a one-island benchmark run
+    // bit-for-bit unchanged by issue #40.
+    coordinatesAcrossIslands: false,
   },
 
   estimateAvailableKg(_context: PolicyContext, batch: ObservedCropBatch): number {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, BadgeCheck, CheckCircle2, PackageCheck, Truck } from "lucide-react";
+import { ArrowLeft, BadgeCheck, CheckCircle2, PackageCheck, Ship, Truck } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useState } from "react";
@@ -24,6 +24,19 @@ function lifecycleFor(status: string) {
   if (status === "PARTIALLY_FULFILLED") return ["REQUESTED", "AWAITING_APPROVAL", "COMMITTED", "IN_DELIVERY", "PARTIALLY_FULFILLED"];
   return standardLifecycle;
 }
+
+
+const LEG_LABEL: Record<string, string> = {
+  PICKUP: "Farm to port",
+  SEA: "Sea crossing",
+  DELIVERY: "Port to you",
+};
+
+const CUSTOMS_LABEL: Record<string, string> = {
+  PENDING: "Awaiting clearance",
+  CLEARED: "Cleared",
+  HELD: "Held at the border",
+};
 
 export default function OrderDetailPage() {
   const { orderId } = useParams<{ orderId: string }>();
@@ -90,6 +103,10 @@ export default function OrderDetailPage() {
   const partialCommitment = committed > 0 && committed + 0.0001 < requested;
   const committedSummary = `Committed ${committed} of ${requested} kg (${Math.round((committed / requested) * 100)}%)`;
   const payment = order.data.payment;
+  // Both are additive: an order that never left its island has neither, and the
+  // page is exactly what it was before issue #40.
+  const interIsland = order.data.interIslandCommitment;
+  const shipment = order.data.maritimeShipment;
 
   return (
     <>
@@ -139,6 +156,84 @@ export default function OrderDetailPage() {
           )}
         </Card>
       </div>
+      {interIsland && (
+        <Card className="section-gap">
+          <SectionTitle
+            title="Cross-island supply"
+            detail={shipment ? titleCase(shipment.status) : titleCase(interIsland.status)}
+          />
+          <p className="payment-disclaimer">
+            Ports, the sailing and the exchange rate are public references with their own sources and licences. The
+            schedule, the capacity, the price, the customs check and the outcome are synthetic simulation values, not
+            an operator&rsquo;s figures.
+          </p>
+          <div className="payment-card">
+            <div className="split"><span>Route</span><strong>{titleCase(interIsland.originIslandId.replaceAll("-", " "))} to {titleCase(interIsland.destinationIslandId.replaceAll("-", " "))}</strong></div>
+            <div className="split"><span>Operator</span><strong>{interIsland.route.operator}</strong></div>
+            <div className="split">
+              <span>Sailing time</span>
+              <strong>
+                {interIsland.route.seaLegHours} h
+                {interIsland.route.journeyHoursSource === "PUBLIC_TIMETABLE" ? " (published)" : " (synthetic default)"}
+              </strong>
+            </div>
+            <div className="split"><span>Approvals</span><strong>{interIsland.approvalSummary.approved} of {interIsland.approvalSummary.required} approved</strong></div>
+            <div className="split">
+              <span>Binding</span>
+              <strong>{interIsland.boundAt ? `Yes, from ${formatDate(interIsland.boundAt)}` : "Not yet — nothing ships until every approval is granted"}</strong>
+            </div>
+            <div className="split">
+              <span>Cost</span>
+              <strong>
+                {formatMoney(interIsland.cost.localAmount, interIsland.cost.localCurrency)}
+                {interIsland.cost.localCurrency === interIsland.cost.comparisonCurrency
+                  ? ""
+                  : ` · ${formatMoney(interIsland.cost.comparisonAmount, interIsland.cost.comparisonCurrency)}`}
+              </strong>
+            </div>
+            {interIsland.cost.localCurrency !== interIsland.cost.comparisonCurrency && (
+              <div className="split"><span>Rate used</span><strong>{interIsland.cost.unitsPerComparisonCurrency} {interIsland.cost.localCurrency} per {interIsland.cost.comparisonCurrency}, as of {interIsland.cost.rateAsOf}</strong></div>
+            )}
+          </div>
+          {shipment && (
+            <>
+              <SectionTitle title="Shipment legs" detail={`${shipment.loadedKg} kg of a ${shipment.capacityKg} kg sailing allowance`} />
+              <div className="allocation-list">
+                {shipment.legs.map((leg) => (
+                  <div className="allocation-row" key={`${leg.kind}-${leg.startsAt}`}>
+                    {leg.kind === "SEA" ? <Ship size={19} /> : <Truck size={19} />}
+                    <span>
+                      <strong>{LEG_LABEL[leg.kind] ?? titleCase(leg.kind)}: {leg.fromLabel} to {leg.toLabel}</strong>
+                      <small>{formatDate(leg.startsAt)} to {formatDate(leg.endsAt)}</small>
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div className="notice section-gap">
+                <strong>Customs: {CUSTOMS_LABEL[shipment.customs.status] ?? titleCase(shipment.customs.status)}</strong>
+                <span>
+                  Reference {shipment.customs.documentationReference} · {shipment.customs.inspected ? "inspected" : "documents only"} ·
+                  {" "}{shipment.customs.delayHours} h · {formatMoney(shipment.customs.feeXcd, "XCD")}
+                </span>
+                {shipment.customs.clearedAt && <span>Cleared {formatDate(shipment.customs.clearedAt)}</span>}
+                <small>{shipment.customs.disclaimer}</small>
+              </div>
+              {(shipment.weatherDelayHours ?? 0) > 0 && (
+                <div className="notice"><strong>Weather delayed the crossing by {shipment.weatherDelayHours} h</strong></div>
+              )}
+              {shipment.loadedKg === 0 && shipment.status !== "SCHEDULED" && (
+                <div className="notice">
+                  <strong>This sailing carried nothing</strong>
+                  <span>No allocated crop was ready to load at the origin farm when the vehicle left, so the boat crossed empty. The booked freight and clearance were still charged.</span>
+                </div>
+              )}
+              {shipment.failureReason && (
+                <div className="notice"><strong>This consignment did not arrive</strong><span>{shipment.failureReason}</span></div>
+              )}
+            </>
+          )}
+        </Card>
+      )}
       {payment && (
         <Card className="section-gap" data-tour="order-payment">
           <SectionTitle title="Payment" detail={`${order.data.paymentTermsDays}-day terms`} />

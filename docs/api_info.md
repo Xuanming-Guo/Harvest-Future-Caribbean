@@ -762,6 +762,124 @@ scope, not only the role name.
   recorded day returns an empty forecast and no `current` rather than inventing
   weather. No live weather service is contacted, by demo and test requirement.
 
+#### Scoped inter-island trade (#40)
+
+Produce may move between islands the run selected, and only over connections a
+reviewed offline dataset records. Four endpoints, and the split between them is
+the point: a *commitment* is a promise that opens a human approval gate, and a
+*shipment* is the movement that may only exist once that gate is clear.
+
+The reference data is
+[`simulation/data/caribbean-maritime-network.v1.json`](../simulation/data/caribbean-maritime-network.v1.json),
+with sources, licences and retrieval dates in
+[`README-maritime.md`](../simulation/data/README-maritime.md). **A listed port
+or link is evidence that public infrastructure or a scheduled passenger service
+exists. It is never evidence that a produce-trading service, timetable,
+capacity, cost or price exists on that route.** Capacity, freight price, customs
+behaviour, failure and every operational outcome are SYNTHETIC.
+
+#### `GET /v1/maritime-network`
+
+- Callers: every product role.
+- Request: `islandIds`, a comma-separated list of manifest island ids.
+- Response: ports, published links and fixed offline exchange rates restricted
+  to those islands, each carrying `reference` with source, publisher, licence,
+  retrieval date and `evidenceType: PUBLIC_REFERENCE`, plus a `disclaimer`.
+- A link survives only when *both* of its ports are on islands in the request,
+  so one island returns no links at all and two islands can never see a third
+  island's port. Nothing is chained: two links that meet at a shared island are
+  not offered as one through-service, because no source publishes one.
+- Product state/event: none. This is a read of offline reference data.
+- Rules/failures: an island the manifest does not carry returns `422`
+  `UNKNOWN_ISLAND`. No live vessel or exchange-rate service is called, during a
+  run or a replay.
+
+#### `POST /v1/inter-island-commitments`
+
+- Callers: coordinator, operations, admin. A buyer or farmer *approves* one of
+  these; neither proposes one on the other's behalf.
+- Request: `orderId`, `originIslandId`, `destinationIslandId`, `linkId` and
+  per-batch `lines`. `destinationIslandId` is stated rather than derived,
+  because an order carries a delivery point and not a manifest island id.
+- Response: `InterIslandCommitment` in `PROPOSED` with `boundAt: null`, its
+  route citation, its quantity, its synthetic cost in the destination island's
+  currency and in XCD, and an `approvalSummary`.
+- Product state/event: creates the commitment and one `INTER_ISLAND_COMMITMENT`
+  approval per counterparty (the buyer, and every grower whose crop it
+  commits), and emits `INTER_ISLAND_COMMITMENT_PROPOSED`. Nothing is reserved
+  and nobody is bound.
+- Rules/failures: a link that is not a published connection between those two
+  islands returns `422` `UNKNOWN_MARITIME_ROUTE`; a pair with no published
+  connection at all returns `422` `NO_PUBLIC_ROUTE` rather than an invented
+  route; a consignment above the synthetic per-sailing allowance returns `422`
+  `SAILING_CAPACITY_EXCEEDED`.
+
+#### `POST /v1/approvals/{approvalId}/decisions` on an inter-island subject
+
+- The ordinary approval endpoint. `subjectType` is `INTER_ISLAND_COMMITMENT`,
+  which `AGENTS.md` already lists among the decisions requiring human approval.
+- The commitment becomes `APPROVED` and gains a `boundAt` only when the **last**
+  pending approval is granted, and emits `INTER_ISLAND_COMMITMENT_APPROVED`
+  then. One participant agreeing does not commit the others.
+- A rejection marks the commitment `REJECTED`, cancels every other pending
+  approval on it, and no sailing can ever be booked against it.
+
+#### `POST /v1/inter-island-commitments/{commitmentId}/shipments`
+
+- Callers: coordinator, operations, admin.
+- Request: the three legs (local pickup, sea, local delivery), the synthetic
+  customs checkpoint, the scheduled departure and arrival, and optionally the
+  capacity, load and the simulation shipment id the record stands for.
+- Response: `MaritimeShipment` in `SCHEDULED`, carrying both provenance labels:
+  `networkProvenance: PUBLIC_REFERENCE` for the ports, link and rate, and
+  `operationsProvenance: SYNTHETIC` for the schedule, capacity, price, customs
+  behaviour and outcome.
+- Product state/event: creates the shipment, moves the commitment to `SHIPPED`,
+  and emits `MARITIME_SHIPMENT_SCHEDULED`.
+- Rules/failures: **`409` `INTER_ISLAND_APPROVAL_REQUIRED` while any approval on
+  the commitment is still pending or has been rejected.** This is the
+  enforcement point for "an inter-island commitment cannot bypass required human
+  approval": before the gate clears there is no row to bind anybody. A customs
+  block without its `disclaimer` returns `422`
+  `CUSTOMS_DISCLAIMER_REQUIRED` — a checkpoint record that travels without the
+  sentence saying it is not a legal customs model can be mistaken for one.
+
+#### `POST /v1/maritime-shipments/{shipmentId}/updates`
+
+- Callers: transporter, coordinator, operations, admin.
+- Records sailing, weather delay, clearance, arrival, delivery or failure, all
+  taken from the physical simulation. There is no vessel tracker behind it.
+- Rules/failures: a status may only move forward (`409`
+  `SHIPMENT_STATUS_REGRESSION`) and `FAILED` is terminal (`409`
+  `SHIPMENT_TERMINAL`), so a late or duplicated update cannot resurrect a lost
+  sailing or rewind a delivered one.
+
+#### `GET /v1/inter-island-commitments`, `GET /v1/maritime-shipments`
+
+- Role-filtered reads. A cross-island order has no local allocation line, so
+  order visibility for a farmer or coordinator also follows the commitment's own
+  lines: the grower whose crop it commits and the coordinator who proposed it
+  can see it, and nobody else gains access they did not already have.
+- `GET /v1/orders/{orderId}` carries `interIslandCommitment` and
+  `maritimeShipment` when they exist. Both fields are additive; an order that
+  never left its island is exactly the shape it was before.
+
+#### The synthetic customs checkpoint
+
+`CustomsCheckpoint` is a documentation check with a seeded inspection delay and
+a fixed cost line. **It is not a legal customs model.** It encodes no tariff
+schedule, no phytosanitary rule, no CARICOM instrument and no territory's actual
+procedure, and every instance carries a `disclaimer` saying so, so the caveat
+travels with the data rather than living only in a README.
+
+#### Currency
+
+Every cross-island price is stated twice: in the destination island's own
+currency and in XCD, with `unitsPerComparisonCurrency` and `rateAsOf` naming the
+fixed offline rate that connects them. The rate is `PUBLIC_REFERENCE`; the
+amount it converts is `SYNTHETIC`. No live financial API is called during a run
+or a replay.
+
 #### `GET /v1/events/stream`
 
 - Callers: authenticated website clients; run-scoped simulation and 3D
@@ -993,6 +1111,9 @@ missing event or apply an event whose schema it cannot validate.
 | Order fulfilled / `ORDER_FULFILLED` | Finalises order and releases unused reservations | Satisfies buyer demand, ends remaining tasks, records local procurement/fulfilment | Fulfilled order and dashboard totals update |
 | Partial/rejected / `ORDER_PARTIALLY_FULFILLED`, `ORDER_REJECTED` | Stores actual accepted quantity and releases remainder | Schedules unmet-demand/import/substitution fallback | Partial/rejected state and exception path appear |
 | Cancelled / `ORDER_CANCELLED` | Releases reservations and cancels operational work | Cancels future pickups and returns actors/vehicles to availability | Supply, routes, and order state update |
+| Inter-island proposed / `INTER_ISLAND_COMMITMENT_PROPOSED` | Stores a non-binding cross-island promise and one approval per counterparty; nothing reserved | Records the proposal only; no commitment, mission or shipment exists yet | Order page shows the route, the cost in both currencies, and that nothing ships until every approval lands |
+| Inter-island approved / `INTER_ISLAND_COMMITMENT_APPROVED` | Sets `boundAt` once the last approval is granted; the commitment may now be booked | Creates the physical commitment and books the sailing; this is the only route by which a connected run puts produce on a boat | Order page shows the commitment as binding |
+| Sailing scheduled / `MARITIME_SHIPMENT_SCHEDULED` | Stores the consignment, its three legs and its synthetic customs checkpoint | Schedules departure, the sea leg, the checkpoint and delivery | Control room draws the sea route and a vessel; order page lists the legs |
 | Payment confirmed / `PAYMENT_CONFIRMED` | Stores `paidAt` and the buyer's reference; no other state changes | None; the payload is settlement evidence only | Farmer money-owed total drops and the order shows paid |
 
 The full event list and payload purpose is in
