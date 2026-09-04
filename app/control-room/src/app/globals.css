@@ -121,7 +121,14 @@ a:focus-visible {
 .chrome > * { pointer-events: auto; }
 
 .chrome-header { grid-area: header; }
-.chrome-left   { grid-area: left; min-height: 0; }
+/*
+ * The left column scrolls as a whole. Its panels are content-sized, so on a
+ * short viewport the lower ones (the map key, and the weather switch inside
+ * it) stay reachable instead of being clipped behind the transport bar.
+ */
+.chrome-left   { grid-area: left; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.chrome-left::-webkit-scrollbar { width: 8px; }
+.chrome-left::-webkit-scrollbar-thumb { border-radius: 4px; background: var(--line-bright); }
 .chrome-right  { grid-area: right; min-height: 0; }
 .chrome-footer { grid-area: footer; }
 
@@ -656,6 +663,126 @@ a:focus-visible {
 
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
+
+/* ---------------------------------------------------------------------
+   Weather overlay key, switch and current reading
+
+   The swatch colours are set inline from `lib/weather-overlay.ts` rather than
+   duplicated here. Every other colour in this file has exactly one home; the
+   weather palette's home is the module the Cesium layer reads, so that the key
+   and the globe cannot drift apart.
+   --------------------------------------------------------------------- */
+
+.weather-key {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.weather-key-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.weather-key-title {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/*
+ * A switch built from a button, never a native checkbox: the front-end design
+ * contract forbids platform-default control chrome in the product interface.
+ */
+.weather-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 8px 3px 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(7, 19, 16, 0.7);
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: border-color 140ms ease, color 140ms ease;
+}
+
+.weather-toggle:hover { border-color: var(--line-bright); }
+.weather-toggle:focus-visible { outline: 2px solid var(--leaf); outline-offset: 2px; }
+
+.weather-toggle-track {
+  position: relative;
+  width: 26px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--surface-raised);
+  transition: background 140ms ease;
+}
+
+.weather-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform 140ms ease, background 140ms ease;
+}
+
+.weather-toggle.is-on { color: var(--text); }
+.weather-toggle.is-on .weather-toggle-track { background: var(--forest); }
+.weather-toggle.is-on .weather-toggle-knob { background: var(--text); transform: translateX(12px); }
+
+.weather-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+/* The storm mark is a ring on the globe, so it is a ring in the key too. */
+.weather-swatch.is-ring {
+  background: none;
+  border: 2px solid var(--line-bright);
+}
+
+.legend-swatch-arrow { width: 11px; height: 11px; flex: none; }
+
+.weather-now {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(18, 48, 40, 0.55);
+}
+
+.weather-now-title {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.weather-now-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 7px; }
+.weather-now-item { display: grid; gap: 2px; }
+.weather-now-island { color: var(--text); font-size: 11px; font-weight: 600; }
+.weather-now-reading { color: var(--text-muted); font-size: 11px; line-height: 1.4; }
+.weather-now-forecast { color: var(--text-dim); font-size: 10px; line-height: 1.4; }
+
+.weather-provenance { margin-bottom: 0; }
 
 .reference-attribution {
   position: absolute;

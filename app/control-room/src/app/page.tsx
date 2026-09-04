@@ -56,6 +56,10 @@ export default function ControlRoomPage() {
   const [selectedAction, setSelectedAction] = useState<SimulationAgentAction | null>(null);
   const [participantId, setParticipantId] = useState("");
   const [focusRegion, setFocusRegion] = useState<string | null>(null);
+  // The weather overlay is on by default: weather is what the saved run says
+  // happened, and hiding it by default would make the physical world the
+  // simulation models invisible until someone went looking for a switch.
+  const [weatherEnabled, setWeatherEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const playback = usePlayback(timeline);
@@ -281,7 +285,7 @@ export default function ControlRoomPage() {
   return (
     <main className="control-room">
       <div className="globe-layer">
-        <CesiumGlobe scene={scene} frame={frame} atMs={state.atMs} selectedId={selectedId} onSelect={handleSelect} focusRegion={focusRegion} />
+        <CesiumGlobe scene={scene} frame={frame} atMs={state.atMs} selectedId={selectedId} onSelect={handleSelect} focusRegion={focusRegion} showWeather={weatherEnabled} />
       </div>
       <ReferenceAttribution sources={scene.referenceDataSources} />
       <div className="chrome">
@@ -290,7 +294,15 @@ export default function ControlRoomPage() {
           {setup}
           {error && <p className="run-error" role="alert">{error}</p>}
         </div>
-        <div className="chrome-left" style={{ display: "grid", gridTemplateRows: "auto auto 1fr", gap: 16, minHeight: 0 }}>
+        {/*
+          * Content-sized rows with the column itself scrolling. A `1fr` last
+          * row gave the final panel whatever the two above it left over, which
+          * at 1080p was nothing: the map key — and with it the weather switch
+          * and reading — sat under the transport bar, unreachable. `max-content`
+          * rather than `auto` because an over-full grid shrinks `auto` rows back
+          * down to their min-content, which clipped the metric tiles instead.
+          */}
+        <div className="chrome-left" style={{ display: "grid", gridTemplateRows: "repeat(4, max-content)", alignContent: "start", gap: 16, minHeight: 0 }}>
           <MetricsPanel frame={frame} policy={policy} />
           <InjectionPanel
             scene={scene}
@@ -311,8 +323,18 @@ export default function ControlRoomPage() {
               <button type="button" className="run-button participant-button" disabled={!selectedParticipant || policy !== "HARVEST"} onClick={() => void openParticipant()}>
                 Open participant website
               </button>
-              <p className="panel-help">Opens the participant’s normal workspace in read-only replay mode.</p>
-              <Legend />
+              <p className="panel-help" style={{ marginBottom: 0 }}>Opens the participant’s normal workspace in read-only replay mode.</p>
+            </div>
+          </section>
+          <section className="panel">
+            <header className="panel-header"><span className="panel-title">Map key</span></header>
+            <div className="panel-body">
+              <Legend
+                frame={frame}
+                weatherLegend={scene.weatherLegend}
+                weatherEnabled={weatherEnabled}
+                onWeatherEnabledChange={setWeatherEnabled}
+              />
             </div>
           </section>
         </div>
