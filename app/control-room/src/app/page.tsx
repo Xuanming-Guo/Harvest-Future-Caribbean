@@ -283,7 +283,7 @@ export default function ControlRoomPage() {
       <div className="globe-layer">
         <CesiumGlobe scene={scene} frame={frame} atMs={state.atMs} selectedId={selectedId} onSelect={handleSelect} focusRegion={focusRegion} />
       </div>
-      <ReferenceAttribution sources={scene.referenceDataSources} />
+      <ReferenceAttribution sources={scene.referenceDataSources} maritime={scene.maritimeAttributions ?? []} maritimeNote={scene.maritimeDisclaimer} />
       <div className="chrome">
         <div className="chrome-header">
           <Masthead scene={scene} frame={frame} />

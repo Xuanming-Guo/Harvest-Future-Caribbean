@@ -23,7 +23,7 @@ import type {
   GeoPoint,
   ReferencePlaceCategory,
 } from "@harvest/simulation";
-import { missionPositionAt } from "@harvest/simulation";
+import { missionPositionAt, vesselPositionAt } from "@harvest/simulation";
 
 /** The live Cesium module, as returned by `await import('cesium')`. */
 export type CesiumModule = typeof import("cesium");
@@ -53,6 +53,16 @@ const STAGE_COLOUR: Record<CropStage, string> = {
 const STAGE_PRIORITY: CropStage[] = ["READY", "SPOILED", "MATURING", "GROWING", "PLANTED", "HARVESTED"];
 
 const BUYER_COLOUR = "#d99b2b";
+// The maritime layer reads as one family: a cool blue for the published network
+// (ports and sea links) and the warmer vehicle amber for a vessel that is
+// actually carrying something, so a moving consignment is never mistaken for a
+// route that merely exists.
+const PORT_COLOUR = "#56a7bd";
+const SEA_LINK_COLOUR = "#4d8fa6";
+const SEA_ROUTE_COLOUR = "#7fd0e6";
+const VESSEL_COLOUR = "#d99b2b";
+const SHIPMENT_FAILED_COLOUR = "#c45645";
+const PORT_PIXEL_SIZE = 9;
 const DISRUPTION_COLOUR = "#c45645";
 const ROAD_COLOUR = "#8faea2";
 const ROAD_DEGRADED_COLOUR = "#c45645";
@@ -287,10 +297,78 @@ export function syncScene(Cesium: CesiumModule, viewer: Viewer, scene: ControlRo
     });
   }
 
+  syncMaritimeScene(Cesium, viewer, scene);
+
   // Buildings, fields and check-in rings. Added after the markers so that the
   // markers, which carry the labels and selection, remain the topmost thing a
   // click can land on.
   syncStructureScene(Cesium, viewer, scene);
+}
+
+/**
+ * Ports and published sea links, drawn once per scene.
+ *
+ * Both are PUBLIC REFERENCE: a port exists and a scheduled service between two
+ * ports exists. Neither is evidence that produce moves on that route, which is
+ * why the link is drawn as a thin dashed line rather than as a solid corridor —
+ * it is a possibility, not a delivery. A scene with no links (any one-island
+ * run) draws nothing here, which is the correct picture.
+ */
+function syncMaritimeScene(Cesium: CesiumModule, viewer: Viewer, scene: ControlRoomScene): void {
+  const network = scene.maritime;
+  if (!network) return;
+
+  const portById = new Map(network.ports.map((port) => [port.id, port] as const));
+
+  for (const port of network.ports) {
+    viewer.entities.add({
+      id: `port::${port.id}`,
+      name: port.name,
+      position: Cesium.Cartesian3.fromDegrees(port.longitude, port.latitude),
+      point: {
+        pixelSize: PORT_PIXEL_SIZE,
+        color: Cesium.Color.fromCssColorString(PORT_COLOUR),
+        outlineColor: Cesium.Color.fromCssColorString("#071310"),
+        outlineWidth: 2,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      },
+      label: {
+        text: port.name,
+        font: "500 11px 'DM Sans', sans-serif",
+        fillColor: Cesium.Color.fromCssColorString("#cfe6ef"),
+        outlineColor: Cesium.Color.fromCssColorString("#071310"),
+        outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.TOP,
+        pixelOffset: new Cesium.Cartesian2(0, 10),
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 400_000),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      },
+    });
+  }
+
+  for (const link of network.links) {
+    const from = portById.get(link.fromPortId);
+    const to = portById.get(link.toPortId);
+    if (!from || !to) continue;
+    viewer.entities.add({
+      id: `sea-link::${link.id}`,
+      name: `${link.operator} — ${from.name} to ${to.name}`,
+      polyline: {
+        positions: Cesium.Cartesian3.fromDegreesArray([from.longitude, from.latitude, to.longitude, to.latitude]),
+        width: 2,
+        material: new Cesium.PolylineDashMaterialProperty({
+          color: Cesium.Color.fromCssColorString(SEA_LINK_COLOUR).withAlpha(0.55),
+          dashLength: 18,
+        }),
+        // Deliberately not clamped: a sea link crosses open water, where
+        // clamping to terrain buries the line under the ocean surface.
+        clampToGround: false,
+      },
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +391,7 @@ export function syncFrame(
   syncBuyers(Cesium, viewer, scene, selectedId);
   syncRoads(Cesium, viewer, scene, frame);
   syncMissions(Cesium, viewer, frame, atMs, selectedId);
+  syncShipments(Cesium, viewer, frame, atMs, selectedId);
   syncDisruptions(Cesium, viewer, scene, frame, selectedId);
   syncStructureFrame(Cesium, viewer, scene, frame, atMs);
 }
@@ -437,6 +516,93 @@ function syncMissions(
       vehicle.point.pixelSize = new Cesium.ConstantProperty(selected ? 14 : 10);
     }
   }
+}
+
+/** Ids of vessel markers ever created, so a finished sailing can be hidden. */
+const vesselEntityIds = new Set<string>();
+
+/**
+ * The live sea legs and the vessels on them.
+ *
+ * A shipment draws a brighter dashed line over its published link while it is
+ * in progress, and a vessel marker that moves along that line between departure
+ * and berthing. A failed sailing turns its route red and shows no vessel: there
+ * is nothing out there any more, and drawing one would be inventing a position.
+ */
+function syncShipments(
+  Cesium: CesiumModule,
+  viewer: Viewer,
+  frame: ControlRoomFrame,
+  atMs: number,
+  selectedId: string | null,
+): void {
+  const live = new Set<string>();
+
+  for (const shipment of frame.shipments ?? []) {
+    const seaLeg = shipment.legs.find((leg) => leg.kind === "SEA");
+    if (!seaLeg) continue;
+    const routeId = `sea-route::${shipment.shipmentId}`;
+    const selected = isSelected(shipment.shipmentId, selectedId) || isSelected(shipment.missionId, selectedId);
+    const failed = shipment.status === "FAILED";
+
+    const route = ensureSeaRouteEntity(Cesium, viewer, routeId, seaLeg.from, seaLeg.to);
+    if (route.polyline) {
+      route.polyline.material = new Cesium.PolylineDashMaterialProperty({
+        color: Cesium.Color.fromCssColorString(failed ? SHIPMENT_FAILED_COLOUR : SEA_ROUTE_COLOUR).withAlpha(selected ? 1 : 0.85),
+        dashLength: 14,
+      });
+      route.polyline.width = new Cesium.ConstantProperty(selected ? 5 : 3);
+    }
+    route.show = true;
+    route.name = `${shipment.operator} · ${shipment.status.toLowerCase()}`;
+
+    const vesselId = `vessel::${shipment.shipmentId}`;
+    live.add(vesselId);
+    const position = vesselPositionAt(shipment, atMs);
+    let vessel = viewer.entities.getById(vesselId);
+    if (!vessel) {
+      vessel = viewer.entities.add({
+        id: vesselId,
+        name: `${shipment.operator} consignment`,
+        point: {
+          pixelSize: 11,
+          color: Cesium.Color.fromCssColorString(VESSEL_COLOUR),
+          outlineColor: Cesium.Color.fromCssColorString("#0d1f1a"),
+          outlineWidth: 2,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
+      vesselEntityIds.add(vesselId);
+    }
+    vessel.show = position !== null;
+    if (position) {
+      vessel.position = new Cesium.ConstantPositionProperty(
+        Cesium.Cartesian3.fromDegrees(position.longitude, position.latitude),
+      );
+    }
+    if (vessel.point) vessel.point.pixelSize = new Cesium.ConstantProperty(selected ? 15 : 11);
+  }
+
+  // A replay scrubbed backwards past a sailing must not leave its vessel behind.
+  for (const vesselId of vesselEntityIds) {
+    if (live.has(vesselId)) continue;
+    const stale = viewer.entities.getById(vesselId);
+    if (stale) stale.show = false;
+  }
+}
+
+function ensureSeaRouteEntity(Cesium: CesiumModule, viewer: Viewer, id: string, from: GeoPoint, to: GeoPoint): Entity {
+  const existing = viewer.entities.getById(id);
+  if (existing) return existing;
+  return viewer.entities.add({
+    id,
+    polyline: {
+      positions: Cesium.Cartesian3.fromDegreesArray([from.longitude, from.latitude, to.longitude, to.latitude]),
+      width: 3,
+      material: Cesium.Color.fromCssColorString(SEA_ROUTE_COLOUR),
+      clampToGround: false,
+    },
+  });
 }
 
 function ensurePolylineEntity(Cesium: CesiumModule, viewer: Viewer, id: string, path: GeoPoint[]): Entity {

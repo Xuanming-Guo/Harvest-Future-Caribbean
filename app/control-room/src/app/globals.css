@@ -682,6 +682,16 @@ a:focus-visible {
 .reference-attribution a:focus-visible,
 .reference-attribution a:hover { text-decoration: underline; }
 
+/* The maritime caveat is longer than a licence line and is the sentence that
+   stops a drawn ferry route reading as a produce service, so it gets its own
+   line rather than trailing the sources. */
+.reference-attribution-note {
+  display: block;
+  margin-top: 4px;
+  color: rgba(216, 230, 223, 0.72);
+  font-style: italic;
+}
+
 @media (max-width: 900px) {
   .reference-attribution {
     right: 14px;
