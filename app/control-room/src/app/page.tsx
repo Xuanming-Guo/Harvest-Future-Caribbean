@@ -242,6 +242,16 @@ export default function ControlRoomPage() {
     () => timeline ? timeline.frames.slice(0, state.frameIndex + 1) : [],
     [timeline, state.frameIndex],
   );
+  /*
+   * Whether this run ever drew a recorded weather day, computed over the whole
+   * saved timeline rather than the frame on screen: the attribution line names
+   * the datasets a run *uses*, and a line that appeared and vanished as
+   * playback crossed a generated day would be noise, not provenance.
+   */
+  const recordedWeather = useMemo(
+    () => (timeline?.frames ?? []).some((item) => (item.weather ?? []).some((reading) => reading.evidenceType === "PUBLIC_REFERENCE")),
+    [timeline],
+  );
   const disruptionMarkers = useMemo(() => {
     if (!timeline) return [];
     const seen = new Set<number>();
@@ -333,7 +343,7 @@ export default function ControlRoomPage() {
       <div className="globe-layer">
         <CesiumGlobe scene={scene} frame={frame} atMs={state.atMs} selectedId={selectedId} onSelect={handleSelect} focusRegion={focusRegion} showWeather={weatherEnabled} />
       </div>
-      <ReferenceAttribution sources={scene.referenceDataSources} maritime={scene.maritimeAttributions ?? []} maritimeNote={scene.maritimeDisclaimer} />
+      <ReferenceAttribution sources={scene.referenceDataSources} maritime={scene.maritimeAttributions ?? []} maritimeNote={scene.maritimeDisclaimer} recordedWeather={recordedWeather} />
       <div className="chrome">
         <div className="chrome-header">
           <Masthead scene={scene} frame={frame} estimationMode={currentRun?.estimationMode} estimationModeUsed={currentRun?.policy !== "BASELINE"} />
