@@ -126,6 +126,16 @@ describe("delivery world", () => {
     expect(screen.getByRole("region", { name: "Roseau Valley places" })).toBeInTheDocument();
   });
 
+  it("turns an owned farm into a crop-filled growth scene", () => {
+    const { container, getByText, unmount } = render(<OpenWorldMap world={world} role="FARMER" />);
+
+    fireEvent.click(container.querySelector('button[aria-label="Farm: Roseau Valley Farm. Open crop progress"]')!);
+    expect(getByText("Your live crop workspace")).toBeInTheDocument();
+    expect(container.querySelectorAll(".field-crop-art")).toHaveLength(12);
+    expect(container.querySelector(".crop-stage-art")).toHaveAttribute("src", expect.stringContaining("cucumber-game.webp"));
+    unmount();
+  });
+
   it("clusters dense world data by zone without losing places from the directory model", () => {
     const denseLocations = Array.from({ length: 24 }, (_, index) => ({
       ...world.locations[0]!,
@@ -140,7 +150,7 @@ describe("delivery world", () => {
     expect(nodes.every((node) => node.label.includes("12 farms"))).toBe(true);
   });
 
-  it("uses semantic zoom to keep a populated island legible", () => {
+  it("keeps a populated island legible while revealing the focused place", () => {
     const populatedWorld = {
       ...world,
       locations: Array.from({ length: 9 }, (_, index) => ({
@@ -151,10 +161,12 @@ describe("delivery world", () => {
     };
     const { container } = render(<OpenWorldMap world={populatedWorld} role="FARMER" />);
 
-    expect(container.querySelector(".world-map-hint")).toHaveTextContent("Zoom in to reveal place names");
-    fireEvent.click(container.querySelector('button[aria-label="Zoom in"]')!);
-    fireEvent.click(container.querySelector('button[aria-label="Zoom in"]')!);
-    expect(container.querySelector(".world-map-hint")).toHaveTextContent("Living island · drag to explore");
+    expect(container.querySelector(".world-map-hint")).toHaveTextContent("Tap a place · drag to explore");
+    const firstPlace = screen.getByRole("button", { name: /Island place 1/ });
+    fireEvent.focus(firstPlace);
+    expect(firstPlace).toHaveClass("is-selected");
+    fireEvent.blur(firstPlace);
+    expect(firstPlace).not.toHaveClass("is-selected");
   });
 
   it("keeps delivery roads as an optional layer over the open world", () => {
@@ -274,8 +286,8 @@ describe("delivery world", () => {
     );
 
     for (const status of statuses) expect(container.querySelector('[data-stage="' + status.toLowerCase() + '"]')).toBeInTheDocument();
-    expect(container.querySelector('[data-crop="cucumber"] .cucumber-leaf')).toBeInTheDocument();
-    expect(container.querySelector('[data-crop="dasheen"] .dasheen-leaf')).toBeInTheDocument();
+    expect(container.querySelector('[data-crop="cucumber"][data-stage="harvest_ready"] img')).toHaveAttribute("src", expect.stringContaining("cucumber-game.webp"));
+    expect(container.querySelector('[data-crop="dasheen"] img')).toHaveAttribute("src", expect.stringContaining("dasheen-game.webp"));
     expect(container.querySelector('[data-crop="papaya"] .generic-leaf')).toBeInTheDocument();
   });
 

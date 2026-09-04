@@ -436,7 +436,16 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .world-back-button:hover { transform: translateY(-1px); box-shadow: 0 5px 0 #17573b; }
 .crop-progress-grid { position: relative; z-index: 2; display: grid; width: min(390px, 100%); grid-template-columns: 1fr; align-items: start; gap: 16px; margin-top: auto; margin-left: auto; }
 .crop-progress-plot { display: grid; grid-template-columns: 118px minmax(0, 1fr); overflow: hidden; border: 3px solid #fff1b6; border-radius: 18px 18px 12px 12px; background: rgba(255,248,215,.96); box-shadow: 0 8px 0 #9d6a32, 0 14px 22px rgba(84,55,27,.2); }
-.crop-progress-plot > svg { display: block; width: 118px; height: 100%; min-height: 148px; object-fit: cover; background: linear-gradient(#a8dfdb 0 42%, #85c66b 42% 100%); }
+.crop-stage-portrait { position: relative; display: grid; width: 118px; min-height: 148px; place-items: center; overflow: hidden; background: linear-gradient(#a8dfdb 0 42%,#85c66b 42% 100%); }
+.crop-stage-portrait > svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.crop-stage-art { position: relative; z-index: 1; width: 108px; height: 108px; object-fit: contain; filter: drop-shadow(0 7px 3px rgba(45,57,29,.32)); transform-origin: 50% 83%; }
+.crop-stage-portrait.is-growing .crop-stage-art { opacity: .94; transform: translateY(10px) scale(.72); }
+.crop-stage-portrait.is-harvest_ready .crop-stage-art { animation: crop-stage-ready 2.2s ease-in-out infinite alternate; }
+.crop-stage-spark { position: absolute; z-index: 2; width: 12px; height: 12px; background: #fff9a8; clip-path: polygon(50% 0,61% 38%,100% 50%,61% 62%,50% 100%,39% 62%,0 50%,39% 38%); filter: drop-shadow(0 0 5px #fff29a); animation: crop-sparkle 1.45s ease-in-out infinite; }
+.crop-stage-spark.spark-one { top: 19%; left: 18%; }
+.crop-stage-spark.spark-two { top: 31%; right: 13%; animation-delay: -.48s; }
+.crop-stage-spark.spark-three { right: 28%; bottom: 17%; animation-delay: -.92s; }
+@keyframes crop-stage-ready { from { transform: translateY(6px) rotate(-1deg) scale(.94); } to { transform: translateY(2px) rotate(1deg) scale(1); } }
 .crop-progress-plot > div { padding: 12px 14px 14px; }
 .crop-progress-copy > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 7px; }
 .crop-progress-copy > div:first-child strong { color: #6b583d; font-size: 9px; text-align: right; }
@@ -707,7 +716,8 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
   .farm-progress-header { align-items: flex-start; flex-direction: column; gap: 10px; }
   .crop-progress-grid { width: 100%; }
   .crop-progress-plot { grid-template-columns: 86px minmax(0, 1fr); }
-  .crop-progress-plot > svg { width: 86px; }
+  .crop-stage-portrait { width: 86px; }
+  .crop-stage-art { width: 82px; height: 82px; }
   .crop-stage-track small { display: none; }
   .mission-action-row { position: sticky; z-index: 15; bottom: 10px; padding: 8px; border: 1px solid #cbded4; border-radius: 13px; background: rgba(255,255,255,.94); box-shadow: 0 10px 25px rgba(16,55,42,.18); backdrop-filter: blur(8px); }
 }
@@ -720,5 +730,5 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .farm-progress-scene, .field-crop-sprite, .crop-ready-spark, .route-node-icon, .world-location-fallback, .hotel-scene-sky span, .world-place-scene { animation: none !important; }
+  .farm-progress-scene, .field-crop-sprite, .crop-ready-spark, .crop-stage-art, .crop-stage-spark, .route-node-icon, .world-location-fallback, .hotel-scene-sky span, .world-place-scene { animation: none !important; }
 }

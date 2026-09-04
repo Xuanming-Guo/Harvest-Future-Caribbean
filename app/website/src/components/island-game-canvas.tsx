@@ -109,7 +109,11 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
         return;
       }
 
-      const truckTexture = await Assets.load("/art/delivery-truck-game.webp");
+      const [truckTexture, farmTexture, hotelTexture] = await Promise.all([
+        Assets.load("/art/delivery-truck-game.webp"),
+        Assets.load("/art/farm-location-game.webp"),
+        Assets.load("/art/hotel-location-game.webp"),
+      ]);
       if (cancelled) {
         app.destroy(false, { children: true });
         return;
@@ -158,27 +162,25 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
         const container = new Container();
         const labelSide = marker.point.x < 0.42 ? "right" : marker.point.x > 0.58 ? "left" : "center";
         const markerColor = marker.kind === "PICKUP" ? 0x55c982 : marker.kind === "DROPOFF" ? 0xff8262 : 0xffca52;
-        const groundGlow = new Graphics().ellipse(0, 12, 35, 14).fill({ color: markerColor, alpha: 0.18 });
-        const pulse = new Graphics().ellipse(0, 6, 31, 23).stroke({ color: markerColor, width: 4, alpha: 0.8 });
-        const symbol = new Graphics();
+        const groundGlow = new Graphics().ellipse(0, 12, 43, 14).fill({ color: markerColor, alpha: 0.18 });
+        const pulse = new Graphics().ellipse(0, 7, 48, 28).stroke({ color: markerColor, width: 4, alpha: 0.8 });
+        const symbol = new Container();
         if (marker.kind === "PICKUP") {
-          symbol.roundRect(-23, -10, 46, 28, 6).fill({ color: 0xa86f3d }).stroke({ color: 0xffe6a0, width: 2 });
-          for (const x of [-13, 0, 13]) {
-            symbol.moveTo(x - 5, -5).lineTo(x + 5, 12).stroke({ color: 0x754623, width: 2, alpha: 0.78 });
-            symbol.ellipse(x - 3, 0, 6, 3).fill({ color: 0x2f8b55 });
-            symbol.ellipse(x + 3, 6, 6, 3).fill({ color: 0x56b96f });
-          }
-          symbol.roundRect(13, -18, 14, 14, 2).fill({ color: 0xf1c56f }).stroke({ color: 0x7e4827, width: 2 });
-          symbol.poly([11, -18, 20, -25, 29, -18]).fill({ color: 0xd95d3f }).stroke({ color: 0x893827, width: 2 });
+          const farm = new Sprite(farmTexture);
+          farm.anchor.set(0.5, 0.75);
+          farm.scale.set(94 / farmTexture.width);
+          symbol.addChild(farm);
         } else if (marker.kind === "DROPOFF") {
-          symbol.roundRect(-20, -14, 40, 34, 5).fill({ color: 0xffe1a1 }).stroke({ color: 0x9c5732, width: 2.5 });
-          symbol.poly([-24, -14, 0, -29, 24, -14]).fill({ color: 0xd9563f }).stroke({ color: 0x8d3527, width: 2.5 });
-          for (const x of [-11, 2]) for (const y of [-7, 3]) symbol.roundRect(x, y, 8, 7, 1).fill({ color: 0x58a8bd }).stroke({ color: 0xfff0bd, width: 1.5 });
-          symbol.roundRect(-4, 9, 8, 11, 2).fill({ color: 0x81503a });
+          const hotel = new Sprite(hotelTexture);
+          hotel.anchor.set(0.5, 0.75);
+          hotel.scale.set(91 / hotelTexture.width);
+          symbol.addChild(hotel);
         } else {
-          symbol.roundRect(-19, -12, 38, 31, 4).fill({ color: 0xeaa43d }).stroke({ color: 0x784527, width: 2.5 });
-          symbol.poly([-23, -12, 0, -27, 23, -12]).fill({ color: 0xb85431 }).stroke({ color: 0x784527, width: 2.5 });
-          symbol.roundRect(-6, 5, 12, 14, 2).fill({ color: 0x4e7658 });
+          const depot = new Graphics();
+          depot.roundRect(-19, -12, 38, 31, 4).fill({ color: 0xeaa43d }).stroke({ color: 0x784527, width: 2.5 });
+          depot.poly([-23, -12, 0, -27, 23, -12]).fill({ color: 0xb85431 }).stroke({ color: 0x784527, width: 2.5 });
+          depot.roundRect(-6, 5, 12, 14, 2).fill({ color: 0x4e7658 });
+          symbol.addChild(depot);
         }
         const label = new Text({
           text: marker.label,
@@ -343,7 +345,7 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
           const selected = marker.kind !== "DEPOT" && selectedStopRef.current === marker.sequence;
           const markerScale = Math.max(0.66, Math.min(1.08, width / 900)) * (showAllLabels ? 1.08 : 1) * (selected ? 1.08 : 1);
           container.scale.set(markerScale);
-          container.y = marker.point.y * height + (reducedMotion.matches ? 0 : Math.sin(elapsed / 420 + index * 1.4) * 3);
+          container.y = marker.point.y * height;
           groundGlow.alpha = 0.12 + (Math.sin(elapsed / 360 + index) + 1) * 0.08;
           pulse.alpha = selected ? 0.42 + (Math.sin(elapsed / 230) + 1) * 0.2 : 0.16;
           pulse.scale.set(selected ? 1 + (Math.sin(elapsed / 260) + 1) * 0.08 : 1);

@@ -137,12 +137,12 @@ export function DeliveryBoard({
   );
 }
 
-function PlantArt({ cropType, status }: { cropType: string; status: NonNullable<DeliveryCargo["cropStatus"]> }) {
+function PlantArt({ cropType, showPlants = true, status }: { cropType: string; showPlants?: boolean; status: NonNullable<DeliveryCargo["cropStatus"]> }) {
   const mature = status === "HARVEST_READY";
   const growing = status === "GROWING" || mature;
   const harvested = status === "HARVESTED";
   const closed = status === "CLOSED";
-  const plants = growing ? [58, 110, 162] : [];
+  const plants = growing && showPlants ? [58, 110, 162] : [];
   const dasheen = cropType === "DASHEEN";
   const cucumber = cropType === "CUCUMBER";
 
@@ -180,12 +180,27 @@ function PlantArt({ cropType, status }: { cropType: string; status: NonNullable<
   );
 }
 
+function CropStageArt({ cropType, status }: { cropType: string; status: NonNullable<DeliveryCargo["cropStatus"]> }) {
+  const cropSprite = cropType === "CUCUMBER"
+    ? "/art/cucumber-game.webp"
+    : cropType === "DASHEEN" ? "/art/dasheen-game.webp" : undefined;
+  const showCrop = cropSprite && (status === "GROWING" || status === "HARVEST_READY");
+
+  return (
+    <div className={`crop-stage-portrait is-${status.toLowerCase()}`}>
+      <PlantArt cropType={cropType} showPlants={!showCrop} status={status} />
+      {showCrop && <Image className="crop-stage-art" src={cropSprite} alt="" width={150} height={150} />}
+      {status === "HARVEST_READY" && showCrop && <><i className="crop-stage-spark spark-one" /><i className="crop-stage-spark spark-two" /><i className="crop-stage-spark spark-three" /></>}
+    </div>
+  );
+}
+
 export function CropProgressPlot({ cargo, quantityLabel = "committed" }: { cargo: DeliveryCargo; quantityLabel?: string }) {
   const status = cargo.cropStatus ?? "PLANNED";
   const currentStage = cropStages.indexOf(status);
   return (
     <article className="crop-progress-plot" data-crop={cargo.cropType.toLowerCase()} data-stage={status.toLowerCase()}>
-      <PlantArt cropType={cargo.cropType} status={status} />
+      <CropStageArt cropType={cargo.cropType} status={status} />
       <div className="crop-progress-copy">
         <div><Badge>{status}</Badge><strong>{cargo.quantity.value} kg {quantityLabel}</strong></div>
         <h4>{cropLabel(cargo.cropType)} field</h4>
@@ -207,7 +222,7 @@ const fieldPositions = [
   [39, 48], [46, 51], [53, 54], [60, 57], [67, 60], [74, 63],
 ] as const;
 
-function FarmFieldCrops({ cargo }: { cargo: DeliveryCargo }) {
+export function FarmFieldCrops({ cargo }: { cargo: DeliveryCargo }) {
   const status = cargo.cropStatus ?? "PLANNED";
   const count = status === "GROWING" ? 8 : status === "HARVEST_READY" ? 12 : status === "PLANNED" ? 5 : 0;
   const cropSprite = cargo.cropType === "CUCUMBER"

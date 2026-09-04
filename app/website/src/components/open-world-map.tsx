@@ -6,7 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 
-import { CropProgressPlot, type DeliveryMissionView } from "@/components/delivery-world";
+import { CropProgressPlot, FarmFieldCrops, type DeliveryMissionView } from "@/components/delivery-world";
 import { IslandGameCanvas, type IslandPoint } from "@/components/island-game-canvas";
 import { Badge, EmptyState } from "@/components/ui";
 import { titleCase } from "@/lib/format";
@@ -81,9 +81,19 @@ function dueLabel(value: string) {
 }
 
 function WorldFarmScene({ location, onBack }: { location: WorldMapLocation; onBack: () => void }) {
+  const crops = location.crops.map((crop) => ({
+    cropBatchId: crop.cropBatchId!,
+    farmId: location.locationId,
+    farmName: location.displayName,
+    cropType: crop.cropType,
+    cropStatus: crop.status,
+    quantity: crop.quantity ?? { value: 0, unit: "kg" as const },
+  }));
+
   return (
     <section className="world-place-scene world-farm-scene" aria-label={`${location.displayName} farm view`}>
       <Image className="farm-scene-art" src="/art/saint-lucia-farm.png" alt="" fill sizes="100vw" priority />
+      {location.access === "CROP_PROGRESS" && crops[0] && <FarmFieldCrops cargo={crops[0]} />}
       <div className="world-place-header">
         <button type="button" className="world-back-button" onClick={onBack}><ArrowLeft size={17} />Back to island</button>
         <div><span>{location.serviceZone}</span><h2>{location.displayName}</h2><small>{location.access === "CROP_PROGRESS" ? "Your live crop workspace" : location.access === "PUBLIC_SUPPLY" ? "Produce currently listed for buyers" : "Delivery location"}</small></div>
@@ -91,15 +101,8 @@ function WorldFarmScene({ location, onBack }: { location: WorldMapLocation; onBa
       <div className="world-place-content">
         {location.access === "CROP_PROGRESS" && location.crops.length ? (
           <div className="crop-progress-grid world-crop-grid">
-            {location.crops.map((crop) => (
-              <CropProgressPlot cargo={{
-                cropBatchId: crop.cropBatchId!,
-                farmId: location.locationId,
-                farmName: location.displayName,
-                cropType: crop.cropType,
-                cropStatus: crop.status,
-                quantity: crop.quantity ?? { value: 0, unit: "kg" },
-              }} quantityLabel="available to promise" key={crop.cropBatchId ?? crop.cropType} />
+            {crops.map((crop) => (
+              <CropProgressPlot cargo={crop} quantityLabel="available to promise" key={crop.cropBatchId ?? crop.cropType} />
             ))}
           </div>
         ) : location.crops.length ? (
@@ -300,7 +303,7 @@ export function OpenWorldMap({ world, mission, role, onClearRoute, onSceneChange
               onReady={() => setRendererReady(true)}
               points={routePoints}
               selectedStop={selectedSequence}
-              showAllLabels={nodes.length <= 6 || mapView.zoom >= 1.4}
+              showAllLabels={nodes.length <= 6}
             />
             {nodes.map((node, index) => (
               <button
@@ -309,6 +312,10 @@ export function OpenWorldMap({ world, mission, role, onClearRoute, onSceneChange
                 style={{ left: `${node.point.x * 100}%`, top: `${node.point.y * 100}%`, "--marker-delay": `${index * -.13}s` } as CSSProperties}
                 aria-label={node.members.length === 1 ? `${node.kind === "FARM" ? "Farm" : "Hotel"}: ${node.label}. ${locationHint(node.members[0]!)}` : `Open ${node.label}`}
                 onClick={() => node.members.length === 1 ? openLocation(node.members[0]!, node.id) : (setDirectoryQuery(node.members[0]!.serviceZone), setKindFilter(node.kind), setDirectoryOpen(true), setSelectedNodeId(node.id))}
+                onPointerEnter={() => setSelectedNodeId(node.id)}
+                onPointerLeave={() => setSelectedNodeId(undefined)}
+                onFocus={() => setSelectedNodeId(node.id)}
+                onBlur={() => setSelectedNodeId(undefined)}
                 key={node.id}
               >
                 <span className="world-location-fallback">{node.kind === "FARM" ? <Sprout size={19} /> : <Building2 size={19} />}<b>{node.members.length > 1 ? node.members.length : node.label}</b></span>
@@ -323,7 +330,7 @@ export function OpenWorldMap({ world, mission, role, onClearRoute, onSceneChange
           <button type="button" onClick={() => setMapView({ x: 0, y: 0, zoom: 1 })} aria-label="Reset map view"><Maximize2 size={17} /></button>
         </div>
         <button className="world-directory-button" type="button" aria-label={`${world.locations.length} island places. Browse farms and hotels`} aria-expanded={directoryOpen} onClick={() => setDirectoryOpen((open) => !open)}><ListFilter size={17} /><span>Places</span><b>{world.locations.length}</b></button>
-        <div className="world-map-hint"><Move size={15} /><span>{nodes.length > 6 && mapView.zoom < 1.4 ? "Zoom in to reveal place names" : "Living island · drag to explore"}</span></div>
+        <div className="world-map-hint"><Move size={15} /><span>{nodes.length > 6 ? "Tap a place · drag to explore" : "Living island · drag to explore"}</span></div>
         {!mission && activeRequests > 0 && (
           <button className="world-demand-signal" type="button" onClick={() => { setDirectoryQuery(""); setKindFilter("HOTEL"); setDirectoryOpen(true); }}>
             <Store size={21} />
