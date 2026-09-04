@@ -2,11 +2,13 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ActionPreviewMessage } from "@harvest/shared";
 import type { InjectedDisruption, ReplayTimeline, SimulationAgentAction } from "@harvest/simulation";
 
 import EstimationModeControl from "@/components/EstimationModeControl";
 import InjectionPanel from "@/components/InjectionPanel";
 import IslandScopeControls from "@/components/IslandScopeControls";
+import ActionPreview from "@/components/panels/ActionPreview";
 import EventFeed from "@/components/panels/EventFeed";
 import Inspector from "@/components/panels/Inspector";
 import ReferenceAttribution from "@/components/panels/ReferenceAttribution";
@@ -14,6 +16,7 @@ import Legend from "@/components/panels/Legend";
 import Masthead from "@/components/panels/Masthead";
 import MetricsPanel from "@/components/panels/MetricsPanel";
 import PlaybackControls from "@/components/transport/PlaybackControls";
+import { actionPreviewFrameUrl, toActionPreviewMessage } from "@/lib/action-preview";
 import { usePlayback } from "@/lib/playback";
 import {
   DEFAULT_ESTIMATION_MODE,
@@ -59,6 +62,7 @@ export default function ControlRoomPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedAction, setSelectedAction] = useState<SimulationAgentAction | null>(null);
   const [participantId, setParticipantId] = useState("");
+  const [preview, setPreview] = useState<{ message: ActionPreviewMessage; frameUrl: string | null; error: string | null } | null>(null);
   const [focusRegion, setFocusRegion] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -179,6 +183,31 @@ export default function ControlRoomPage() {
     }
   }, [currentRun, participantId]);
 
+  /**
+   * Opens the embedded reenactment. It mints its own read-only participant
+   * session rather than reusing one, because the token is short-lived and the
+   * preview has to work whether or not anyone opened the website first.
+   * Playback is deliberately untouched: the timeline keeps running or stays
+   * paused exactly as it was.
+   */
+  const previewAction = useCallback(async (action: SimulationAgentAction) => {
+    if (!currentRun) return;
+    const participant = timeline?.scene.participants.find((item) => item.simulationActorId === action.simulationActorId);
+    const message = toActionPreviewMessage(action, participant);
+    setPreview({ message, frameUrl: null, error: null });
+    try {
+      const session = await createParticipantSession(currentRun.runId, action.productActorId);
+      setPreview((current) => (current && current.message.actionId === action.actionId
+        ? { ...current, frameUrl: actionPreviewFrameUrl(session.accessToken, action.actionId) }
+        : current));
+    } catch (caught) {
+      const detail = caught instanceof Error ? caught.message : String(caught);
+      setPreview((current) => (current && current.message.actionId === action.actionId
+        ? { ...current, error: detail }
+        : current));
+    }
+  }, [currentRun, timeline]);
+
   const handleSelect = useCallback((id: string | null) => {
     setSelectedAction(null);
     setSelectedId(id);
@@ -198,6 +227,12 @@ export default function ControlRoomPage() {
     setSelectedId(null);
     setSelectedAction(null);
   }, []);
+
+  // A preview belongs to one action in one run. Loading another run would leave
+  // a frame open on a session that no longer matches what is on the globe.
+  useEffect(() => {
+    setPreview(null);
+  }, [currentRun?.runId]);
 
   const framesSoFar = useMemo(
     () => timeline ? timeline.frames.slice(0, state.frameIndex + 1) : [],
@@ -328,11 +363,26 @@ export default function ControlRoomPage() {
           </section>
         </div>
         <div className="chrome-right" style={{ display: "grid", gridTemplateRows: "1fr 1fr", gap: 16, minHeight: 0 }}>
-          <Inspector scene={scene} frame={frame} selectedId={selectedId} selectedAction={selectedAction} onClose={clearSelection} />
+          <Inspector
+            scene={scene}
+            frame={frame}
+            selectedId={selectedId}
+            selectedAction={selectedAction}
+            onClose={clearSelection}
+            onPreviewAction={policy === "HARVEST" ? (action) => void previewAction(action) : undefined}
+          />
           <section className="panel"><header className="panel-header"><span className="panel-title">What is happening</span></header><div className="panel-body"><EventFeed scene={scene} frames={framesSoFar} onSelect={handleSelect} onSelectAction={handleSelectAction} /></div></section>
         </div>
         <div className="chrome-footer"><PlaybackControls state={{ ...state, frame }} controls={controls} disruptionMarkers={disruptionMarkers} /></div>
       </div>
+      {preview && (
+        <ActionPreview
+          message={preview.message}
+          frameUrl={preview.frameUrl}
+          error={preview.error}
+          onClose={() => setPreview(null)}
+        />
+      )}
       {loading && <div className="run-loading" role="status">Generating and saving the simulation…</div>}
     </main>
   );

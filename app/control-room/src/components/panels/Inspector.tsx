@@ -17,6 +17,8 @@ export interface InspectorProps {
   selectedId: string | null;
   selectedAction: SimulationAgentAction | null;
   onClose: () => void;
+  /** Opens the embedded read-only reenactment. Absent when it is unavailable. */
+  onPreviewAction?: (action: SimulationAgentAction) => void;
 }
 
 const STAGE_CLASS: Record<CropStage, string> = {
@@ -249,12 +251,25 @@ function safeReference(value: string | undefined) {
   return value ? value.slice(0, 8) : "not recorded";
 }
 
-function AgentActionView({ action, scene, onClose }: { action: SimulationAgentAction; scene: ControlRoomScene; onClose: () => void }): React.JSX.Element {
+function AgentActionView({ action, scene, onClose, onPreview }: { action: SimulationAgentAction; scene: ControlRoomScene; onClose: () => void; onPreview?: (action: SimulationAgentAction) => void }): React.JSX.Element {
   const participant = scene.participants.find((item) => item.simulationActorId === action.simulationActorId);
   return (
     <>
       <Header title={participant?.displayName ?? action.role.toLowerCase()} subtitle="Agent action" onClose={onClose} />
       <div className="panel-body">
+        {/* Above the rows, not after them: the Inspector is a short panel and a
+            preview offered below its fold is a preview nobody finds. */}
+        {onPreview && (
+          <>
+            <button type="button" className="run-button participant-button preview-button" onClick={() => onPreview(action)}>
+              Preview in Harvest
+            </button>
+            <p className="panel-help">
+              Opens this participant’s read-only workspace and points at the control a person would use. It is a replay
+              of a typed Product API action, not browser automation.
+            </p>
+          </>
+        )}
         <Row label="Role" value={action.role.toLowerCase()} />
         <Row label="Tool" value={action.toolName.replaceAll("_", " ")} />
         <Row label="Status" value={<span className={`pill ${action.status === "SUCCEEDED" ? "pill-good" : "pill-bad"}`}>{action.status.toLowerCase()}</span>} />
@@ -289,9 +304,9 @@ function Header({ title, subtitle, onClose }: { title: string; subtitle: string;
   );
 }
 
-export default function Inspector({ scene, frame, selectedId, selectedAction, onClose }: InspectorProps): React.JSX.Element {
+export default function Inspector({ scene, frame, selectedId, selectedAction, onClose, onPreviewAction }: InspectorProps): React.JSX.Element {
   if (selectedAction) {
-    return <section className="panel"><AgentActionView action={selectedAction} scene={scene} onClose={onClose} /></section>;
+    return <section className="panel"><AgentActionView action={selectedAction} scene={scene} onClose={onClose} onPreview={onPreviewAction} /></section>;
   }
   if (!selectedId) {
     return (

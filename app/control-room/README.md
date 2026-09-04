@@ -35,7 +35,8 @@ and handles play, pause, speed, rewind, scrub and reset locally:
 - Harvest agent actions and adapter provenance appear in purple in the feed,
   and a forecast-producing action also names the estimation method that ran;
 - selecting a purple action opens its role, tool, status, approval class and
-  safe trace/event references in the Inspector;
+  safe trace/event references in the Inspector, and offers **Preview in
+  Harvest**;
 - a mapped participant can be opened in the normal website, read-only.
 
 The scenario selector is populated by `GET /v1/simulation-scenarios`. It opens
@@ -95,6 +96,60 @@ so a screenshot cannot separate a fallback run from a learned one.
 
 Participants cannot change the method. The website's crop page shows an
 **Estimated by** line naming the method and model version, and nothing else.
+
+## Preview in Harvest
+
+Selecting a saved agent action and pressing **Preview in Harvest** opens a
+closable panel containing the real participant website, framed on the same
+15-minute read-only session as **Open participant website**. The website then
+scrolls to the control a person would use for that tool, rings it, and captions
+what was recorded: participant, simulation time, entity, action, and outcome.
+`Escape` or **Close** dismisses it.
+
+It is a reenactment, not automation, and the panel says so. Agents call typed
+Product API tools; they never drive a browser, so there are no input events to
+replay. What is replayed is the *description* of a saved action, drawn over the
+live interface.
+
+Three separate things stop a preview from changing anything. The overlay is
+inert (`pointer-events: none`), the framed workspace is already inside a
+disabled fieldset because the session is read-only, and the Product API refuses
+every write from a replay session. The outermost of the three is the API's.
+
+The panel is capped short of the bottom of the window so the transport row stays
+uncovered: playback keeps running, or stays paused, exactly as it was.
+
+### What crosses into the frame
+
+The frame gets one `postMessage` after it asks for one, containing exactly
+`tool`, `entityIds`, `summary`, `status`, `simulationTime`, `participantName`,
+`role` and the `actionId` that matches the `?preview=` flag in its URL. The
+payload is built by naming those fields one at a time in
+`src/lib/action-preview.ts`, never by spreading a recorded action, so a private
+field added to `SimulationAgentAction` later cannot ride along. Trace,
+correlation and causation ids stay in the Inspector. No chain of thought, no
+hidden simulation truth, and nothing belonging to another participant.
+
+Both ends check `event.origin` and ignore anything from elsewhere.
+
+### Mapping a tool to a control
+
+`app/website/src/lib/action-preview.ts` maps every `ProductTools` tool to a
+route and an ordered chain of `data-tour` targets, reusing the attribute the
+first-session tutorial already puts on those controls. The chain falls back from
+the control, to the section that owns it, to the page: a saved run is a finished
+world, so the approval that was decided is decided and its live button has
+usually gone. Highlighting the section that owned a spent control is honest;
+drawing a fake live button would not be.
+
+A tool with no visual equivalent captions "No visual mapping for this action yet"
+and shows the recorded detail instead of opening an unrelated page.
+`app/website/tests/action-preview-map.test.ts` reads the tool list out of
+`app/api/src/simulation-agents.ts` and fails on a tool nobody mapped or a
+`data-tour` target no page renders any more.
+
+Motion is one pulsing ring and a pointer; under `prefers-reduced-motion` the
+pointer is dropped and the ring becomes a static highlight.
 
 ## Event injection
 

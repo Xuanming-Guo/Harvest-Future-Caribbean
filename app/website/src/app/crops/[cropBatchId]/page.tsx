@@ -299,7 +299,7 @@ export default function CropDetailPage() {
               <div className="field"><label htmlFor="estimate">Estimated crop (kg)</label><input id="estimate" type="number" min="0" step="0.5" value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} /></div>
               <div className="field field-full"><label htmlFor="notes">What have you noticed?</label><textarea id="notes" rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="For example: heavy rain, pest damage, or good growth" /></div>
               {!online && <div className="field-full"><OfflineHint>No connection. This update is kept on your device and sent on its own when you are back online.</OfflineHint></div>}
-              <button className="button field-full" disabled={observation.isPending}><Save size={16} />{observation.isPending ? "Saving..." : "Save crop update"}</button>
+              <button className="button field-full" data-tour="crop-update-save" disabled={observation.isPending}><Save size={16} />{observation.isPending ? "Saving..." : "Save crop update"}</button>
             </form>
           </Card></div>
         ) : (
@@ -327,7 +327,7 @@ export default function CropDetailPage() {
               <div className="field"><label>Available from</label><input type="date" value={availableFrom} onChange={(event) => setAvailableFrom(event.target.value)} /></div>
               <div className="field"><label>Available until</label><input type="date" value={availableUntil} onChange={(event) => setAvailableUntil(event.target.value)} /></div>
               {!online && <div className="field-full"><OfflineHint>No connection. This offer is kept on your device, and Harvest checks the safe quantity again before publishing it.</OfflineHint></div>}
-              <button className="button field-full" disabled={listing.isPending || listingQuantity > batch.data.availableToPromise.value}><Store size={16} />{listing.isPending ? "Publishing..." : "List in marketplace"}</button>
+              <button className="button field-full" data-tour="crop-listing-submit" disabled={listing.isPending || listingQuantity > batch.data.availableToPromise.value}><Store size={16} />{listing.isPending ? "Publishing..." : "List in marketplace"}</button>
             </form>
           </Card></div>
         </>
