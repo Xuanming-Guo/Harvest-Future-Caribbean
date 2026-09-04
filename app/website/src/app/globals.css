@@ -530,3 +530,77 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+/*
+ * Simulated action replay (issue #38).
+ *
+ * The whole layer is inert. A preview must be incapable of pressing anything,
+ * so nothing here takes pointer events; the ring is drawn over the control the
+ * agent's typed tool corresponds to, never wired to it.
+ *
+ * The pulse is the only motion, and `prefers-reduced-motion` replaces it with a
+ * plain static ring rather than merely slowing it down: a highlight that keeps
+ * moving is exactly what the setting is asking to stop.
+ */
+.action-preview-layer { position: fixed; inset: 0; z-index: 900; pointer-events: none; }
+.action-preview-ring {
+  position: fixed;
+  border: 3px solid #8a54c4;
+  border-radius: 15px;
+  box-shadow: 0 0 0 9999px rgba(23, 51, 42, .55), 0 0 0 7px rgba(138, 84, 196, .22);
+  transition: top .18s ease, left .18s ease, width .18s ease, height .18s ease;
+  animation: action-preview-pulse 1.9s ease-in-out infinite;
+}
+@keyframes action-preview-pulse {
+  0%, 100% { box-shadow: 0 0 0 9999px rgba(23, 51, 42, .55), 0 0 0 5px rgba(138, 84, 196, .18); }
+  50%      { box-shadow: 0 0 0 9999px rgba(23, 51, 42, .55), 0 0 0 13px rgba(138, 84, 196, .32); }
+}
+.action-preview-pointer {
+  position: fixed;
+  width: 19px;
+  height: 19px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50% 50% 50% 2px;
+  background: #8a54c4;
+  box-shadow: 0 2px 9px rgba(23, 51, 42, .45);
+  animation: action-preview-tap 1.9s ease-in-out infinite;
+}
+@keyframes action-preview-tap {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50%      { transform: translate(-5px, -5px) scale(.82); }
+}
+.action-preview-caption {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  width: min(330px, calc(100vw - 36px));
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+  padding: 17px 19px;
+  border: 1px solid #cdb6e6;
+  border-radius: 15px;
+  background: var(--card);
+  box-shadow: 0 18px 55px rgba(5, 22, 15, .3);
+}
+/* Moved out of the way of a control on the right-hand side of the page. */
+.action-preview-caption.is-left { right: auto; left: 18px; }
+.action-preview-eyebrow { margin-bottom: 5px; color: #6f3fa0; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.action-preview-caption h2 { margin-bottom: 12px; font-size: 18px; letter-spacing: -.02em; }
+.action-preview-facts { display: grid; gap: 6px; margin: 0 0 12px; }
+.action-preview-facts > div { display: grid; grid-template-columns: 96px 1fr; gap: 10px; align-items: baseline; }
+.action-preview-facts dt { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.action-preview-facts dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.action-preview-status { display: inline-block; padding: 1px 8px; border-radius: 999px; background: rgba(91, 166, 75, .18); color: #2f6b25; font-size: 12px; font-weight: 700; }
+.action-preview-status.is-rejected { background: rgba(184, 74, 57, .16); color: var(--red); }
+.action-preview-summary { margin-bottom: 10px; font-size: 13px; line-height: 1.55; }
+.action-preview-note { margin-bottom: 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.action-preview-provenance { margin: 0; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; line-height: 1.5; }
+
+@media (max-width: 720px) {
+  .action-preview-caption, .action-preview-caption.is-left { right: 10px; left: 10px; bottom: 10px; width: auto; max-height: 46vh; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action-preview-ring { animation: none; }
+  .action-preview-pointer { display: none; }
+}
