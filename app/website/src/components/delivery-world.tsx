@@ -284,6 +284,8 @@ export function DeliveryJourney({
   controls,
   compact = false,
   detailsInitiallyOpen = false,
+  immersive = false,
+  onWorldModeChange,
   vehicleLabel,
 }: {
   mission: DeliveryMissionView;
@@ -291,6 +293,8 @@ export function DeliveryJourney({
   controls?: ReactNode;
   compact?: boolean;
   detailsInitiallyOpen?: boolean;
+  immersive?: boolean;
+  onWorldModeChange?: (mode: "MAP" | "FARM") => void;
   vehicleLabel?: string;
 }) {
   const anchors = useMemo(() => routeAnchors(mission), [mission]);
@@ -301,6 +305,7 @@ export function DeliveryJourney({
   const [cameraBusy, setCameraBusy] = useState(false);
   const [farmLeaving, setFarmLeaving] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [rendererReady, setRendererReady] = useState(false);
   const transitionTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const inertiaFrame = useRef<number | null>(null);
   const gesture = useRef<{
@@ -345,6 +350,7 @@ export function DeliveryJourney({
     setDetailsOpen(false);
     if (process.env.NODE_ENV === "test") {
       setZoomFarmId(farmId);
+      onWorldModeChange?.("FARM");
       return;
     }
     transitionTimers.current.forEach(clearTimeout);
@@ -358,6 +364,7 @@ export function DeliveryJourney({
     scheduleTransition(() => {
       setZoomFarmId(farmId);
       setCameraBusy(false);
+      onWorldModeChange?.("FARM");
     }, 560);
   }
 
@@ -365,12 +372,14 @@ export function DeliveryJourney({
     if (process.env.NODE_ENV === "test") {
       setZoomFarmId(null);
       setMapView({ x: 0, y: 0, zoom: 1 });
+      onWorldModeChange?.("MAP");
       return;
     }
     setFarmLeaving(true);
     scheduleTransition(() => {
       setZoomFarmId(null);
       setFarmLeaving(false);
+      onWorldModeChange?.("MAP");
       setCameraBusy(true);
       requestAnimationFrame(() => setMapView({ x: 0, y: 0, zoom: 1 }));
       scheduleTransition(() => setCameraBusy(false), 680);
@@ -498,7 +507,7 @@ export function DeliveryJourney({
   }
 
   return (
-    <Card className={`delivery-journey ${compact ? "is-compact" : ""}`}>
+    <Card className={`delivery-journey ${compact ? "is-compact" : ""} ${immersive ? "is-immersive" : ""}`}>
       <div className="journey-heading">
         <div className="journey-title-lockup"><span>Island route</span><SectionTitle title="Saint Lucia delivery journey" detail={`${mission.stops.length} local stops`} /></div>
         <div className="journey-labels"><Badge>{mission.status}</Badge>{mission.atRisk && <Badge tone="high">At risk</Badge>}</div>
@@ -520,13 +529,14 @@ export function DeliveryJourney({
           ) : (
             <>
               <div className="world-pan-layer" style={worldStyle} data-zoom={mapView.zoom.toFixed(1)}>
-                <div className="world-scene-surface">
+                <div className={`world-scene-surface ${rendererReady ? "is-game-ready" : ""}`}>
                   <IslandBackdrop />
                   <IslandGameCanvas
                     activeSegment={mission.status === "DELIVERED" ? points.length - 2 : mission.currentStopSequence}
                     delivered={mission.status === "DELIVERED"}
                     markers={gameMarkers}
                     moving={moving}
+                    onReady={() => setRendererReady(true)}
                     points={gamePoints}
                     selectedStop={selectedStop}
                   />

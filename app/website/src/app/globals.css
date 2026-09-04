@@ -17,6 +17,7 @@
 }
 
 * { box-sizing: border-box; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 html, body { min-height: 100%; }
 body { margin: 0; color: var(--ink); background: var(--cream); font-family: "DM Sans", sans-serif; }
 button, input, select, textarea { font: inherit; }
@@ -373,7 +374,7 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .route-node > span:last-child b { display: grid; flex: 0 0 auto; width: 17px; height: 17px; place-items: center; border-radius: 50%; color: white; font-size: 9px; background: #2c7654; }
 .route-node:hover .route-node-icon, .route-node.is-selected .route-node-icon, .route-node:focus-visible .route-node-icon { transform: translateY(-4px) scale(1.07); box-shadow: 0 7px 0 #175438, 0 11px 16px rgba(14,64,49,.35); }
 .route-node.is-selected .route-node-icon { outline: 4px solid #ffd452; outline-offset: 3px; }
-.world-scene-surface:has(.island-game-renderer[data-renderer-ready="true"]) .route-node > span { opacity: 0; }
+.world-scene-surface.is-game-ready .route-node > span { opacity: 0; }
 @keyframes route-marker-float { from { translate: 0 0; } to { translate: 0 -5px; } }
 .journey-warning { position: absolute; z-index: 8; top: 18px; right: 18px; display: grid; width: 39px; height: 39px; place-items: center; border: 3px solid white; border-radius: 50%; color: white; background: #c94c3d; box-shadow: 0 5px 12px rgba(87,34,26,.3); }
 .world-map-hint { position: absolute; z-index: 10; left: 16px; bottom: 16px; display: flex; align-items: center; gap: 6px; padding: 7px 10px; border: 2px solid rgba(74,44,20,.14); border-radius: 999px; color: #32594e; font-size: 10px; font-weight: 900; background: rgba(255,251,220,.9); box-shadow: 0 3px 0 rgba(72,45,25,.18); pointer-events: none; }
@@ -408,6 +409,7 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .journey-controls { display: grid; gap: 9px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); }
 .journey-controls .button, .journey-controls .button-secondary { width: 100%; justify-content: center; }
 .farm-progress-scene { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; padding: 24px; overflow: auto; color: #163f33; background: #79c8ca; cursor: default; animation: farm-camera-arrive .72s cubic-bezier(.16,.84,.24,1) both; transform-origin: 31% 57%; }
+.delivery-journey.is-immersive .farm-progress-scene { z-index: 60; }
 @keyframes farm-camera-arrive { from { opacity: 0; filter: saturate(.75) blur(3px); transform: scale(1.13); } to { opacity: 1; filter: saturate(1) blur(0); transform: scale(1); } }
 .farm-progress-scene.is-leaving { pointer-events: none; animation: farm-camera-leave .43s cubic-bezier(.55,.08,.68,.53) both; }
 @keyframes farm-camera-leave { from { opacity: 1; filter: saturate(1) blur(0); transform: scale(1); } to { opacity: 0; filter: saturate(.72) blur(3px); transform: scale(1.12); } }
@@ -496,12 +498,37 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .island-world-count svg { grid-row: span 2; }
 .island-world-count strong { color: #3b503d; font-size: 17px; }
 .island-world-count span { color: #79644c; font-size: 9px; font-weight: 800; }
+.island-world-count.is-action { font: inherit; text-align: left; cursor: pointer; }
+.island-world-count.is-action:hover, .island-world-count.is-action:focus-visible { border-color: #79a356; background: #f4fadf; box-shadow: 0 3px 0 #6f974e, 0 0 0 3px rgba(255,221,92,.42); transform: translateY(-1px); }
 .map-route-switcher { display: flex; gap: 10px; padding: 5px 3px 10px; overflow-x: auto; scrollbar-width: thin; }
 .map-route-switcher > button { display: grid; grid-template-columns: auto minmax(130px, 1fr) auto; align-items: center; gap: 9px; flex: 0 0 auto; padding: 10px 12px; border: 2px solid #e7ce96; border-radius: 13px; color: #315843; text-align: left; background: #fff9e7; box-shadow: 0 4px 0 #c99b57; cursor: pointer; }
 .map-route-switcher > button:hover, .map-route-switcher > button:focus-visible, .map-route-switcher > button.is-selected { border-color: #70a34f; background: #eff8d8; box-shadow: 0 4px 0 #56813e, 0 0 0 3px rgba(250,211,86,.42); transform: translateY(-1px); }
 .map-route-switcher > button > span { display: grid; }
 .map-route-switcher strong { font-size: 10px; }
 .map-route-switcher small { color: #76634f; font-size: 9px; }
+.main-column main.map-main { max-width: none; padding: 18px 20px 24px; }
+.map-main .island-world-page { position: relative; display: block; }
+.map-main .island-world-hud { position: absolute; z-index: 30; top: 15px; left: 15px; width: min(520px, calc(64% - 40px)); padding: 10px 12px; border-width: 2px; border-radius: 15px; background: rgba(255,244,202,.92); box-shadow: 0 5px 0 rgba(127,73,27,.68), 0 12px 26px rgba(34,68,44,.2); transition: opacity .24s ease, transform .24s ease; backdrop-filter: blur(9px); }
+.map-main .island-world-hud.is-hidden { opacity: 0; pointer-events: none; transform: translateY(-12px); }
+.map-main .island-world-hud h1 { font-size: clamp(17px, 2vw, 22px); }
+.map-main .island-world-hud p { max-width: 510px; font-size: 9px; }
+.map-main .island-world-count { min-width: 126px; padding: 7px 10px; }
+.delivery-journey.is-immersive .journey-heading { display: none; }
+.map-main .empty-island-world .journey-heading { display: none; }
+.delivery-journey.is-immersive .journey-layout, .map-main .empty-island-world .journey-layout { min-height: calc(100dvh - 116px); }
+.map-route-drawer { position: absolute; z-index: 45; top: 100px; left: 20px; display: flex; width: min(370px, calc(100% - 40px)); max-height: min(620px, calc(100dvh - 150px)); flex-direction: column; gap: 12px; padding: 14px; border: 4px solid #875028; border-radius: 18px; background: linear-gradient(145deg, #f8d894, #edbb6d); box-shadow: 0 9px 0 #60361e, 0 24px 50px rgba(27,53,37,.3); animation: route-drawer-arrive .26s cubic-bezier(.18,.8,.26,1) both; }
+@keyframes route-drawer-arrive { from { opacity: 0; transform: translateY(-10px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.map-route-drawer-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #4c2d19; }
+.map-route-drawer-heading > div { display: grid; gap: 2px; }
+.map-route-drawer-heading span { font-size: 9px; font-weight: 900; letter-spacing: .11em; text-transform: uppercase; }
+.map-route-drawer-heading strong { font: 800 18px "Manrope", sans-serif; }
+.map-route-drawer-heading button { display: grid; width: 35px; height: 35px; place-items: center; border: 2px solid #fff0b2; border-radius: 50%; color: white; background: #d9573f; box-shadow: 0 3px 0 #9b392b; cursor: pointer; }
+.map-route-search { display: flex; align-items: center; gap: 8px; padding: 0 11px; border: 2px solid #dfb46f; border-radius: 11px; color: #397056; background: rgba(255,253,229,.95); box-shadow: inset 0 2px 4px rgba(92,54,23,.08); }
+.map-route-search:focus-within { border-color: #43805d; box-shadow: 0 0 0 3px rgba(255,239,154,.7); }
+.map-route-search input { min-width: 0; width: 100%; height: 42px; border: 0; outline: 0; color: #2d473a; background: transparent; font-size: 11px; }
+.map-route-drawer .map-route-switcher { display: grid; gap: 9px; padding: 2px 5px 7px 2px; overflow: auto; }
+.map-route-drawer .map-route-switcher > button { grid-template-columns: auto minmax(0, 1fr) auto; width: 100%; }
+.map-route-drawer .map-route-switcher > p { margin: 8px; color: #755332; font-size: 11px; text-align: center; }
 .empty-island-stage { cursor: default; }
 .empty-world-message { position: absolute; z-index: 5; top: 50%; left: 50%; display: grid; width: min(360px, calc(100% - 40px)); justify-items: center; padding: 20px; border: 4px solid #fff0ae; border-radius: 20px; color: #2d7651; background: rgba(255,251,225,.92); box-shadow: 0 8px 0 rgba(109,64,28,.42), 0 20px 35px rgba(29,66,49,.22); transform: translate(-50%, -50%); backdrop-filter: blur(8px); }
 .empty-world-message .empty-state { padding: 8px 0 0; }
@@ -528,6 +555,16 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 @media (max-width: 640px) {
   .island-world-hud { align-items: flex-start; flex-direction: column; }
   .island-world-count { width: 100%; }
+  .main-column main.map-main { padding: 9px; }
+  .map-main .island-world-hud { right: 170px; left: 12px; width: auto; align-items: center; flex-direction: row; gap: 8px; padding: 8px 10px; }
+  .map-main .island-world-hud > div:first-child > span, .map-main .island-world-hud p { display: none; }
+  .map-main .island-world-hud h1 { margin: 0; font-size: 15px; white-space: nowrap; }
+  .map-main .island-world-count { grid-template-columns: auto auto; width: auto; min-width: 0; padding: 6px 8px; }
+  .map-main .island-world-count svg { grid-row: auto; }
+  .map-main .island-world-count span { display: none; }
+  .delivery-journey.is-immersive .journey-layout, .map-main .empty-island-world .journey-layout { min-height: calc(100dvh - 84px); }
+  .map-route-drawer { position: fixed; top: auto; right: 10px; bottom: 10px; left: 10px; width: auto; max-height: min(68dvh, 580px); border-radius: 21px; animation-name: route-drawer-mobile-arrive; }
+  @keyframes route-drawer-mobile-arrive { from { opacity: 0; transform: translateY(28px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
   .delivery-game-hud { grid-template-columns: 1fr; gap: 12px; padding: 13px; }
   .delivery-hud-stats { grid-column: auto; grid-row: auto; overflow-x: auto; }
   .delivery-hud-stats > span { flex: 0 0 auto; }
@@ -556,6 +593,13 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
   .crop-progress-plot > svg { width: 86px; }
   .crop-stage-track small { display: none; }
   .mission-action-row { position: sticky; z-index: 15; bottom: 10px; padding: 8px; border: 1px solid #cbded4; border-radius: 13px; background: rgba(255,255,255,.94); box-shadow: 0 10px 25px rgba(16,55,42,.18); backdrop-filter: blur(8px); }
+}
+
+@media (max-width: 480px) {
+  .map-main .island-world-hud { right: 64px; }
+  .map-main .island-world-count { display: none; }
+  .delivery-journey.is-immersive .map-detail-toggle { width: 42px; height: 42px; grid-template-columns: 1fr; justify-items: center; padding: 0; font-size: 0; }
+  .delivery-journey.is-immersive .world-map-hint span { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

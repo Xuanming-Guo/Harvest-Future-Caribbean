@@ -123,7 +123,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <LogOut size={17} />Sign out
           </button>
         </header>
-        <fieldset className="workspace-fieldset" disabled={Boolean(actor.readOnly)}><main>{children}</main></fieldset>
+        <fieldset className="workspace-fieldset" disabled={Boolean(actor.readOnly)}><main className={pathname === "/map" ? "map-main" : undefined}>{children}</main></fieldset>
       </div>
       {!actor.readOnly && <OnboardingGuide actor={actor} restartSignal={tutorialRequest} />}
     </div>

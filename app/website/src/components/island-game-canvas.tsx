@@ -15,6 +15,7 @@ type IslandGameCanvasProps = {
   delivered: boolean;
   markers: IslandMarker[];
   moving: boolean;
+  onReady?: () => void;
   points: IslandPoint[];
   selectedStop: number;
 };
@@ -55,9 +56,10 @@ function curveDirection(curve: Curve, progress: number) {
   return { x: after.x - before.x, y: after.y - before.y };
 }
 
-export function IslandGameCanvas({ activeSegment, delivered, markers, moving, points, selectedStop }: IslandGameCanvasProps) {
+export function IslandGameCanvas({ activeSegment, delivered, markers, moving, onReady, points, selectedStop }: IslandGameCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const onReadyRef = useRef(onReady);
   const selectedStopRef = useRef(selectedStop);
   const [reducedMotion, setReducedMotion] = useState(false);
   const pointKey = points.map((point) => `${point.x},${point.y}`).join(";");
@@ -66,6 +68,10 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, po
   useEffect(() => {
     selectedStopRef.current = selectedStop;
   }, [selectedStop]);
+
+  useEffect(() => {
+    onReadyRef.current = onReady;
+  }, [onReady]);
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
@@ -130,6 +136,21 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, po
         [0.08, 0.18], [0.14, 0.48], [0.06, 0.76], [0.21, 0.91], [0.52, 0.94], [0.75, 0.9],
         [0.91, 0.73], [0.94, 0.42], [0.82, 0.17], [0.63, 0.1], [0.37, 0.08],
       ];
+      const birds = Array.from({ length: 3 }, (_, index) => {
+        const bird = new Graphics()
+          .moveTo(-8, 0)
+          .quadraticCurveTo(-4, -5, 0, 0)
+          .quadraticCurveTo(4, -5, 8, 0)
+          .stroke({ color: 0x315e58, width: 2, alpha: 0.58 });
+        bird.scale.set(0.75 + index * 0.17);
+        ambientLayer.addChild(bird);
+        return bird;
+      });
+      const fieldMotes = Array.from({ length: 9 }, (_, index) => {
+        const mote = new Graphics().circle(0, 0, index % 3 === 0 ? 2.2 : 1.4).fill({ color: index % 2 ? 0xffed8d : 0xe8fff0, alpha: 0.75 });
+        ambientLayer.addChild(mote);
+        return mote;
+      });
 
       const normalizedMarkers = JSON.parse(markerPayload) as IslandMarker[];
       const worldMarkers = normalizedMarkers.map((marker) => {
@@ -241,6 +262,9 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, po
           const position = shimmerPositions[index]!;
           shimmer.position.set(position[0]! * width, position[1]! * height);
         });
+        birds.forEach((bird, index) => {
+          bird.position.set((0.33 + index * 0.1) * width, (0.13 + index * 0.035) * height);
+        });
         worldMarkers.forEach(({ container, point }) => {
           container.position.set(point.x * width, point.y * height);
         });
@@ -259,6 +283,7 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, po
 
       rebuildScene();
       host.dataset.rendererReady = "true";
+      onReadyRef.current?.();
 
       const tick = (ticker: { deltaMS: number }) => {
         if (app.screen.width !== width || app.screen.height !== height) rebuildScene();
@@ -288,6 +313,20 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, po
         shimmers.forEach((shimmer, index) => {
           shimmer.alpha = reducedMotion.matches ? 0.38 : 0.2 + (Math.sin(elapsed / 620 + index * 1.7) + 1) * 0.24;
           shimmer.scale.x = 0.78 + Math.sin(elapsed / 810 + index) * 0.24;
+        });
+        birds.forEach((bird, index) => {
+          if (reducedMotion.matches) return;
+          const flight = (elapsed / (15000 + index * 1300) + index * 0.27) % 1;
+          bird.x = (-0.06 + flight * 1.12) * width;
+          bird.y = (0.11 + index * 0.045 + Math.sin(flight * Math.PI * 4 + index) * 0.018) * height;
+          bird.scale.y = 0.72 + Math.sin(elapsed / 170 + index) * 0.18;
+        });
+        fieldMotes.forEach((mote, index) => {
+          const phase = (elapsed / (3200 + index * 170) + index / fieldMotes.length) % 1;
+          const originX = (0.25 + index % 3 * 0.08) * width;
+          const originY = (0.41 + Math.floor(index / 3) * 0.08) * height;
+          mote.position.set(originX + Math.sin(phase * Math.PI * 2 + index) * 13, originY - phase * 31);
+          mote.alpha = reducedMotion.matches ? 0.28 : Math.sin(phase * Math.PI) * 0.62;
         });
         worldMarkers.forEach(({ container, groundGlow, label, labelBoard, marker, pulse }, index) => {
           const selected = marker.kind !== "DEPOT" && selectedStopRef.current === marker.sequence;
