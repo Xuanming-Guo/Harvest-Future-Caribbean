@@ -1,5 +1,6 @@
 import type { DeliveryMission } from "@prisma/client";
 
+import { anonymousLocationName, identityDisclosure, visibleFarmIds } from "./access.js";
 import type { AuthActor } from "./auth.js";
 import { prisma } from "./db.js";
 import { missionDto, quantity } from "./serializers.js";
@@ -15,8 +16,25 @@ type StoredStop = {
 
 const sameRun = (left: string | null, right: string | null) => left === right;
 
+/**
+ * Roughly a kilometre of resolution: enough to draw a believable island route,
+ * far too little to find a gate. Used for a stop whose owner the viewer has not
+ * earned the name of.
+ */
+const coarsePoint = (point: { latitude: number; longitude: number }) => ({
+  latitude: Math.round(point.latitude * 100) / 100,
+  longitude: Math.round(point.longitude * 100) / 100,
+});
+
 export async function deliveryMissionViews(rows: DeliveryMission[], viewer: AuthActor) {
   if (!rows.length) return [];
+
+  const disclosure = await identityDisclosure(viewer);
+  // A farmer follows the truck through its own gate only. Another grower's
+  // pickup on the same run stays an unnamed stop on the road.
+  const ownFarmIds = viewer.role === "FARMER" ? new Set(await visibleFarmIds(viewer)) : null;
+  const mayIdentifyFarm = (farmId: string) => disclosure.unrestricted || disclosure.farms.has(farmId);
+  const mayIdentifyBuyer = (buyerId: string) => disclosure.unrestricted || disclosure.buyers.has(buyerId);
 
   const orderIds = [...new Set(rows.map((row) => row.orderId))];
   const orders = await prisma.order.findMany({ where: { id: { in: orderIds } } });
@@ -56,6 +74,10 @@ export async function deliveryMissionViews(rows: DeliveryMission[], viewer: Auth
     const order = candidateOrder && sameRun(candidateOrder.simulationRunId, row.simulationRunId) ? candidateOrder : undefined;
     const candidateBuyer = order ? buyerById.get(order.buyerId) : undefined;
     const buyer = candidateBuyer && sameRun(candidateBuyer.simulationRunId, row.simulationRunId) ? candidateBuyer : undefined;
+    const buyerIdentified = Boolean(buyer && mayIdentifyBuyer(buyer.id));
+    const buyerLabel = buyer
+      ? buyerIdentified ? buyer.name : anonymousLocationName("HOTEL", buyer.serviceZone)
+      : "Buyer destination";
     const candidateAllocation = allocationByOrder.get(row.orderId);
     const allocation = candidateAllocation && sameRun(candidateAllocation.simulationRunId, row.simulationRunId) ? candidateAllocation : undefined;
     const includeCropStatus = viewer.role !== "TRANSPORTER" || row.transporterId === viewer.id;
@@ -70,10 +92,11 @@ export async function deliveryMissionViews(rows: DeliveryMission[], viewer: Auth
       const batch = batchById.get(cropBatchId);
       const farm = batch ? farmById.get(batch.farmId) : undefined;
       if (!batch || !farm || !sameRun(batch.simulationRunId, row.simulationRunId) || !sameRun(farm.simulationRunId, row.simulationRunId)) return [];
+      if (ownFarmIds && !ownFarmIds.has(farm.id)) return [];
       return [{
         cropBatchId,
         farmId: farm.id,
-        farmName: farm.name,
+        farmName: mayIdentifyFarm(farm.id) ? farm.name : anonymousLocationName("FARM", farm.productionZone),
         cropType: batch.cropType,
         ...(includeCropStatus ? { cropStatus: batch.status } : {}),
         quantity: quantity(value),
@@ -83,11 +106,24 @@ export async function deliveryMissionViews(rows: DeliveryMission[], viewer: Auth
     const stops = (row.stops as unknown as StoredStop[]).map((stop) => {
       const candidateFarm = stop.farmId ? farmById.get(stop.farmId) : undefined;
       const farm = candidateFarm && sameRun(candidateFarm.simulationRunId, row.simulationRunId) ? candidateFarm : undefined;
+      const farmIdentified = Boolean(farm && mayIdentifyFarm(farm.id));
+      const identified = stop.kind === "PICKUP" ? farmIdentified : buyerIdentified;
+      const displayName = stop.kind === "PICKUP"
+        ? farm
+          ? farmIdentified ? farm.name : anonymousLocationName("FARM", farm.productionZone)
+          : `Pickup ${stop.sequence}`
+        : buyer
+          ? buyerLabel
+          : `Delivery ${stop.sequence}`;
+      // The address itself is part of the identity. A stop the viewer may not
+      // name is drawn at zone resolution and carries no crop-batch references.
+      if (identified) return { ...stop, displayName };
       return {
-        ...stop,
-        displayName: stop.kind === "PICKUP"
-          ? farm?.name ?? `Pickup ${stop.sequence}`
-          : buyer?.name ?? `Delivery ${stop.sequence}`,
+        sequence: stop.sequence,
+        kind: stop.kind,
+        ...(stop.quantity ? { quantity: stop.quantity } : {}),
+        location: coarsePoint(stop.location),
+        displayName,
       };
     });
 
@@ -95,7 +131,7 @@ export async function deliveryMissionViews(rows: DeliveryMission[], viewer: Auth
       ...missionDto(row),
       stops,
       routeRegion: "Saint Lucia",
-      buyerName: buyer?.name ?? "Buyer destination",
+      buyerName: buyerLabel,
       cropType: order?.cropType ?? cargo[0]?.cropType ?? "Produce",
       atRisk: order?.atRisk ?? false,
       cargo,

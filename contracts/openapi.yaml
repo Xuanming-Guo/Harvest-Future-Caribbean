@@ -1594,11 +1594,19 @@ components:
     WorldMapLocation:
       type: object
       additionalProperties: false
-      required: [locationId, kind, displayName, serviceZone, access, crops, opportunities]
+      required: [locationId, kind, displayName, identified, serviceZone, access, crops, opportunities]
       properties:
         locationId: {type: string, format: uuid}
         kind: {enum: [FARM, HOTEL]}
         displayName: {type: string, minLength: 1}
+        identified:
+          description: >-
+            True when the caller has earned the real name of this place: its
+            own farm, a mission stop it must drive to, or a counterparty on an
+            order that has passed the human approval gate. False means
+            displayName is a zone-level label such as "A buyer in Castries" and
+            no name or address is disclosed.
+          type: boolean
         serviceZone: {type: string, minLength: 1}
         access: {enum: [CROP_PROGRESS, PUBLIC_SUPPLY, BUYER_DEMAND, OWN_ORDERS, LOGISTICS]}
         crops: {type: array, items: {$ref: '#/components/schemas/WorldMapCrop'}}

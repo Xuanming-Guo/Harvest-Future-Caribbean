@@ -1,6 +1,6 @@
 import type { BuyerDemand, CropBatch, Listing } from "@prisma/client";
 
-import { actorRunScope, visibleBatchIds, visibleFarmIds, visibleOrderIds } from "./access.js";
+import { actorRunScope, anonymousLocationName, identityDisclosure, visibleBatchIds, visibleFarmIds, visibleOrderIds } from "./access.js";
 import type { AuthActor } from "./auth.js";
 import { prisma } from "./db.js";
 import { quantity } from "./serializers.js";
@@ -24,6 +24,7 @@ function mapOpportunity(row: BuyerDemand) {
 
 export async function worldMapView(actor: AuthActor) {
   const scope = actorRunScope(actor);
+  const disclosure = await identityDisclosure(actor);
   const directFarmIds = actor.role === "ADMIN" || actor.role === "OPERATIONS"
     ? (await prisma.farm.findMany({ where: scope, select: { id: true } })).map((farm) => farm.id)
     : await visibleFarmIds(actor);
@@ -59,7 +60,11 @@ export async function worldMapView(actor: AuthActor) {
     : [];
   const publicFarmByBatch = new Map(publicBatches.map((batch) => [batch.id, batch.farmId]));
   const publicFarmIds = unique(publicBatches.map((batch) => batch.farmId));
-  const farmIds = unique([...directFarmIds, ...missionFarmIds, ...publicFarmIds]);
+  // A farmer's island is its own fields. Another grower's plot never becomes a
+  // place a farmer can open, not even when both supply the same delivery.
+  const farmIds = actor.role === "FARMER"
+    ? directFarmIds
+    : unique([...directFarmIds, ...missionFarmIds, ...publicFarmIds]);
   const farms = farmIds.length ? await prisma.farm.findMany({ where: { ...scope, id: { in: farmIds } } }) : [];
 
   const matchingDemands = actor.role === "FARMER" || actor.role === "COORDINATOR"
@@ -71,12 +76,14 @@ export async function worldMapView(actor: AuthActor) {
       : actor.role === "ADMIN" || actor.role === "OPERATIONS"
         ? await prisma.buyerDemand.findMany({ where: { ...scope, status: { in: ["OPEN", "MATCHING"] } }, orderBy: { neededBy: "asc" } })
         : [];
-  const hotelIds = unique([
-    ...matchingDemands.map((demand) => demand.buyerId),
-    ...visibleOrders.map((order) => order.buyerId),
-    ...missionOrders.map((order) => order.buyerId),
-    ...(actor.role === "BUYER" ? [actor.id] : []),
-  ]);
+  // A hotel is never a place on another hotel's island.
+  const hotelIds = actor.role === "BUYER"
+    ? [actor.id]
+    : unique([
+      ...matchingDemands.map((demand) => demand.buyerId),
+      ...visibleOrders.map((order) => order.buyerId),
+      ...missionOrders.map((order) => order.buyerId),
+    ]);
   const hotels = hotelIds.length ? await prisma.actor.findMany({ where: { ...scope, id: { in: hotelIds }, role: "BUYER" } }) : [];
 
   const directBatchesByFarm = new Map<string, CropBatch[]>();
@@ -91,11 +98,13 @@ export async function worldMapView(actor: AuthActor) {
 
   const farmLocations = farms.map((farm) => {
     const canSeeProgress = directFarmIds.includes(farm.id);
+    const identified = disclosure.unrestricted || disclosure.farms.has(farm.id);
     const listings = listingsByFarm.get(farm.id) ?? [];
     return {
       locationId: farm.id,
       kind: "FARM" as const,
-      displayName: farm.name,
+      displayName: identified ? farm.name : anonymousLocationName("FARM", farm.productionZone),
+      identified,
       serviceZone: farm.productionZone,
       access: canSeeProgress ? "CROP_PROGRESS" as const : listings.length ? "PUBLIC_SUPPLY" as const : "LOGISTICS" as const,
       crops: canSeeProgress
@@ -105,19 +114,24 @@ export async function worldMapView(actor: AuthActor) {
     };
   });
 
-  const hotelLocations = hotels.map((hotel) => ({
-    locationId: hotel.id,
-    kind: "HOTEL" as const,
-    displayName: hotel.name,
-    serviceZone: hotel.serviceZone ?? "Saint Lucia",
-    access: actor.role === "BUYER" && hotel.id === actor.id
-      ? "OWN_ORDERS" as const
-      : (demandsByBuyer.get(hotel.id)?.length ?? 0) > 0
-        ? "BUYER_DEMAND" as const
-        : "LOGISTICS" as const,
-    crops: [],
-    opportunities: (demandsByBuyer.get(hotel.id) ?? []).map(mapOpportunity),
-  }));
+  const hotelLocations = hotels.map((hotel) => {
+    const identified = disclosure.unrestricted || disclosure.buyers.has(hotel.id);
+    const zone = hotel.serviceZone ?? "Saint Lucia";
+    return {
+      locationId: hotel.id,
+      kind: "HOTEL" as const,
+      displayName: identified ? hotel.name : anonymousLocationName("HOTEL", zone),
+      identified,
+      serviceZone: zone,
+      access: actor.role === "BUYER" && hotel.id === actor.id
+        ? "OWN_ORDERS" as const
+        : (demandsByBuyer.get(hotel.id)?.length ?? 0) > 0
+          ? "BUYER_DEMAND" as const
+          : "LOGISTICS" as const,
+      crops: [],
+      opportunities: (demandsByBuyer.get(hotel.id) ?? []).map(mapOpportunity),
+    };
+  });
 
   return {
     region: "Saint Lucia",

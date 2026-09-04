@@ -839,7 +839,12 @@ export async function buildServer() {
     const row = await prisma.order.findUnique({ where: { id: orderId } });
     if (!row) throw httpError(404, "ORDER_NOT_FOUND", "Order was not found.");
     const allocation = await prisma.allocation.findFirst({ where: { orderId }, orderBy: { createdAt: "desc" } });
-    const lines = allocation ? await prisma.allocationLine.findMany({ where: { allocationId: allocation.id } }) : [];
+    const allLines = allocation ? await prisma.allocationLine.findMany({ where: { allocationId: allocation.id } }) : [];
+    // A farmer reads its own committed quantity, the way the approval card
+    // already shows it. What a second farm contributed to the same order is
+    // that farm's business, not this one's.
+    const ownBatchIds = actor.role === "FARMER" ? new Set(await visibleBatchIds(actor)) : null;
+    const lines = ownBatchIds ? allLines.filter((line) => ownBatchIds.has(line.cropBatchId)) : allLines;
     const summarizedLines = [...lines.reduce((map, line) => map.set(line.cropBatchId, (map.get(line.cropBatchId) ?? 0) + line.quantity), new Map<string, number>())].map(([cropBatchId, value]) => ({ cropBatchId, quantity: quantity(value) }));
     const approvals = allocation ? await prisma.approval.findMany({ where: { subjectType: "ALLOCATION", subjectId: allocation.id } }) : [];
     const mission = await prisma.deliveryMission.findFirst({ where: { orderId }, orderBy: { deadline: "desc" } });

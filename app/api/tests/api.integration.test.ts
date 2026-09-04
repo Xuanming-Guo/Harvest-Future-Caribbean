@@ -138,11 +138,16 @@ describe("participant Product API", () => {
       expect(farmer.statusCode).toBe(200);
       expect(farmer.json()).toMatchObject({ region: "Saint Lucia" });
       expect(farmer.json().locations).toEqual(expect.arrayContaining([
-        expect.objectContaining({ locationId: farmId, kind: "FARM", displayName: "Canaries Hillside Plot", access: "CROP_PROGRESS", crops: [expect.objectContaining({ cropBatchId: batchId, cropType: "DASHEEN", status: "GROWING" })] }),
-        expect.objectContaining({ kind: "HOTEL", displayName: "Bay Gardens Hotel", access: "BUYER_DEMAND", opportunities: [expect.objectContaining({ cropType: "CUCUMBER", quantity: { value: 20, unit: "kg" } })] }),
-        expect.objectContaining({ kind: "FARM", displayName: "Choiseul Roots Cooperative", serviceZone: "Choiseul", access: "CROP_PROGRESS", crops: [expect.objectContaining({ cropType: "DASHEEN", status: "HARVEST_READY" })] }),
-        expect.objectContaining({ kind: "HOTEL", displayName: "Piton Lantern Hotel", serviceZone: "Soufrière", access: "BUYER_DEMAND", opportunities: [expect.objectContaining({ cropType: "DASHEEN", quantity: { value: 24, unit: "kg" } })] }),
+        expect.objectContaining({ locationId: farmId, kind: "FARM", displayName: "Canaries Hillside Plot", identified: true, access: "CROP_PROGRESS", crops: [expect.objectContaining({ cropBatchId: batchId, cropType: "DASHEEN", status: "GROWING" })] }),
+        // Bay Gardens already took a delivery from Ana, so it keeps its name.
+        expect.objectContaining({ kind: "HOTEL", displayName: "Bay Gardens Hotel", identified: true, access: "BUYER_DEMAND", opportunities: [expect.objectContaining({ cropType: "CUCUMBER", quantity: { value: 20, unit: "kg" } })] }),
+        expect.objectContaining({ kind: "FARM", displayName: "Choiseul Roots Cooperative", identified: true, serviceZone: "Choiseul", access: "CROP_PROGRESS", crops: [expect.objectContaining({ cropType: "DASHEEN", status: "HARVEST_READY" })] }),
+        // Piton Lantern has an open request Ana can fill and no agreed order
+        // with her, so the request is actionable while the hotel stays a
+        // zone-level marker.
+        expect.objectContaining({ kind: "HOTEL", displayName: "A buyer in Soufrière", identified: false, serviceZone: "Soufrière", access: "BUYER_DEMAND", opportunities: [expect.objectContaining({ cropType: "DASHEEN", quantity: { value: 24, unit: "kg" } })] }),
       ]));
+      expect(farmer.body).not.toContain("Piton Lantern Hotel");
       expect(farmer.body).not.toContain("13.9");
       expect(farmer.body).not.toContain("-61.07");
 
@@ -153,6 +158,147 @@ describe("participant Product API", () => {
     } finally {
       await prisma.cropBatch.delete({ where: { id: batchId } });
       await prisma.farm.delete({ where: { id: farmId } });
+    }
+  });
+
+  it("scopes the map and the delivery view to what each role may see", async () => {
+    const ids = {
+      ana: "a0000000-0000-4000-8000-000000000001",
+      marcus: "a0000000-0000-4000-8000-000000000005",
+      bayGardens: "a0000000-0000-4000-8000-000000000002",
+      piton: "a0000000-0000-4000-8000-000000000007",
+      rodney: "a0000000-0000-4000-8000-000000000009",
+      farmAna: "14141414-1414-4414-8414-141414141414",
+      farmMarcus: "14141414-1414-4414-8414-141414141415",
+      farmChoiseul: "14141414-1414-4414-8414-141414141418",
+      batchAna: "11111111-1111-4111-8111-111111111111",
+      batchMarcus: "11111111-1111-4111-8111-111111111112",
+      bayGardensOrder: "20202020-2020-4020-8020-202020202020",
+    };
+    const pitonOrderId = randomUUID();
+    const sharedOrderId = randomUUID();
+    const sharedAllocationId = randomUUID();
+    const sharedMissionId = randomUUID();
+    const rivalTransporterId = randomUUID();
+    const rivalMissionId = randomUUID();
+
+    await prisma.order.create({ data: { id: pitonOrderId, buyerId: ids.piton, cropType: "DASHEEN", requestedQuantity: 8, neededBy: new Date("2026-09-10T12:00:00Z"), latitude: 13.826, longitude: -61.058, listingIds: [], lifecycleStatus: "REQUESTED", activeExceptionIds: [] } });
+    // One order, two farms, no approval yet: the shape the demo commits to and
+    // the sharpest test of what each side may read before anyone has agreed.
+    await prisma.order.create({ data: { id: sharedOrderId, buyerId: ids.rodney, cropType: "CUCUMBER", requestedQuantity: 16, neededBy: new Date("2026-09-11T12:00:00Z"), latitude: 14.073, longitude: -60.951, listingIds: [], lifecycleStatus: "AWAITING_APPROVAL", activeExceptionIds: [] } });
+    await prisma.allocation.create({ data: { id: sharedAllocationId, orderId: sharedOrderId, status: "PROPOSED" } });
+    await prisma.allocationLine.createMany({ data: [
+      { allocationId: sharedAllocationId, cropBatchId: ids.batchAna, listingId: "16161616-1616-4616-8616-161616161616", quantity: 10 },
+      { allocationId: sharedAllocationId, cropBatchId: ids.batchMarcus, listingId: "16161616-1616-4616-8616-161616161617", quantity: 6 },
+    ] });
+    await prisma.deliveryMission.create({ data: {
+      id: sharedMissionId,
+      orderId: sharedOrderId,
+      status: "AVAILABLE",
+      quantity: 16,
+      deadline: new Date("2026-09-11T12:00:00Z"),
+      currentStopSequence: 0,
+      stops: [
+        { sequence: 1, kind: "PICKUP", farmId: ids.farmAna, cropBatchIds: [ids.batchAna], quantity: { value: 10, unit: "kg" }, location: { latitude: 13.953, longitude: -61.005 } },
+        { sequence: 2, kind: "PICKUP", farmId: ids.farmMarcus, cropBatchIds: [ids.batchMarcus], quantity: { value: 6, unit: "kg" }, location: { latitude: 13.941, longitude: -60.918 } },
+        { sequence: 3, kind: "DROPOFF", quantity: { value: 16, unit: "kg" }, location: { latitude: 14.073, longitude: -60.951 } },
+      ],
+    } });
+    await prisma.actor.create({ data: { id: rivalTransporterId, authSubject: "transporter-rival-" + rivalTransporterId, name: "Rival Haulage", role: "TRANSPORTER", isSynthetic: true } });
+    await prisma.deliveryMission.create({ data: {
+      id: rivalMissionId,
+      orderId: pitonOrderId,
+      status: "ASSIGNED",
+      transporterId: rivalTransporterId,
+      quantity: 8,
+      deadline: new Date("2026-09-10T12:00:00Z"),
+      currentStopSequence: 0,
+      stops: [
+        { sequence: 1, kind: "PICKUP", farmId: ids.farmChoiseul, cropBatchIds: [], quantity: { value: 8, unit: "kg" }, location: { latitude: 13.775, longitude: -61.047 } },
+        { sequence: 2, kind: "DROPOFF", quantity: { value: 8, unit: "kg" }, location: { latitude: 13.826, longitude: -61.058 } },
+      ],
+    } });
+    await signIn("buyer-piton-demo");
+
+    try {
+      // FARMER: another grower's farm is not a place, and its crop is not a read.
+      const marcusMap = await server.inject({ method: "GET", url: "/v1/world-map", headers: auth("farmer-marcus") });
+      expect(marcusMap.statusCode).toBe(200);
+      expect(marcusMap.json().locations.filter((location: { kind: string }) => location.kind === "FARM").map((location: { locationId: string }) => location.locationId)).toEqual([ids.farmMarcus]);
+      expect(marcusMap.body).not.toContain("Roseau Valley Farm");
+      expect(marcusMap.body).not.toContain(ids.farmAna);
+      expect(marcusMap.body).not.toContain(ids.batchAna);
+      expect((await server.inject({ method: "GET", url: "/v1/crop-batches/" + ids.batchAna, headers: auth("farmer-marcus") })).statusCode).toBe(404);
+      expect((await server.inject({ method: "GET", url: "/v1/crop-batches", headers: auth("farmer-marcus") })).json().items.map((item: { cropBatchId: string }) => item.cropBatchId)).toEqual([ids.batchMarcus]);
+
+      // FARMER: a buyer stays anonymous until an order with it has been agreed.
+      const anaMap = await server.inject({ method: "GET", url: "/v1/world-map", headers: auth("farmer-ana") });
+      const rodney = anaMap.json().locations.find((location: { locationId: string }) => location.locationId === ids.rodney);
+      expect(rodney).toMatchObject({ kind: "HOTEL", displayName: "A buyer in Gros Islet", identified: false, serviceZone: "Gros Islet" });
+      expect(anaMap.body).not.toContain("Rodney Bay House");
+      expect(anaMap.json().locations.find((location: { locationId: string }) => location.locationId === ids.bayGardens)).toMatchObject({ displayName: "Bay Gardens Hotel", identified: true });
+
+      // FARMER: a shared order shows this farm's own line and nobody else's.
+      const marcusOrder = await server.inject({ method: "GET", url: "/v1/orders/" + sharedOrderId, headers: auth("farmer-marcus") });
+      expect(marcusOrder.statusCode).toBe(200);
+      expect(marcusOrder.json().allocation.lines).toEqual([{ cropBatchId: ids.batchMarcus, quantity: { value: 6, unit: "kg" } }]);
+      expect(marcusOrder.json().deliveryMission.cargo).toEqual([expect.objectContaining({ farmId: ids.farmMarcus, farmName: "Mabouya Growers" })]);
+      expect(marcusOrder.json().deliveryMission.buyerName).toBe("A buyer in Gros Islet");
+      expect(marcusOrder.json().deliveryMission.stops[0]).toMatchObject({ kind: "PICKUP", displayName: "A farm in Roseau Valley", location: { latitude: 13.95, longitude: -61 } });
+      expect(marcusOrder.json().deliveryMission.stops[0].farmId).toBeUndefined();
+      expect(marcusOrder.json().deliveryMission.stops[1]).toMatchObject({ kind: "PICKUP", displayName: "Mabouya Growers", farmId: ids.farmMarcus, location: { latitude: 13.941, longitude: -60.918 } });
+      expect(marcusOrder.body).not.toContain("Roseau Valley Farm");
+      expect(marcusOrder.body).not.toContain(ids.batchAna);
+      expect(marcusOrder.body).not.toContain("Rodney Bay House");
+
+      // BUYER: one hotel never lists, opens, or maps another hotel's business.
+      const pitonOrders = await server.inject({ method: "GET", url: "/v1/orders", headers: auth("buyer-piton-demo") });
+      expect(pitonOrders.statusCode).toBe(200);
+      expect(pitonOrders.json().items.map((item: { orderId: string }) => item.orderId)).toEqual([pitonOrderId]);
+      expect((await server.inject({ method: "GET", url: "/v1/orders/" + ids.bayGardensOrder, headers: auth("buyer-piton-demo") })).statusCode).toBe(404);
+      const bayOrders = await server.inject({ method: "GET", url: "/v1/orders", headers: auth("buyer-hotel") });
+      expect(bayOrders.json().items.map((item: { orderId: string }) => item.orderId)).not.toContain(pitonOrderId);
+      expect((await server.inject({ method: "GET", url: "/v1/orders/" + pitonOrderId, headers: auth("buyer-hotel") })).statusCode).toBe(404);
+      const pitonMap = await server.inject({ method: "GET", url: "/v1/world-map", headers: auth("buyer-piton-demo") });
+      expect(pitonMap.json().locations.filter((location: { kind: string }) => location.kind === "HOTEL").map((location: { locationId: string }) => location.locationId)).toEqual([ids.piton]);
+      expect(pitonMap.body).not.toContain("Bay Gardens Hotel");
+      // Listed supply is a crop and a quantity; the seller is a zone until agreed.
+      const pitonFarms = pitonMap.json().locations.filter((location: { kind: string }) => location.kind === "FARM");
+      expect(pitonFarms.length).toBeGreaterThan(0);
+      expect(pitonFarms.every((location: { identified: boolean; displayName: string }) => location.identified === false && location.displayName.startsWith("A farm in "))).toBe(true);
+      expect(pitonMap.body).not.toContain("Roseau Valley Farm");
+
+      // TRANSPORTER: mission stops, and no other transporter's job.
+      const transporterMap = await server.inject({ method: "GET", url: "/v1/world-map", headers: auth("transporter-daniel") });
+      const transporterLocationIds = transporterMap.json().locations.map((location: { locationId: string }) => location.locationId);
+      expect(transporterLocationIds).toEqual(expect.arrayContaining([ids.farmAna, ids.farmMarcus, ids.rodney]));
+      expect(transporterLocationIds).not.toContain(ids.farmChoiseul);
+      expect(transporterMap.body).not.toContain("Choiseul Roots Cooperative");
+      expect(transporterMap.json().locations.every((location: { crops: unknown[]; opportunities: unknown[] }) => !location.crops.length && !location.opportunities.length)).toBe(true);
+      const danielMissionIds = (await server.inject({ method: "GET", url: "/v1/delivery-missions", headers: auth("transporter-daniel") })).json().items.map((item: { missionId: string }) => item.missionId);
+      expect(danielMissionIds).toContain(sharedMissionId);
+      expect(danielMissionIds).not.toContain(rivalMissionId);
+      expect((await server.inject({ method: "GET", url: "/v1/delivery-missions/" + rivalMissionId, headers: auth("transporter-daniel") })).statusCode).toBe(404);
+      expect((await server.inject({ method: "GET", url: "/v1/delivery-missions/" + rivalMissionId + "/updates", headers: auth("transporter-daniel") })).statusCode).toBe(404);
+
+      // COORDINATOR: the permitted island, by name.
+      const coordinatorMap = await server.inject({ method: "GET", url: "/v1/world-map", headers: auth("coordinator-maya") });
+      const coordinatorFarms = coordinatorMap.json().locations.filter((location: { kind: string }) => location.kind === "FARM");
+      expect(coordinatorFarms.map((location: { locationId: string }) => location.locationId)).toEqual(expect.arrayContaining([ids.farmAna, ids.farmMarcus, ids.farmChoiseul]));
+      expect(coordinatorMap.json().locations.every((location: { identified: boolean }) => location.identified)).toBe(true);
+      expect(coordinatorMap.body).toContain("Roseau Valley Farm");
+      expect(coordinatorMap.body).toContain("Mabouya Growers");
+      const coordinatorBatches = (await server.inject({ method: "GET", url: "/v1/crop-batches", headers: auth("coordinator-maya") })).json().items.map((item: { cropBatchId: string }) => item.cropBatchId);
+      expect(coordinatorBatches).toEqual(expect.arrayContaining([ids.batchAna, ids.batchMarcus]));
+      const coordinatorOrder = await server.inject({ method: "GET", url: "/v1/orders/" + sharedOrderId, headers: auth("coordinator-maya") });
+      expect(coordinatorOrder.json().allocation.lines).toHaveLength(2);
+      expect(coordinatorOrder.json().deliveryMission.buyerName).toBe("Rodney Bay House");
+    } finally {
+      await prisma.deliveryMission.deleteMany({ where: { id: { in: [sharedMissionId, rivalMissionId] } } });
+      await prisma.allocationLine.deleteMany({ where: { allocationId: sharedAllocationId } });
+      await prisma.allocation.delete({ where: { id: sharedAllocationId } });
+      await prisma.order.deleteMany({ where: { id: { in: [sharedOrderId, pitonOrderId] } } });
+      await prisma.actor.delete({ where: { id: rivalTransporterId } });
     }
   });
 
