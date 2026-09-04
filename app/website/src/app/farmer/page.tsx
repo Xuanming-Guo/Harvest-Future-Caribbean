@@ -211,7 +211,7 @@ export default function FarmerHome() {
               </MoreDetail>
             </>
           )}
-          <Link href="/farmer/farm" className="text-link section-gap"><Map size={16} aria-hidden="true" />See your farm map</Link>
+          <Link href="/map" className="text-link section-gap"><Map size={16} aria-hidden="true" />See your farm on the island map</Link>
         </Disclosure>
 
         <Disclosure

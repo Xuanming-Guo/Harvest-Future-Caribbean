@@ -17,10 +17,13 @@ import { expect, test, type Page, type Request } from "@playwright/test";
  * network access check blocks a fulfilled page from framing localhost.
  */
 
-const PRODUCT_API = "http://localhost:3001";
-const WEBSITE_ORIGIN = "http://localhost:3000";
-const CONTROL_ROOM_ORIGIN = "http://localhost:3002";
-const HARNESS_PORT = 3002;
+// Defaults are the dev stack. The overrides let the suite run against a second
+// set of ports when 3000-3002 are already busy, which also stops a stray run
+// writing into whichever database happens to be answering on 3001.
+const PRODUCT_API = process.env.HARVEST_E2E_API_URL ?? "http://localhost:3001";
+const WEBSITE_ORIGIN = process.env.HARVEST_E2E_WEB_URL ?? "http://localhost:3000";
+const CONTROL_ROOM_ORIGIN = process.env.HARVEST_E2E_CONTROL_ROOM_URL ?? "http://localhost:3002";
+const HARNESS_PORT = Number(new URL(CONTROL_ROOM_ORIGIN).port || 3002);
 
 /** Reads `{ frameUrl, payload }` from its own fragment, so no token is logged. */
 const HARNESS_HTML = `<!doctype html><meta charset="utf-8"><title>Harvest preview harness</title>

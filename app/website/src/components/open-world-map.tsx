@@ -104,7 +104,7 @@ function WorldFarmScene({ location, onBack }: { location: WorldMapLocation; onBa
       {location.access === "CROP_PROGRESS" && crops[0] && <FarmFieldCrops cargo={crops[0]} />}
       <div className="world-place-header">
         <button type="button" className="world-back-button" onClick={onBack}><ArrowLeft size={17} />Back to island</button>
-        <div><span>{location.serviceZone}</span><h2>{location.displayName}</h2><small>{location.access === "CROP_PROGRESS" ? "Your live crop workspace" : location.access === "PUBLIC_SUPPLY" ? "Produce currently listed for buyers" : "Delivery location"}</small></div>
+        <div><span>{location.serviceZone}</span><h2>{location.displayName}</h2><small>{!location.identified ? "Name and address shared once an order is agreed" : location.access === "CROP_PROGRESS" ? "Your live crop workspace" : location.access === "PUBLIC_SUPPLY" ? "Produce currently listed for buyers" : "Delivery location"}</small></div>
       </div>
       <div className="world-place-content">
         {location.access === "CROP_PROGRESS" && location.crops.length ? (
@@ -176,7 +176,7 @@ function WorldHotelScene({ location, world, role, onBack }: { location: WorldMap
       <Image className="hotel-scene-art" src={hotelArt} alt="" width={512} height={341} priority />
       <div className="world-place-header">
         <button type="button" className="world-back-button" onClick={onBack}><ArrowLeft size={17} />Back to island</button>
-        <div><span>{location.serviceZone}</span><h2>{location.displayName}</h2><small>{location.access === "BUYER_DEMAND" ? "Buyer requests you can help fill" : "Hotel delivery destination"}</small></div>
+        <div><span>{location.serviceZone}</span><h2>{location.displayName}</h2><small>{!location.identified ? "Name and address shared once an order is agreed" : location.access === "BUYER_DEMAND" ? "Buyer requests you can help fill" : "Hotel delivery destination"}</small></div>
       </div>
       <div className="world-place-content hotel-order-board">
         <div className="hotel-order-board-title"><Store size={23} /><span><small>Order board</small><h3>{location.opportunities.length ? "Produce wanted" : "Hotel deliveries"}</h3></span></div>
