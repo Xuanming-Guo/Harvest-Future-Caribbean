@@ -30,7 +30,10 @@ and handles play, pause, speed, rewind, scrub and reset locally:
 - licensed public reference places appear as quieter category markers, with
   labels only at close range and full provenance in the Inspector;
 - source and licence attribution remains visible whenever reference places are
-  present;
+  present, collapsed by default to a single credit line under the globe — the
+  OpenStreetMap credit, the scene's other reference datasets named in words,
+  and a **Sources** button that opens the full publishers, licences, retrieval
+  dates and synthetic-outcomes caveat upward over it;
 - injecting a disruption creates a new derived run and preserves the source;
 - Harvest agent actions and adapter provenance appear in purple in the feed,
   and a forecast-producing action also names the estimation method that ran;
