@@ -123,8 +123,8 @@ export default function MarketplacePage() {
             </div>
             <div className="field-full order-summary"><span>Requested <strong>{quantity} kg</strong></span><span>Selected <strong>{selectedSupply} kg</strong></span></div>
             {!online && <div className="field-full"><OfflineHint>An order reserves supply from other farms, so it is never queued. Reconnect to send it.</OfflineHint></div>}
-            <button type="button" className="button button-secondary" disabled={demand.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) demand.mutate(); }}><Plus size={16} />{demand.isPending ? "Saving..." : "Save as demand"}</button>
-            <button className="button" aria-disabled={!online || undefined} disabled={order.isPending || !selected.length || !actor?.deliveryLocation}><ShoppingCart size={16} />{order.isPending ? "Placing order..." : "Place order"}</button>
+            <button type="button" className="button button-secondary" data-tour="marketplace-demand-save" disabled={demand.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) demand.mutate(); }}><Plus size={16} />{demand.isPending ? "Saving..." : "Save as demand"}</button>
+            <button className="button" data-tour="marketplace-order-submit" aria-disabled={!online || undefined} disabled={order.isPending || !selected.length || !actor?.deliveryLocation}><ShoppingCart size={16} />{order.isPending ? "Placing order..." : "Place order"}</button>
           </form>
           {(message || demand.error || order.error) && <p className={(demand.error || order.error) ? "form-error" : "form-success"}>{message ?? demand.error?.message ?? order.error?.message}</p>}
         </Card>

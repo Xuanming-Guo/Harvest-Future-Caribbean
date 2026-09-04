@@ -43,7 +43,7 @@ export default function TransporterHome() {
           {!available.length ? <EmptyState title="No jobs waiting" detail="New approved orders will appear automatically." /> : <div className="mission-list">{available.map((mission) => (
             <article className="mission-card" key={mission.missionId}>
               <div><Badge>{mission.status}</Badge><h3>{mission.quantity.value} kg delivery</h3><p><MapPin size={15} />{mission.stops.length} stops - due {formatDate(mission.deadline)}</p></div>
-              <button className="button" disabled={accept.isPending || !vehicleId} aria-disabled={!online || undefined} onClick={() => { if (online) accept.mutate(mission.missionId); }}>Accept job</button>
+              <button className="button" data-tour="transporter-accept-job" disabled={accept.isPending || !vehicleId} aria-disabled={!online || undefined} onClick={() => { if (online) accept.mutate(mission.missionId); }}>Accept job</button>
             </article>
           ))}</div>}
           {!online && <OfflineHint>Accepting a job commits you to a delivery, so it is never queued. Reconnect to accept.</OfflineHint>}

@@ -56,6 +56,7 @@ export function Disclosure({
   primary = false,
   defaultOpen = false,
   children,
+  ...rest
 }: {
   id: string;
   title: string;
@@ -64,14 +65,15 @@ export function Disclosure({
   primary?: boolean;
   defaultOpen?: boolean;
   children: React.ReactNode;
-}) {
+  /** Lets a caller hang a tutorial or action-preview hook on the whole section. */
+} & Omit<React.ComponentPropsWithoutRef<"section">, "id" | "title" | "children">) {
   const [open, setOpen] = useState(defaultOpen);
   useEffect(() => {
     if (defaultOpen) setOpen(true);
   }, [defaultOpen]);
 
   return (
-    <section className={`workspace-section${primary ? " workspace-section-primary" : ""}`} id={id}>
+    <section className={`workspace-section${primary ? " workspace-section-primary" : ""}`} id={id} {...rest}>
       <h2 className="workspace-section-heading">
         <button
           type="button"

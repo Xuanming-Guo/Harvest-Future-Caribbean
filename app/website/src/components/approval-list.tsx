@@ -45,7 +45,7 @@ export function ApprovalList({ compact = false, embedded = false }: { compact?: 
   const declineBlocked = !reasonCode || !nextAction.trim();
   const body = (
     <>
-      <div className="task-list">
+      <div className="task-list" data-tour="approvals-section">
         {approvals.data.items.map((approval) => (
           <article className="task-row approval-row" key={approval.approvalId}>
             <div>
@@ -54,7 +54,7 @@ export function ApprovalList({ compact = false, embedded = false }: { compact?: 
               <p>{approval.context?.quantity ? `Confirm ${approval.context.quantity.value} kg${approval.context.cropType ? ` of ${titleCase(approval.context.cropType)}` : ""}${approval.context.neededBy ? ` for delivery by ${formatDate(approval.context.neededBy)}` : ""}.` : approval.context?.summary ?? (approval.subjectType === "ALLOCATION" ? "Confirm that you agree with this order allocation." : "Confirm the proposed recovery action.")}</p>
               {!compact && <small>Requested {formatDate(approval.requestedAt)}</small>}
             </div>
-            <div className="inline-actions">
+            <div className="inline-actions" data-tour="approval-decide">
               <button className="button button-danger" disabled={decision.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) { if (decliningId === approval.approvalId) closeDecline(); else setDecliningId(approval.approvalId); } }}><X size={16} />Decline</button>
               <button className="button" disabled={decision.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) decision.mutate({ id: approval.approvalId, value: "APPROVE" }); }}><Check size={16} />Approve</button>
             </div>
