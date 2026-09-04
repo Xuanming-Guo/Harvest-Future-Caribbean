@@ -31,6 +31,44 @@ type Curve = {
   end: IslandPoint;
 };
 
+export type IslandRoadSegment = { start: IslandPoint; end: IslandPoint };
+
+const farmAssetPaths = [
+  "/art/farm-location-game.webp",
+  "/art/farm-location-dasheen.webp",
+  "/art/farm-location-orchard.webp",
+];
+const hotelAssetPaths = [
+  "/art/hotel-location-game.webp",
+  "/art/hotel-location-boutique.webp",
+  "/art/hotel-location-eco.webp",
+];
+
+export function buildIslandRoadNetwork(markers: IslandMarker[]): IslandRoadSegment[] {
+  if (markers.length < 2) return [];
+  const connected = new Set<number>([Math.max(0, markers.findIndex((marker) => marker.kind === "DEPOT"))]);
+  const segments: IslandRoadSegment[] = [];
+
+  while (connected.size < markers.length) {
+    let shortest: { from: number; to: number; distance: number } | undefined;
+    for (const from of connected) {
+      for (let to = 0; to < markers.length; to += 1) {
+        if (connected.has(to)) continue;
+        const distance = Math.hypot(
+          markers[from]!.point.x - markers[to]!.point.x,
+          markers[from]!.point.y - markers[to]!.point.y,
+        );
+        if (!shortest || distance < shortest.distance) shortest = { from, to, distance };
+      }
+    }
+    if (!shortest) break;
+    connected.add(shortest.to);
+    segments.push({ start: markers[shortest.from]!.point, end: markers[shortest.to]!.point });
+  }
+
+  return segments;
+}
+
 function curveFor(start: IslandPoint, end: IslandPoint, index: number): Curve {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
@@ -112,23 +150,33 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
         return;
       }
 
-      const [truckTexture, farmTexture, hotelTexture] = await Promise.all([
+      const textures = await Promise.all([
         Assets.load("/art/delivery-truck-game.webp"),
-        Assets.load("/art/farm-location-game.webp"),
-        Assets.load("/art/hotel-location-game.webp"),
+        ...farmAssetPaths.map((path) => Assets.load(path)),
+        ...hotelAssetPaths.map((path) => Assets.load(path)),
       ]);
+      const truckTexture = textures[0]!;
+      const farmTextures = textures.slice(1, 1 + farmAssetPaths.length);
+      const hotelTextures = textures.slice(1 + farmAssetPaths.length);
       if (cancelled) {
         app.destroy(false, { children: true });
         return;
       }
 
+      const networkLayer = new Container();
       const routeLayer = new Container();
       const ambientLayer = new Container();
       const markerLayer = new Container();
       const dustLayer = new Container();
       const truckLayer = new Container();
       const celebrationLayer = new Container();
-      app.stage.addChild(routeLayer, ambientLayer, markerLayer, dustLayer, truckLayer, celebrationLayer);
+      app.stage.addChild(networkLayer, routeLayer, ambientLayer, markerLayer, dustLayer, truckLayer, celebrationLayer);
+
+      const roadShadow = new Graphics();
+      const roadEdge = new Graphics();
+      const roadSurface = new Graphics();
+      const roadHighlight = new Graphics();
+      networkLayer.addChild(roadShadow, roadEdge, roadSurface, roadHighlight);
 
       const routeGlow = new Graphics();
       const routeLine = new Graphics();
@@ -167,16 +215,24 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
         const markerColor = marker.kind === "PICKUP" ? 0x55c982 : marker.kind === "DROPOFF" ? 0xff8262 : 0xffca52;
         const isReady = marker.state === "HARVEST_READY";
         const hasDemand = marker.state === "OPEN";
-        const groundGlow = new Graphics().ellipse(0, 12, isReady || hasDemand ? 49 : 43, isReady || hasDemand ? 17 : 14).fill({ color: markerColor, alpha: 0.18 });
-        const pulse = new Graphics().ellipse(0, 7, 48, 28).stroke({ color: markerColor, width: 4, alpha: 0.8 });
+        const footprintWidth = marker.kind === "DEPOT" ? 34 : marker.kind === "DROPOFF" ? 61 : 58;
+        const footprint = new Graphics()
+          .ellipse(4, 18, footprintWidth, marker.kind === "DEPOT" ? 14 : 19)
+          .fill({ color: marker.kind === "DROPOFF" ? 0xc5a86a : 0x7cab52, alpha: 0.34 })
+          .stroke({ color: marker.kind === "DROPOFF" ? 0xf1d695 : 0xb8d67c, width: 3, alpha: 0.42 })
+          .ellipse(8, 23, footprintWidth * 0.78, 11)
+          .fill({ color: 0x3d5633, alpha: 0.13 });
+        const groundGlow = new Graphics().ellipse(0, 12, isReady || hasDemand ? 57 : 49, isReady || hasDemand ? 19 : 16).fill({ color: markerColor, alpha: 0.18 });
+        const pulse = new Graphics().ellipse(0, 9, 57, 32).stroke({ color: markerColor, width: 4, alpha: 0.8 });
         const symbol = new Container();
         const accessory = new Container();
         if (marker.kind === "PICKUP") {
+          const farmTexture = farmTextures[marker.variant % farmTextures.length]!;
           const farm = new Sprite(farmTexture);
-          farm.anchor.set(0.5, 0.75);
-          const farmScale = (91 + marker.variant * 3) / farmTexture.width;
-          farm.scale.set(marker.variant === 2 ? -farmScale : farmScale, farmScale);
-          farm.rotation = (marker.variant - 1) * 0.015;
+          farm.anchor.set(0.5, 0.78);
+          const farmScale = (119 + marker.variant * 4) / farmTexture.width;
+          farm.scale.set(farmScale);
+          farm.rotation = (marker.variant - 1) * 0.008;
           if (marker.state === "CLOSED") {
             farm.tint = 0xb9beaa;
             farm.alpha = 0.72;
@@ -211,11 +267,12 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
             accessory.addChild(crate);
           }
         } else if (marker.kind === "DROPOFF") {
+          const hotelTexture = hotelTextures[marker.variant % hotelTextures.length]!;
           const hotel = new Sprite(hotelTexture);
-          hotel.anchor.set(0.5, 0.75);
-          const hotelScale = (89 + marker.variant * 3) / hotelTexture.width;
-          hotel.scale.set(marker.variant === 2 ? -hotelScale : hotelScale, hotelScale);
-          hotel.rotation = (marker.variant - 1) * 0.012;
+          hotel.anchor.set(0.5, 0.78);
+          const hotelScale = (122 + marker.variant * 4) / hotelTexture.width;
+          hotel.scale.set(hotelScale);
+          hotel.rotation = (marker.variant - 1) * 0.008;
           if (marker.state === "QUIET") hotel.tint = 0xe3e6d8;
           symbol.addChild(hotel);
 
@@ -263,7 +320,8 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
           accessory.addChild(spark);
           return spark;
         }) : [];
-        container.addChild(groundGlow, pulse, symbol, accessory, labelBoard, label);
+        container.addChild(footprint, groundGlow, pulse, symbol, accessory, labelBoard, label);
+        container.zIndex = marker.point.y * 1000;
         markerLayer.addChild(container);
         return { accessory, container, groundGlow, label, labelBoard, marker, pulse, point: marker.point, statusSparks };
       });
@@ -285,6 +343,8 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
         return piece;
       }) : [];
 
+      markerLayer.sortableChildren = true;
+      const roadSegments = buildIslandRoadNetwork(normalizedMarkers);
       const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
       const normalizedPoints = pointKey ? pointKey.split(";").map((value) => {
         const [x, y] = value.split(",").map(Number);
@@ -303,6 +363,33 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
           { x: normalizedPoints[index + 1]!.x * width, y: normalizedPoints[index + 1]!.y * height },
           index,
         ));
+
+        roadShadow.clear();
+        roadEdge.clear();
+        roadSurface.clear();
+        roadHighlight.clear();
+        roadSegments.forEach((segment, index) => {
+          const road = curveFor(
+            { x: segment.start.x * width, y: segment.start.y * height },
+            { x: segment.end.x * width, y: segment.end.y * height },
+            index + 7,
+          );
+          for (const graphic of [roadShadow, roadEdge, roadSurface, roadHighlight]) {
+            graphic.moveTo(road.start.x, road.start.y).bezierCurveTo(
+              road.controlA.x,
+              road.controlA.y,
+              road.controlB.x,
+              road.controlB.y,
+              road.end.x,
+              road.end.y,
+            );
+          }
+        });
+        const roadWidth = Math.max(4.5, width * 0.0053);
+        roadShadow.stroke({ color: 0x334b2c, width: roadWidth + 7, alpha: 0.2 });
+        roadEdge.stroke({ color: 0x906838, width: roadWidth + 4, alpha: 0.84 });
+        roadSurface.stroke({ color: 0xe6c77e, width: roadWidth, alpha: 0.9 });
+        roadHighlight.stroke({ color: 0xffe5a5, width: Math.max(1.2, roadWidth * 0.2), alpha: 0.64 });
 
         routeGlow.clear();
         routeLine.clear();

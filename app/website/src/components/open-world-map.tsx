@@ -169,10 +169,11 @@ function HotelOpportunityTicket({ index, matches, opportunity, role }: {
 }
 
 function WorldHotelScene({ location, world, role, onBack }: { location: WorldMapLocation; world: WorldMapView; role: ProductRole; onBack: () => void }) {
+  const hotelArt = ["/art/hotel-location-game.webp", "/art/hotel-location-boutique.webp", "/art/hotel-location-eco.webp"][hash(location.locationId) % 3]!;
   return (
     <section className="world-place-scene world-hotel-scene" aria-label={`${location.displayName} hotel view`}>
       <div className="hotel-scene-sky" aria-hidden="true"><span /><span /><span /></div>
-      <Image className="hotel-scene-art" src="/art/hotel-location-game.webp" alt="" width={512} height={341} priority />
+      <Image className="hotel-scene-art" src={hotelArt} alt="" width={512} height={341} priority />
       <div className="world-place-header">
         <button type="button" className="world-back-button" onClick={onBack}><ArrowLeft size={17} />Back to island</button>
         <div><span>{location.serviceZone}</span><h2>{location.displayName}</h2><small>{location.access === "BUYER_DEMAND" ? "Buyer requests you can help fill" : "Hotel delivery destination"}</small></div>
@@ -243,7 +244,7 @@ export function OpenWorldMap({ world, mission, role, onClearRoute, onSceneChange
       point: node.point,
       sequence: index + 100,
       state: worldMarkerState(node),
-      variant: hash(node.id) % 3,
+      variant: index % 3,
     })),
   ];
   const selectedNodeIndex = nodes.findIndex((node) => node.id === selectedNodeId);
@@ -396,7 +397,7 @@ export function OpenWorldMap({ world, mission, role, onClearRoute, onSceneChange
       >
         <div className="world-pan-layer" style={worldStyle} data-zoom={mapView.zoom.toFixed(1)}>
           <div className={`world-scene-surface open-world-surface ${rendererReady ? "is-game-ready" : ""}`}>
-            <Image className="island-art" src="/art/saint-lucia-delivery-island.png" alt="" fill sizes="100vw" priority draggable={false} />
+            <Image className="island-art" src="/art/saint-lucia-terrain-v1.webp" alt="" fill sizes="100vw" priority draggable={false} />
             <IslandGameCanvas
               activeSegment={mission?.status === "DELIVERED" ? Math.max(0, routePoints.length - 2) : mission?.currentStopSequence ?? 0}
               delivered={mission?.status === "DELIVERED"}

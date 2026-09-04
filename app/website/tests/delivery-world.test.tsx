@@ -9,6 +9,7 @@ import {
   type DeliveryMissionView,
   VehiclePicker,
 } from "@/components/delivery-world";
+import { buildIslandRoadNetwork, type IslandMarker } from "@/components/island-game-canvas";
 import { layoutWorldLocations, OpenWorldMap, worldMarkerState, type WorldMapView } from "@/components/open-world-map";
 
 const mission: DeliveryMissionView = {
@@ -150,6 +151,22 @@ describe("delivery world", () => {
     expect(nodes.every((node) => node.label.includes("12 farms"))).toBe(true);
   });
 
+  it("grows one connected road network as live locations are added", () => {
+    const markers: IslandMarker[] = layoutWorldLocations(world.locations).map((node, index) => ({
+      kind: node.kind === "FARM" ? "PICKUP" : "DROPOFF",
+      label: node.label,
+      point: node.point,
+      sequence: index,
+      state: worldMarkerState(node),
+      variant: index % 3,
+    }));
+    markers.push({ kind: "PICKUP", label: "New farm", point: { x: .48, y: .61 }, sequence: 3, state: "GROWING", variant: 2 });
+
+    const network = buildIslandRoadNetwork(markers);
+    expect(network).toHaveLength(markers.length - 1);
+    expect(network.some((road) => road.start === markers[2]!.point || road.end === markers[2]!.point)).toBe(true);
+  });
+
   it("keeps a populated island legible while revealing the focused place", () => {
     const populatedWorld = {
       ...world,
@@ -175,6 +192,7 @@ describe("delivery world", () => {
     expect(worldMarkerState(nodes.find((node) => node.kind === "HOTEL")!)).toBe("OPEN");
 
     const { container } = render(<OpenWorldMap world={world} role="FARMER" />);
+    expect(container.querySelector(".island-art")).toHaveAttribute("src", expect.stringContaining("saint-lucia-terrain-v1.webp"));
     expect(container.querySelector('[data-world-state="HARVEST_READY"]')).toBeInTheDocument();
     expect(container.querySelector('[data-world-state="OPEN"]')).toBeInTheDocument();
     expect(container.querySelector(".world-location-hit b")).not.toHaveTextContent("1");

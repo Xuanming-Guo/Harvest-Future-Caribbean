@@ -267,7 +267,7 @@ function IslandBackdrop() {
   return (
     <Image
       className="island-art"
-      src="/art/saint-lucia-delivery-island.png"
+      src="/art/saint-lucia-terrain-v1.webp"
       alt=""
       fill
       sizes="(max-width: 800px) 100vw, 75vw"
