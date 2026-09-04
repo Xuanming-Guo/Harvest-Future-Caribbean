@@ -35,6 +35,16 @@ enum SimulationDecisionMode {
   LLM_ASSISTED
 }
 
+/**
+ * Which harvest-estimation method a run (and each forecast it produced) used.
+ * DETERMINISTIC_FALLBACK is the rule-based fixture and must stay visibly
+ * distinct from learned-model output.
+ */
+enum EstimationMode {
+  LEARNED_MODEL
+  DETERMINISTIC_FALLBACK
+}
+
 enum PairedRunStatus {
   CREATING
   COMPLETED
@@ -48,6 +58,7 @@ model SimulationRun {
   seed              BigInt
   decisionMode      SimulationDecisionMode @map("decision_mode")
   decisionAdapter   String                 @default("deterministic") @map("decision_adapter")
+  estimationMode    EstimationMode         @default(DETERMINISTIC_FALLBACK) @map("estimation_mode")
   scope             Json
   resolvedIslandIds Json                    @map("resolved_island_ids")
   disruptions       Json
@@ -256,6 +267,7 @@ model YieldPrediction {
   requestId      String     @map("request_id") @db.Uuid
   cropBatchId    String     @map("crop_batch_id") @db.Uuid
   modelVersion   String     @map("model_version")
+  estimationMode EstimationMode @default(DETERMINISTIC_FALLBACK) @map("estimation_mode")
   q10            Float
   q50            Float
   q90            Float
@@ -546,4 +558,119 @@ model IdempotencyRecord {
 
   @@unique([actorId, method, path, key])
   @@map("idempotency_records")
+}
+
+/// One island-day of observed weather, plus the forecast issued on that day.
+///
+/// Only days that have already occurred are ever written, so this table cannot
+/// hold future weather and the endpoint over it cannot leak any. Realised
+/// fields are SYNTHETIC records; `forecast` is a MODEL_PREDICTED array of
+/// `WeatherForecastDay`, which is a different kind of claim and carries its own
+/// label. Rows with a null `simulationRunId` belong to the seeded development
+/// world; a connected run writes its own.
+model WeatherObservation {
+  id                 String     @id @default(uuid()) @db.Uuid
+  islandId           String     @map("island_id")
+  observedOn         DateTime   @map("observed_on") @db.Date
+  condition          String
+  rainMm             Float      @map("rain_mm")
+  windKph            Float      @map("wind_kph")
+  windFromDegrees    Float      @map("wind_from_degrees")
+  cloudCoverFraction Float      @map("cloud_cover_fraction")
+  tempBand           String     @map("temp_band")
+  provenance         Provenance
+  forecast           Json
+  forecastProvenance Provenance @map("forecast_provenance")
+  simulationRunId    String?    @map("simulation_run_id") @db.Uuid
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([simulationRunId, islandId, observedOn])
+  @@index([islandId, observedOn])
+  @@map("weather_observations")
+}
+
+/// A promise to move produce between two islands, and the human approval it
+/// needs before it binds anyone (#40).
+///
+/// Separate from Allocation because it is a different decision with a different
+/// approval subject: AGENTS.md lists inter-island commitments among the actions
+/// that require human approval, and the Approval.subjectType vocabulary already
+/// carries INTER_ISLAND_COMMITMENT for exactly this.
+///
+/// The route columns are PUBLIC REFERENCE, copied from the reviewed offline
+/// dataset simulation/data/caribbean-maritime-network.v1.json. Everything else
+/// on the row — the quantity, the freight and clearance cost, the schedule that
+/// follows it — is SYNTHETIC. boundAt is null until every approval has been
+/// granted, and a shipment cannot be created against a row where it is.
+model InterIslandCommitment {
+  id                   String   @id @db.Uuid
+  orderId              String   @map("order_id") @db.Uuid
+  status               String
+  originIslandId       String   @map("origin_island_id")
+  destinationIslandId  String   @map("destination_island_id")
+  linkId               String   @map("link_id")
+  originPortId         String   @map("origin_port_id")
+  destinationPortId    String   @map("destination_port_id")
+  operator             String
+  seaLegHours          Float    @map("sea_leg_hours")
+  /// PUBLIC_TIMETABLE when the operator published this duration, else
+  /// SYNTHETIC_DEFAULT. A consumer must be able to tell the two apart.
+  journeyHoursSource   String   @map("journey_hours_source")
+  quantity             Float
+  /// Freight plus clearance in XCD, and the same value in the destination
+  /// island's own currency at the dataset's fixed offline rate.
+  costXcd              Float    @map("cost_xcd")
+  localCurrency        String   @map("local_currency")
+  localCostAmount      Float    @map("local_cost_amount")
+  unitsPerXcd          Float    @map("units_per_xcd")
+  rateAsOf             String   @map("rate_as_of")
+  /// Per-batch lines, as [{cropBatchId, quantity}].
+  lines                Json
+  /// Source, licence and retrieval date for the port, link and rate cited above.
+  networkReferences    Json      @map("network_references")
+  /// Set only once every approval on this commitment has been granted.
+  boundAt              DateTime? @map("bound_at") @db.Timestamptz(3)
+  traceId              String?   @map("trace_id") @db.Uuid
+  simulationRunId      String?   @map("simulation_run_id") @db.Uuid
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([orderId])
+  @@map("inter_island_commitments")
+}
+
+/// One cross-island consignment on a published sailing (#40).
+///
+/// Created only from an approved InterIslandCommitment. legs is a JSON array of
+/// the three legs (local pickup, sea, local delivery) as published by
+/// MaritimeShipmentLeg in contracts/openapi.yaml; customs is the synthetic
+/// checkpoint, which is NOT a legal customs model and carries a disclaimer
+/// saying so on every row.
+model MaritimeShipment {
+  id                   String    @id @db.Uuid
+  commitmentId         String    @map("commitment_id") @db.Uuid
+  orderId              String    @map("order_id") @db.Uuid
+  status               String
+  /// SYNTHETIC allowance per sailing, not an operator figure.
+  capacityKg           Float     @map("capacity_kg")
+  loadedKg             Float     @map("loaded_kg")
+  legs                 Json
+  customs              Json
+  scheduledDepartureAt DateTime  @map("scheduled_departure_at") @db.Timestamptz(3)
+  scheduledArrivalAt   DateTime  @map("scheduled_arrival_at") @db.Timestamptz(3)
+  actualDepartureAt    DateTime? @map("actual_departure_at") @db.Timestamptz(3)
+  actualArrivalAt      DateTime? @map("actual_arrival_at") @db.Timestamptz(3)
+  deliveredAt          DateTime? @map("delivered_at") @db.Timestamptz(3)
+  failureReason        String?   @map("failure_reason")
+  weatherDelayHours    Float     @default(0) @map("weather_delay_hours")
+  /// Simulation-side shipment identity, so a Product record and a replay frame
+  /// can be checked against each other.
+  simulationShipmentId String?   @map("simulation_shipment_id")
+  simulationRunId      String?   @map("simulation_run_id") @db.Uuid
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([orderId])
+  @@index([commitmentId])
+  @@map("maritime_shipments")
 }

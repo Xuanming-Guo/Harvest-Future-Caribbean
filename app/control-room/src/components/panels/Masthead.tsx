@@ -10,13 +10,26 @@
  * right next to the claim.
  */
 
-import type { ControlRoomScene } from "@harvest/simulation";
+import type { ControlRoomFrame, ControlRoomScene } from "@harvest/simulation";
+
+import { weatherHeadline } from "@/lib/run";
+
+import type { EstimationMode } from "@/lib/run";
 
 export interface MastheadProps {
   scene: ControlRoomScene;
+  /** Estimation method of the loaded run; absent until a run is loaded. */
+  estimationMode?: EstimationMode;
+  /** Baseline runs record the choice but never request a harvest estimate. */
+  estimationModeUsed?: boolean;
 }
 
-export default function Masthead({ scene }: MastheadProps): React.JSX.Element {
+const ESTIMATION_LABELS: Record<EstimationMode, string> = {
+  LEARNED_MODEL: "learned model",
+  DETERMINISTIC_FALLBACK: "deterministic fallback",
+};
+
+export default function Masthead({ scene, estimationMode, estimationModeUsed = true }: MastheadProps): React.JSX.Element {
   return (
     <div className="masthead">
       <span className="masthead-mark" aria-hidden="true">
@@ -30,6 +43,30 @@ export default function Masthead({ scene }: MastheadProps): React.JSX.Element {
 
       <span className="pill">{scene.policy.toLowerCase()}</span>
       <span className="pill">seed {scene.seed}</span>
+      {weather && (
+        <span className="pill" title="Synthetic realised weather; forecasts are model predictions and can be wrong.">
+          {weather}
+        </span>
+      )}
+
+      {/*
+       * The estimation method belongs beside the run's other immutable inputs.
+       * A screenshot of a fallback run must not be mistakable for a run of the
+       * learned model, so the badge states the method rather than hiding it in
+       * the inspector.
+       */}
+      {estimationMode && (
+        <span
+          className="pill"
+          title={estimationModeUsed
+            ? `Forecasts in this run were produced by the ${ESTIMATION_LABELS[estimationMode]}.`
+            : "Baseline runs do not use the Product API or a harvest-estimation model; the choice is recorded but unused."}
+        >
+          {estimationModeUsed
+            ? `estimate: ${ESTIMATION_LABELS[estimationMode]}`
+            : `estimate: ${ESTIMATION_LABELS[estimationMode]} (unused)`}
+        </span>
+      )}
 
       {/*
        * Mandatory, never dismissible: this run is entirely synthetic and must

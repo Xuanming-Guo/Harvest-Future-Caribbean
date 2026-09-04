@@ -575,6 +575,170 @@ paths:
                 decidedBy: 17171717-1717-4717-8717-171717171717
                 decidedAt: '2026-08-01T11:00:00Z'
         default: {$ref: '#/components/responses/Problem'}
+  /v1/inter-island-commitments:
+    get:
+      tags: [Orders]
+      operationId: listInterIslandCommitments
+      summary: List cross-island commitments and their approval state
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+        - name: orderId
+          in: query
+          schema: {type: string, format: uuid}
+        - name: status
+          in: query
+          schema: {enum: [PROPOSED, APPROVED, REJECTED, SHIPPED, CANCELLED]}
+      responses:
+        '200':
+          description: Cross-island commitments visible to the caller.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/InterIslandCommitmentPage'}
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      tags: [Orders]
+      operationId: proposeInterIslandCommitment
+      summary: Propose moving produce from another island, pending human approval
+      description: >-
+        Creates a `PROPOSED` commitment and one `INTER_ISLAND_COMMITMENT`
+        approval per counterparty. The commitment does not bind anybody until
+        every approval is granted, and no shipment may be created against it
+        before then. The route must be one the reviewed offline network
+        `simulation/data/caribbean-maritime-network.v1.json` records between two
+        islands the run selected; anything else is rejected with
+        `422 UNKNOWN_MARITIME_ROUTE` rather than treated as a new service.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/InterIslandCommitmentCreate'}
+            example:
+              orderId: 20202020-2020-4020-8020-202020202020
+              originIslandId: martinique
+              destinationIslandId: saint-lucia
+              linkId: link-martinique-saint-lucia
+              lines: [{cropBatchId: 16161616-1616-4616-8616-161616161616, quantity: {value: 120, unit: kg}}]
+      responses:
+        '201':
+          description: Commitment stored in `PROPOSED` with its approvals pending.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/InterIslandCommitment'}
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/inter-island-commitments/{commitmentId}:
+    get:
+      tags: [Orders]
+      operationId: getInterIslandCommitment
+      summary: Read one cross-island commitment
+      parameters:
+        - $ref: '#/components/parameters/InterIslandCommitmentId'
+      responses:
+        '200':
+          description: Commitment visible to the caller.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/InterIslandCommitment'}
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/inter-island-commitments/{commitmentId}/shipments:
+    post:
+      tags: [Delivery]
+      operationId: createMaritimeShipment
+      summary: Book an approved cross-island commitment onto its sailing
+      description: >-
+        Refused with `409 INTER_ISLAND_APPROVAL_REQUIRED` while any approval on
+        the commitment is still pending or has been rejected. Capacity, cost,
+        schedule, customs behaviour and outcome are SYNTHETIC; the ports, the
+        link and the exchange rate are public references with their own sources
+        and licences.
+      parameters:
+        - $ref: '#/components/parameters/InterIslandCommitmentId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MaritimeShipmentCreate'}
+      responses:
+        '201':
+          description: Shipment stored in `SCHEDULED`.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MaritimeShipment'}
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/maritime-shipments:
+    get:
+      tags: [Delivery]
+      operationId: listMaritimeShipments
+      summary: List cross-island consignments and their legs
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+        - name: orderId
+          in: query
+          schema: {type: string, format: uuid}
+        - name: status
+          in: query
+          schema: {enum: [SCHEDULED, DEPARTED, DELAYED, ARRIVED, DELIVERED, FAILED]}
+      responses:
+        '200':
+          description: Shipments visible to the caller.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MaritimeShipmentPage'}
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/maritime-shipments/{shipmentId}/updates:
+    post:
+      tags: [Delivery]
+      operationId: updateMaritimeShipment
+      summary: Record what actually happened to a cross-island consignment
+      description: >-
+        Sailing, customs clearance, weather delay, arrival, delivery or failure.
+        Every value is SYNTHETIC and comes from the physical simulation; nothing
+        here is a vessel-tracking feed, and no live service is called. A status
+        may only move forward, and a `FAILED` consignment is terminal.
+      parameters:
+        - $ref: '#/components/parameters/MaritimeShipmentId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MaritimeShipmentUpdate'}
+      responses:
+        '200':
+          description: Shipment record updated.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MaritimeShipment'}
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/maritime-network:
+    get:
+      tags: [Delivery]
+      operationId: getMaritimeNetwork
+      summary: Read the public-reference port and sailing network for a scope
+      description: >-
+        Ports, published links and fixed offline exchange rates, restricted to
+        the islands asked for. Every record carries its own source, licence and
+        retrieval date. This is reference geography and published services only:
+        it is not evidence that a produce-trading service exists on any route,
+        and it carries no schedule, capacity, price or availability. No live
+        vessel or exchange-rate service is called, during a run or a replay.
+      parameters:
+        - name: islandIds
+          in: query
+          required: true
+          description: Comma-separated manifest island ids to restrict the network to.
+          schema: {type: string, minLength: 1}
+      responses:
+        '200':
+          description: The network restricted to the requested islands.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MaritimeNetwork'}
+        default: {$ref: '#/components/responses/Problem'}
   /v1/delivery-missions:
     get:
       tags: [Delivery]
@@ -922,6 +1086,55 @@ paths:
                 activeMissionIds: [23232323-2323-4323-8323-232323232323]
                 openExceptionIds: []
         default: {$ref: '#/components/responses/Problem'}
+  /v1/weather:
+    get:
+      tags: [Operations]
+      operationId: getIslandWeather
+      summary: Read observed conditions and the shared imperfect forecast for an island
+      description: >-
+        Every participant, human or simulated, plans from this one answer.
+        `current` is the realised weather for a day that has already occurred
+        and is labelled SYNTHETIC; `forecast` covers days that have not and is
+        labelled MODEL_PREDICTED, because a forecast is a prediction and not a
+        record. Realised weather for a future day is never stored and therefore
+        cannot be returned. No live weather service is contacted.
+      parameters:
+        - name: islandId
+          in: query
+          description: Defaults to the island of the caller's simulation run, or to saint-lucia.
+          schema: {type: string, minLength: 1, maxLength: 64}
+        - name: asOf
+          in: query
+          description: >-
+            Calendar date to read. Defaults to the most recent day on record.
+            A date later than that returns the most recent day instead of
+            inventing one, so the horizon cannot be probed.
+          schema: {type: string, format: date}
+        - name: simulationRunId
+          in: query
+          description: Operations and admin actors may select a saved run; a simulated actor is confined to its own.
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Current conditions and the forecast issued on the same day.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IslandWeather'}
+              example:
+                islandId: saint-lucia
+                asOf: '2026-09-05'
+                current:
+                  date: '2026-09-05'
+                  condition: RAIN
+                  rainMm: 18.4
+                  windKph: 24.1
+                  windFromDegrees: 84
+                  cloudCoverFraction: 0.54
+                  tempBand: WARM
+                  provenance: SYNTHETIC
+                forecast:
+                  - {date: '2026-09-06', leadDays: 1, condition: STORM, rainMm: 48.2, windKph: 41.5, windFromDegrees: 79, cloudCoverFraction: 0.9, tempBand: WARM, confidence: 0.78, provenance: MODEL_PREDICTED}
+        default: {$ref: '#/components/responses/Problem'}
   /v1/agent-traces/{traceId}:
     get:
       tags: [Operations]
@@ -1026,6 +1239,7 @@ paths:
               policy: HARVEST
               seed: 8675309
               decisionMode: DETERMINISTIC
+              estimationMode: DETERMINISTIC_FALLBACK
               scope: {mode: SELECTED, islandIds: [saint-lucia]}
       responses:
         '201':
@@ -1205,6 +1419,16 @@ components:
       schema: {type: string, format: uuid}
     ApprovalId:
       name: approvalId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    MaritimeShipmentId:
+      name: shipmentId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    InterIslandCommitmentId:
+      name: commitmentId
       in: path
       required: true
       schema: {type: string, format: uuid}
@@ -1536,12 +1760,18 @@ components:
     YieldPredictionEvidence:
       type: object
       additionalProperties: false
-      required: [predictionId, requestId, cropBatchId, modelVersion, q10MarketableYield, q50MarketableYield, q90MarketableYield, harvestWindow, readiness, confidence, warnings, featureSnapshot, provenance, generatedAt]
+      required: [predictionId, requestId, cropBatchId, modelVersion, estimationMode, q10MarketableYield, q50MarketableYield, q90MarketableYield, harvestWindow, readiness, confidence, warnings, featureSnapshot, provenance, generatedAt]
       properties:
         predictionId: {type: string, format: uuid}
         requestId: {type: string, format: uuid}
         cropBatchId: {type: string, format: uuid}
         modelVersion: {type: string, minLength: 1}
+        estimationMode:
+          allOf: [{$ref: '#/components/schemas/EstimationMode'}]
+          description: >-
+            Which method produced this forecast. provenance stays
+            MODEL_PREDICTED for both, so DETERMINISTIC_FALLBACK is the field
+            that keeps fixture output from reading as learned-model output.
         q10MarketableYield: {$ref: './common.schema.json#/$defs/Quantity'}
         q50MarketableYield: {$ref: './common.schema.json#/$defs/Quantity'}
         q90MarketableYield: {$ref: './common.schema.json#/$defs/Quantity'}
@@ -1825,6 +2055,12 @@ components:
             approvalSummary: {$ref: '#/components/schemas/ApprovalSummary'}
             deliveryMission: {$ref: '#/components/schemas/DeliveryMissionView'}
             deliveryAcceptance: {$ref: '#/components/schemas/DeliveryAcceptance'}
+            interIslandCommitment:
+              description: Present only when part of this order is being sourced from another island.
+              $ref: '#/components/schemas/InterIslandCommitment'
+            maritimeShipment:
+              description: Present only once an approved inter-island commitment has been booked onto a sailing.
+              $ref: '#/components/schemas/MaritimeShipment'
     ApprovalDecision:
       description: >-
         REJECT must carry reasonCode and nextAction so the affected participant
@@ -2211,6 +2447,54 @@ components:
           minimum: 0
         activeMissionIds: {type: array, items: {type: string, format: uuid}}
         openExceptionIds: {type: array, items: {type: string, format: uuid}}
+    WeatherObservation:
+      description: Realised weather for a day that has already occurred. Synthetic record.
+      type: object
+      additionalProperties: false
+      required: [date, condition, rainMm, windKph, windFromDegrees, cloudCoverFraction, tempBand, provenance]
+      properties:
+        date: {type: string, format: date}
+        condition: {enum: [CLEAR, CLOUD, RAIN, STORM]}
+        rainMm: {type: number, minimum: 0}
+        windKph: {type: number, minimum: 0}
+        windFromDegrees:
+          description: Direction the wind blows from, clockwise from true north.
+          type: number
+          minimum: 0
+          exclusiveMaximum: 360
+        cloudCoverFraction: {type: number, minimum: 0, maximum: 1}
+        tempBand: {enum: [COOL, WARM, HOT]}
+        provenance: {const: SYNTHETIC}
+    WeatherForecastDay:
+      description: >-
+        One forecast day. Deliberately imperfect: a noised model of the realised
+        series whose error grows with lead time, never a reading of it.
+      type: object
+      additionalProperties: false
+      required: [date, leadDays, condition, rainMm, windKph, windFromDegrees, cloudCoverFraction, tempBand, confidence, provenance]
+      properties:
+        date: {type: string, format: date}
+        leadDays: {type: integer, minimum: 1}
+        condition: {enum: [CLEAR, CLOUD, RAIN, STORM]}
+        rainMm: {type: number, minimum: 0}
+        windKph: {type: number, minimum: 0}
+        windFromDegrees: {type: number, minimum: 0, exclusiveMaximum: 360}
+        cloudCoverFraction: {type: number, minimum: 0, maximum: 1}
+        tempBand: {enum: [COOL, WARM, HOT]}
+        confidence: {type: number, minimum: 0, maximum: 1}
+        provenance: {const: MODEL_PREDICTED}
+    IslandWeather:
+      type: object
+      additionalProperties: false
+      required: [islandId, asOf, forecast]
+      properties:
+        islandId: {type: string}
+        asOf: {type: string, format: date}
+        simulationRunId: {type: string, format: uuid}
+        current:
+          description: Absent when no day has been recorded for this island yet.
+          $ref: '#/components/schemas/WeatherObservation'
+        forecast: {type: array, items: {$ref: '#/components/schemas/WeatherForecastDay'}}
     OrderOutcomeSummary:
       type: object
       additionalProperties: false
@@ -2312,6 +2596,280 @@ components:
       required: [items]
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/SimulationScenario'}}
+    MaritimeReferenceCitation:
+      description: >-
+        Where one public-reference maritime record came from. Present on every
+        port, link and exchange rate so that a consumer can separate cited
+        geography from synthetic operations without leaving the payload.
+      type: object
+      additionalProperties: false
+      required: [sourceTitle, sourceUrl, publisher, licence, retrievedAt, evidenceType]
+      properties:
+        sourceTitle: {type: string, minLength: 1}
+        sourceUrl: {type: string, format: uri}
+        publisher: {type: string, minLength: 1}
+        licence: {type: string, minLength: 1}
+        retrievedAt: {type: string, format: date}
+        geography: {type: string}
+        evidenceType: {const: PUBLIC_REFERENCE}
+    MaritimePort:
+      type: object
+      additionalProperties: false
+      required: [portId, name, islandId, position, portType, reference]
+      properties:
+        portId: {type: string, minLength: 1}
+        name: {type: string, minLength: 1}
+        islandId: {type: string, minLength: 1}
+        position: {$ref: './common.schema.json#/$defs/GeoPoint'}
+        portType: {type: string}
+        reference: {$ref: '#/components/schemas/MaritimeReferenceCitation'}
+    MaritimeLink:
+      description: >-
+        A real, publicly scheduled connection between two ports. Evidence that
+        transport infrastructure or a passenger service exists; never evidence
+        that a produce service, timetable, capacity, cost or price exists on it.
+      type: object
+      additionalProperties: false
+      required: [linkId, fromPortId, toPortId, mode, operator, reference]
+      properties:
+        linkId: {type: string, minLength: 1}
+        fromPortId: {type: string, minLength: 1}
+        toPortId: {type: string, minLength: 1}
+        mode: {type: string}
+        operator: {type: string}
+        typicalJourneyHours:
+          type: [number, 'null']
+          description: As published by the operator, or null where no primary timetable was retrievable.
+        reference: {$ref: '#/components/schemas/MaritimeReferenceCitation'}
+    MaritimeExchangeRate:
+      type: object
+      additionalProperties: false
+      required: [currency, name, regime, islandIds, unitsPerUSD, unitsPerXCD, reference]
+      properties:
+        currency: {type: string, minLength: 3, maxLength: 3}
+        name: {type: string}
+        regime: {type: string}
+        islandIds: {type: array, items: {type: string}}
+        unitsPerUSD: {type: number, exclusiveMinimum: 0}
+        unitsPerXCD: {type: number, exclusiveMinimum: 0}
+        reference: {$ref: '#/components/schemas/MaritimeReferenceCitation'}
+    MaritimeNetwork:
+      type: object
+      additionalProperties: false
+      required: [version, generatedAt, islandIds, ports, links, rates, ratesAsOf, disclaimer]
+      properties:
+        version: {type: string}
+        generatedAt: {type: string, format: date}
+        islandIds: {type: array, items: {type: string}}
+        ports: {type: array, items: {$ref: '#/components/schemas/MaritimePort'}}
+        links:
+          type: array
+          description: Only links whose both ports are on islands in the requested scope. Never inferred, never chained.
+          items: {$ref: '#/components/schemas/MaritimeLink'}
+        rates: {type: array, items: {$ref: '#/components/schemas/MaritimeExchangeRate'}}
+        ratesAsOf: {type: string, format: date}
+        disclaimer: {type: string, minLength: 1}
+    DualCurrencyAmount:
+      description: >-
+        One value stated in an island's own currency and in XCD, with the fixed
+        offline rate that connects them. The rate is a public reference; the
+        amount it converts is synthetic.
+      type: object
+      additionalProperties: false
+      required: [localAmount, localCurrency, comparisonAmount, comparisonCurrency, unitsPerComparisonCurrency, rateProvenance, amountProvenance, rateAsOf]
+      properties:
+        localAmount: {type: number, minimum: 0}
+        localCurrency: {type: string, minLength: 3, maxLength: 3}
+        comparisonAmount: {type: number, minimum: 0}
+        comparisonCurrency: {const: XCD}
+        unitsPerComparisonCurrency: {type: number, exclusiveMinimum: 0}
+        rateProvenance: {const: PUBLIC_REFERENCE}
+        amountProvenance: {const: SYNTHETIC}
+        rateAsOf: {type: string, format: date}
+        rateSource: {$ref: '#/components/schemas/MaritimeReferenceCitation'}
+    MaritimeShipmentLeg:
+      type: object
+      additionalProperties: false
+      required: [kind, fromLabel, toLabel, from, to, startsAt, endsAt]
+      properties:
+        kind: {enum: [PICKUP, SEA, DELIVERY]}
+        fromLabel: {type: string}
+        toLabel: {type: string}
+        from: {$ref: './common.schema.json#/$defs/GeoPoint'}
+        to: {$ref: './common.schema.json#/$defs/GeoPoint'}
+        startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
+        journeyHoursSource:
+          description: Sea legs only. Whether the duration came from a published timetable or a labelled synthetic default.
+          enum: [PUBLIC_TIMETABLE, SYNTHETIC_DEFAULT]
+    CustomsCheckpoint:
+      description: >-
+        SYNTHETIC documentation check at the destination port. Not a legal
+        customs model: it encodes no tariff schedule, no phytosanitary rule and
+        no territory procedure, and `disclaimer` says so on every instance.
+      type: object
+      additionalProperties: false
+      required: [portId, status, documentationReference, inspected, delayHours, feeXcd, disclaimer, provenance]
+      properties:
+        portId: {type: string}
+        status: {enum: [PENDING, CLEARED, HELD]}
+        documentationReference: {type: string}
+        inspected: {type: boolean}
+        delayHours: {type: number, minimum: 0}
+        clearedAt: {type: [string, 'null'], format: date-time}
+        feeXcd: {type: number, minimum: 0}
+        disclaimer: {type: string, minLength: 1}
+        provenance: {const: SYNTHETIC}
+    InterIslandRoute:
+      type: object
+      additionalProperties: false
+      required: [linkId, originPortId, destinationPortId, operator, seaLegHours, journeyHoursSource, references]
+      properties:
+        linkId: {type: string}
+        originPortId: {type: string}
+        destinationPortId: {type: string}
+        operator: {type: string}
+        seaLegHours: {type: number, exclusiveMinimum: 0}
+        journeyHoursSource: {enum: [PUBLIC_TIMETABLE, SYNTHETIC_DEFAULT]}
+        references:
+          description: Source, licence and retrieval date for the link, both ports and the rate.
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/MaritimeReferenceCitation'}
+    InterIslandCommitmentCreate:
+      type: object
+      additionalProperties: false
+      required: [orderId, originIslandId, destinationIslandId, linkId, lines]
+      properties:
+        orderId: {type: string, format: uuid}
+        originIslandId: {type: string, minLength: 1}
+        destinationIslandId:
+          type: string
+          minLength: 1
+          description: >-
+            The buyer's island. Stated rather than derived, because a Product
+            API order carries a delivery point and not a manifest island id, and
+            guessing one from coordinates would put a commitment on the wrong
+            side of a scope boundary.
+          example: saint-lucia
+        linkId:
+          type: string
+          minLength: 1
+          description: A link id from the reviewed offline network. An unknown link is rejected, never created.
+        lines:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required: [cropBatchId, quantity]
+            properties:
+              cropBatchId: {type: string, format: uuid}
+              quantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        simulationShipmentId: {type: string}
+    InterIslandCommitment:
+      description: >-
+        A promise to move produce between two islands. `boundAt` is null until
+        every `INTER_ISLAND_COMMITMENT` approval has been granted; until then
+        nothing may be shipped against it.
+      type: object
+      additionalProperties: false
+      required: [commitmentId, orderId, status, originIslandId, destinationIslandId, route, quantity, cost, lines, approvalSummary, createdAt]
+      properties:
+        commitmentId: {type: string, format: uuid}
+        orderId: {type: string, format: uuid}
+        status: {enum: [PROPOSED, APPROVED, REJECTED, SHIPPED, CANCELLED]}
+        originIslandId: {type: string}
+        destinationIslandId: {type: string}
+        route: {$ref: '#/components/schemas/InterIslandRoute'}
+        quantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        cost: {$ref: '#/components/schemas/DualCurrencyAmount'}
+        lines:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [cropBatchId, quantity]
+            properties:
+              cropBatchId: {type: string, format: uuid}
+              quantity: {$ref: './common.schema.json#/$defs/Quantity'}
+        approvalSummary: {$ref: '#/components/schemas/ApprovalSummary'}
+        boundAt: {type: [string, 'null'], format: date-time}
+        shipmentId: {type: [string, 'null'], format: uuid}
+        provenanceNote: {type: string}
+        createdAt: {type: string, format: date-time}
+    InterIslandCommitmentPage:
+      type: object
+      additionalProperties: false
+      required: [items, pageInfo]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/InterIslandCommitment'}}
+        pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
+    MaritimeShipmentCreate:
+      type: object
+      additionalProperties: false
+      required: [legs, customs, scheduledDepartureAt, scheduledArrivalAt]
+      properties:
+        legs: {type: array, minItems: 3, maxItems: 3, items: {$ref: '#/components/schemas/MaritimeShipmentLeg'}}
+        customs: {$ref: '#/components/schemas/CustomsCheckpoint'}
+        scheduledDepartureAt: {type: string, format: date-time}
+        scheduledArrivalAt: {type: string, format: date-time}
+        capacityKg: {type: number, exclusiveMinimum: 0}
+        loadedKg: {type: number, minimum: 0}
+        simulationShipmentId: {type: string}
+    MaritimeShipment:
+      description: >-
+        One cross-island consignment. `networkProvenance` covers the ports, the
+        link and the exchange rate; `operationsProvenance` covers the schedule,
+        the capacity, the price, the customs behaviour and the outcome. Both are
+        present on every record because a shipment mixes the two kinds of claim.
+      type: object
+      additionalProperties: false
+      required: [shipmentId, commitmentId, orderId, status, capacityKg, loadedKg, legs, customs, cost, route, scheduledDepartureAt, scheduledArrivalAt, networkProvenance, operationsProvenance, createdAt]
+      properties:
+        shipmentId: {type: string, format: uuid}
+        commitmentId: {type: string, format: uuid}
+        orderId: {type: string, format: uuid}
+        status: {enum: [SCHEDULED, DEPARTED, DELAYED, ARRIVED, DELIVERED, FAILED]}
+        originIslandId: {type: string}
+        destinationIslandId: {type: string}
+        route: {$ref: '#/components/schemas/InterIslandRoute'}
+        capacityKg: {type: number, exclusiveMinimum: 0}
+        loadedKg: {type: number, minimum: 0}
+        legs: {type: array, items: {$ref: '#/components/schemas/MaritimeShipmentLeg'}}
+        customs: {$ref: '#/components/schemas/CustomsCheckpoint'}
+        cost: {$ref: '#/components/schemas/DualCurrencyAmount'}
+        scheduledDepartureAt: {type: string, format: date-time}
+        scheduledArrivalAt: {type: string, format: date-time}
+        actualDepartureAt: {type: [string, 'null'], format: date-time}
+        actualArrivalAt: {type: [string, 'null'], format: date-time}
+        deliveredAt: {type: [string, 'null'], format: date-time}
+        failureReason: {type: [string, 'null']}
+        weatherDelayHours: {type: number, minimum: 0}
+        simulationShipmentId: {type: [string, 'null']}
+        networkProvenance: {const: PUBLIC_REFERENCE}
+        operationsProvenance: {const: SYNTHETIC}
+        createdAt: {type: string, format: date-time}
+    MaritimeShipmentUpdate:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: {enum: [SCHEDULED, DEPARTED, DELAYED, ARRIVED, DELIVERED, FAILED]}
+        loadedKg: {type: number, minimum: 0}
+        actualDepartureAt: {type: string, format: date-time}
+        actualArrivalAt: {type: string, format: date-time}
+        deliveredAt: {type: string, format: date-time}
+        failureReason: {type: string, maxLength: 1000}
+        weatherDelayHours: {type: number, minimum: 0}
+        customs: {$ref: '#/components/schemas/CustomsCheckpoint'}
+    MaritimeShipmentPage:
+      type: object
+      additionalProperties: false
+      required: [items, pageInfo]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/MaritimeShipment'}}
+        pageInfo: {$ref: './common.schema.json#/$defs/PageInfo'}
     SimulationScope:
       oneOf:
         - type: object
@@ -2337,6 +2895,12 @@ components:
         durationMs: {type: integer, minimum: 1}
         affectedEntityIds: {type: array, minItems: 1, items: {type: string, minLength: 1}}
         publicDescription: {type: string, minLength: 1, maxLength: 500}
+    EstimationMode:
+      description: >-
+        Which harvest-estimation method produced a forecast. LEARNED_MODEL is
+        the FastAPI quantile service; DETERMINISTIC_FALLBACK is the rule-based
+        fixture and is never learned-model output.
+      enum: [LEARNED_MODEL, DETERMINISTIC_FALLBACK]
     SimulationRunCreate:
       oneOf:
         - type: object
@@ -2347,6 +2911,14 @@ components:
             policy: {enum: [BASELINE, HARVEST]}
             seed: {type: integer, minimum: 0, maximum: 4294967295}
             decisionMode: {enum: [DETERMINISTIC, LLM_ASSISTED]}
+            estimationMode:
+              allOf: [{$ref: '#/components/schemas/EstimationMode'}]
+              description: >-
+                Harvest-estimation method for this run only; never a global
+                server switch. Omitting the field selects
+                DETERMINISTIC_FALLBACK. No schema-level default is declared
+                because generated TypeScript would then make the field
+                required on every request body.
             scope: {$ref: '#/components/schemas/SimulationScope'}
             disruptions: {type: array, items: {$ref: '#/components/schemas/InjectedDisruption'}}
         - type: object
@@ -2410,7 +2982,7 @@ components:
     SimulationRun:
       type: object
       additionalProperties: false
-      required: [runId, scenarioId, policy, seed, decisionMode, decisionAdapter, scope, resolvedIslandIds, disruptions, status, frameCount, decisionCount, createdAt, updatedAt]
+      required: [runId, scenarioId, policy, seed, decisionMode, decisionAdapter, estimationMode, scope, resolvedIslandIds, disruptions, status, frameCount, decisionCount, createdAt, updatedAt]
       properties:
         runId: {type: string, format: uuid}
         scenarioId: {type: string, minLength: 1}
@@ -2418,6 +2990,9 @@ components:
         seed: {type: integer, minimum: 0, maximum: 4294967295}
         decisionMode: {enum: [DETERMINISTIC, LLM_ASSISTED]}
         decisionAdapter: {type: string, minLength: 1}
+        estimationMode:
+          allOf: [{$ref: '#/components/schemas/EstimationMode'}]
+          description: Stored per run. Baseline runs record the choice but never call a forecast model.
         scope: {$ref: '#/components/schemas/SimulationScope'}
         resolvedIslandIds: {type: array, minItems: 1, items: {type: string}}
         disruptions: {type: array, items: {$ref: '#/components/schemas/InjectedDisruption'}}
@@ -2502,6 +3077,9 @@ components:
         entityId: {type: string, format: uuid}
         eventIds: {type: array, items: {type: string, format: uuid}}
         adapter: {type: string, minLength: 1}
+        estimationMode:
+          allOf: [{$ref: '#/components/schemas/EstimationMode'}]
+          description: Present on forecast-producing tools so replay states which estimation method ran.
         approval: {enum: [NONE, SYNTHETIC_PARTICIPANT]}
         correlationId: {type: string, format: uuid}
         causationId: {type: string, format: uuid}
@@ -2668,9 +3246,10 @@ components:
     SimulationTimeline:
       type: object
       additionalProperties: false
-      required: [runId, evidenceLabel, provenanceNote, scene, frames]
+      required: [runId, evidenceLabel, provenanceNote, estimationMode, scene, frames]
       properties:
         runId: {type: string, format: uuid}
+        estimationMode: {$ref: '#/components/schemas/EstimationMode'}
         evidenceLabel: {type: string}
         provenanceNote: {type: string}
         scene: {$ref: '#/components/schemas/ReplayScene'}
@@ -2678,9 +3257,10 @@ components:
     SimulationWorldFrame:
       type: object
       additionalProperties: false
-      required: [runId, frameIndex, frameCount, frame]
+      required: [runId, frameIndex, frameCount, estimationMode, frame]
       properties:
         runId: {type: string, format: uuid}
+        estimationMode: {$ref: '#/components/schemas/EstimationMode'}
         frameIndex: {type: integer, minimum: 0}
         frameCount: {type: integer, minimum: 1}
         frame: {$ref: '#/components/schemas/ReplayFrame'}

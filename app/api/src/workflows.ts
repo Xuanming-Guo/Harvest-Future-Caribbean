@@ -1,15 +1,23 @@
 import { randomUUID } from "node:crypto";
 
-import { Prisma, Provenance } from "@prisma/client";
+import { EstimationMode, Prisma, Provenance } from "@prisma/client";
 
 import { operationNow } from "./clock.js";
 import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { recordEvent } from "./events.js";
 import { httpError, type DecisionReason } from "./http.js";
+import { decideInterIslandApproval } from "./inter-island.js";
 import { commitmentValue } from "./payments.js";
 
 const kilograms = (value: number) => ({ value, unit: "kg" });
+
+/**
+ * Version stamped on every deterministic-fallback estimate. The `fixture-`
+ * prefix is load bearing: it is what a reader sees on the crop page and in the
+ * saved trace, and it must never resemble a learned model version.
+ */
+export const FIXTURE_MODEL_VERSION = "fixture-yield-v0.1.0";
 
 /** Nullable reason columns written alongside a recorded human decision. */
 const decisionReasonColumns = (decisionReason?: DecisionReason) => ({
@@ -99,6 +107,7 @@ export async function rematchWaitingOrders(cropType: string, actorId: string, si
 
 type ModelPrediction = {
   predictionId: string;
+  estimationMode: EstimationMode;
   requestId: string;
   cropBatchId: string;
   modelVersion: string;
@@ -147,7 +156,7 @@ function parseHttpPrediction(value: unknown, requestId: string, cropBatchId: str
   if (!validNumber(body.readiness) || body.readiness > 1 || !validNumber(body.confidence) || body.confidence > 1 || body.provenance !== "MODEL_PREDICTED" || !Array.isArray(body.warnings) || !body.warnings.every((warning) => typeof warning === "string" && warning.length > 0)) {
     modelResponseError("The model response includes invalid evidence fields.");
   }
-  return { predictionId: body.predictionId, requestId, cropBatchId, modelVersion: body.modelVersion, q10, q50, q90, harvestStart: start, harvestEnd: end, readiness: body.readiness, confidence: body.confidence, warnings: body.warnings, generatedAt, featureSnapshot };
+  return { predictionId: body.predictionId, requestId, cropBatchId, estimationMode: EstimationMode.LEARNED_MODEL, modelVersion: body.modelVersion, q10, q50, q90, harvestStart: start, harvestEnd: end, readiness: body.readiness, confidence: body.confidence, warnings: body.warnings, generatedAt, featureSnapshot };
 }
 
 export interface WorkflowEventContext {
@@ -247,6 +256,39 @@ async function serializableTransaction<T>(operation: (tx: Prisma.TransactionClie
   throw new Error("Serializable transaction retry limit reached.");
 }
 
+/**
+ * Resolve the harvest-estimation method for one prediction.
+ *
+ * The choice is per run, never a global switch: a crop batch that belongs to a
+ * simulation run inherits that run's stored mode, so two runs executing
+ * concurrently can use different methods. A real participant's batch has no
+ * run, so it keeps the server's `MODEL_ADAPTER` configuration.
+ */
+async function resolveEstimationMode(simulationRunId: string | null): Promise<EstimationMode> {
+  if (!simulationRunId) {
+    if (config.modelAdapter === "fixture") return EstimationMode.DETERMINISTIC_FALLBACK;
+    if (config.modelAdapter === "http") return EstimationMode.LEARNED_MODEL;
+    throw httpError(500, "MODEL_ADAPTER_INVALID", "MODEL_ADAPTER must be fixture or http.");
+  }
+  const run = await prisma.simulationRun.findUnique({
+    where: { id: simulationRunId },
+    select: { estimationMode: true },
+  });
+  // A run-scoped batch whose run row has gone is not a reason to silently
+  // reach for the learned service; the labelled fallback is the safe default.
+  return run?.estimationMode ?? EstimationMode.DETERMINISTIC_FALLBACK;
+}
+
+/** Human wording used in trace steps and agent-action summaries. */
+export function estimationMethodLabel(mode: EstimationMode) {
+  return mode === EstimationMode.LEARNED_MODEL ? "learned harvest-estimation model" : "deterministic fallback";
+}
+
+/** Trace-step tool name, so a saved trace names the method that actually ran. */
+export function estimationToolName(mode: EstimationMode) {
+  return mode === EstimationMode.LEARNED_MODEL ? "learned-yield-model" : "deterministic-fallback-yield-model";
+}
+
 export async function produceFixturePrediction(
   cropBatchId: string,
   actorId: string,
@@ -270,8 +312,9 @@ export async function produceFixturePrediction(
     weatherSummary: {},
     satelliteSummary: {},
   };
+  const estimationMode = await resolveEstimationMode(batch.simulationRunId);
   let prediction: ModelPrediction;
-  if (config.modelAdapter === "fixture") {
+  if (estimationMode === EstimationMode.DETERMINISTIC_FALLBACK) {
     const estimate = observation?.estimatedQuantity ?? 20;
     const damageBuffer = Math.max(2, Math.round(estimate * 0.3));
     const q10 = Math.max(0, estimate - damageBuffer);
@@ -283,12 +326,17 @@ export async function produceFixturePrediction(
     const end = new Date(start);
     end.setUTCDate(end.getUTCDate() + 3);
     prediction = {
-      predictionId: randomUUID(), requestId, cropBatchId, modelVersion: "fixture-yield-v0.1.0", q10, q50, q90,
+      predictionId: randomUUID(), requestId, cropBatchId, estimationMode, modelVersion: FIXTURE_MODEL_VERSION, q10, q50, q90,
       harvestStart: start, harvestEnd: end, readiness: 0.8, confidence: observation ? 0.76 : 0.55,
-      warnings: observation ? ["Synthetic fixture prediction"] : ["No recent field observation"], generatedAt,
+      // The first warning is not decoration. It is the label that stops a
+      // rule-based number being read as learned-model output.
+      warnings: observation
+        ? ["Deterministic fallback estimate, not a learned-model prediction"]
+        : ["Deterministic fallback estimate, not a learned-model prediction", "No recent field observation"],
+      generatedAt,
       featureSnapshot: { ...featureSnapshot, weatherSummary: { source: "fixture", rainfall7dMm: 74 }, satelliteSummary: { source: "fixture", ndvi: 0.71 } },
     };
-  } else if (config.modelAdapter === "http") {
+  } else {
     let response: Response;
     try {
       response = await fetch(`${config.modelServiceUrl.replace(/\/$/, "")}/internal/v1/yield-predictions`, {
@@ -297,14 +345,15 @@ export async function produceFixturePrediction(
         body: JSON.stringify({ requestId, cropBatchId, cropType: batch.cropType, farmId: batch.farmId, requestedAt: operationNow().toISOString(), ...(batch.simulationRunId ? { simulationRunId: batch.simulationRunId } : {}), provenance: observation?.provenance ?? "SYNTHETIC", features: featureSnapshot }),
       });
     } catch {
-      throw httpError(503, "MODEL_UNAVAILABLE", "The configured yield-model service could not be reached.");
+      // Never fall back silently. A learned-model run that quietly produced
+      // fixture numbers would be indistinguishable from a real one.
+      throw httpError(502, "MODEL_UNAVAILABLE", "The learned harvest-estimation service could not be reached; no fallback estimate was substituted.");
     }
-    if (!response.ok) throw httpError(503, "MODEL_UNAVAILABLE", "The configured yield-model service rejected the prediction request.");
+    if (!response.ok) throw httpError(502, "MODEL_UNAVAILABLE", "The learned harvest-estimation service rejected the prediction request; no fallback estimate was substituted.");
     prediction = parseHttpPrediction(await response.json(), requestId, cropBatchId, featureSnapshot);
-  } else {
-    throw httpError(500, "MODEL_ADAPTER_INVALID", "MODEL_ADAPTER must be fixture or http.");
   }
 
+  const methodLabel = estimationMethodLabel(prediction.estimationMode);
   await prisma.$transaction(async (tx) => {
     const committed = await tx.reservation.aggregate({
       where: { cropBatchId, status: "ACTIVE", simulationRunId: batch.simulationRunId },
@@ -322,6 +371,7 @@ export async function produceFixturePrediction(
         requestId: prediction.requestId,
         cropBatchId,
         modelVersion: prediction.modelVersion,
+        estimationMode: prediction.estimationMode,
         q10: prediction.q10,
         q50: prediction.q50,
         q90: prediction.q90,
@@ -363,7 +413,7 @@ export async function produceFixturePrediction(
     });
     await tx.agentTrace.update({
       where: { id: traceId },
-      data: { status: "COMPLETED", stage: "FORECAST_READY", summary: "Produced a conservative forecast and calculated available-to-promise after active commitments." },
+      data: { status: "COMPLETED", stage: "FORECAST_READY", summary: `Produced a conservative forecast using the ${methodLabel} and calculated available-to-promise after active commitments.` },
     });
     await tx.traceStep.create({
       data: {
@@ -371,11 +421,11 @@ export async function produceFixturePrediction(
         recordedAt: prediction.generatedAt,
         kind: "TOOL_CALL",
         agentName: "Crop Intelligence Agent",
-        toolName: config.modelAdapter === "http" ? "http-yield-model" : "fixture-yield-model",
+        toolName: estimationToolName(prediction.estimationMode),
         provenance: Provenance.MODEL_PREDICTED,
         summary: isReadyStatus(current.status)
-          ? `Forecast q10 is ${prediction.q10} kg; ${committedQuantity} kg is committed, leaving ${availableToPromise} kg ATP.`
-          : `Forecast q10 is ${prediction.q10} kg, but the crop is ${current.status.toLowerCase().replaceAll("_", " ")} so ATP stays at 0 kg until it is reported harvest ready.`,
+          ? `The ${methodLabel} (${prediction.modelVersion}) put q10 at ${prediction.q10} kg; ${committedQuantity} kg is committed, leaving ${availableToPromise} kg ATP.`
+          : `The ${methodLabel} (${prediction.modelVersion}) put q10 at ${prediction.q10} kg, but the crop is ${current.status.toLowerCase().replaceAll("_", " ")} so ATP stays at 0 kg until it is reported harvest ready.`,
         confidence: prediction.confidence,
         simulationRunId: batch.simulationRunId,
       },
@@ -383,7 +433,7 @@ export async function produceFixturePrediction(
     return forecastEvent;
   });
 
-  return { predictionId: prediction.predictionId, requestId: prediction.requestId };
+  return { predictionId: prediction.predictionId, requestId: prediction.requestId, estimationMode: prediction.estimationMode };
 }
 
 export async function proposeAllocation(orderId: string, actorId: string, traceId: string) {
@@ -589,6 +639,11 @@ export async function approveAllocation(
       if (!approval) throw httpError(404, "APPROVAL_NOT_FOUND", "Approval was not found.");
       if (approval.status !== "PENDING") throw httpError(409, "APPROVAL_ALREADY_DECIDED", "This approval already has a final decision.");
       if (approval.requestedFromActorId !== actorId) throw httpError(403, "APPROVAL_FORBIDDEN", "This decision belongs to another participant.");
+      // An inter-island commitment has its own gate and its own consequence:
+      // clearing the last approval is what makes it bookable at all.
+      if (approval.subjectType === "INTER_ISLAND_COMMITMENT") {
+        return decideInterIslandApproval(tx, approval, actorId, "APPROVE", reason, decisionReasonColumns(decisionReason));
+      }
       if (approval.subjectType !== "ALLOCATION") {
         return approveRecovery(tx, approval, actorId, reason, decisionReason);
       }
@@ -826,6 +881,12 @@ export async function rejectApproval(approvalId: string, actorId: string, reason
     if (!approval) throw httpError(404, "APPROVAL_NOT_FOUND", "Approval was not found.");
     if (approval.status !== "PENDING") throw httpError(409, "APPROVAL_ALREADY_DECIDED", "This approval already has a final decision.");
     if (approval.requestedFromActorId !== actorId) throw httpError(403, "APPROVAL_FORBIDDEN", "This decision belongs to another participant.");
+    // A rejected inter-island commitment stops there: the commitment is marked
+    // rejected, every other pending approval on it is cancelled, and no sailing
+    // can ever be booked against it.
+    if (approval.subjectType === "INTER_ISLAND_COMMITMENT") {
+      return decideInterIslandApproval(tx, approval, actorId, "REJECT", reason, decisionReasonColumns(decisionReason));
+    }
     const decidedAt = operationNow();
     const updated = await tx.approval.update({ where: { id: approvalId }, data: { status: "REJECTED", decidedBy: actorId, decidedAt, reason, ...decisionReasonColumns(decisionReason) } });
     if (approval.subjectType === "ALLOCATION") {

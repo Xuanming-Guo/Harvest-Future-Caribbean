@@ -20,6 +20,8 @@
  */
 
 import type { SimulationInstant } from '../core/time.js';
+import type { DualCurrencyAmount, MaritimeRoute, ScopedMaritimeNetwork } from './maritime.js';
+import type { ForecastDay, RealisedWeather, WeatherModel } from './weather.js';
 
 /** Mirrors `Provenance` in contracts/common.schema.json. */
 export type Provenance = 'OBSERVED' | 'INFERRED' | 'SYNTHETIC' | 'STAKEHOLDER_CALIBRATED' | 'MODEL_PREDICTED';
@@ -203,6 +205,17 @@ export interface HiddenTruth {
   disruptions: ScheduledDisruption[];
   /** Daily rainfall in mm, keyed by ISO date. Drives road and crop effects. */
   rainfallMmByDate: Map<string, number>;
+  /**
+   * Realised weather for every island-day of the run, and the forecasts issued
+   * against it.
+   *
+   * Realised weather for a day that has not occurred is hidden truth in exactly
+   * the sense a scheduled disruption is: the engine may act on it, and nothing
+   * facing a participant may read it. The forecasts the same object holds are
+   * observable, which is why the model lives here rather than being split in
+   * two — a forecast is only meaningful beside the series it approximates.
+   */
+  weather: WeatherModel;
 }
 
 // --------------------------------------------------------------------------
@@ -263,6 +276,108 @@ export interface Commitment {
   /** Whether a human approval gate was cleared. Baseline never sets this. */
   approvedAt: SimulationInstant | null;
   status: 'PROPOSED' | 'APPROVED' | 'DELIVERED' | 'CANCELLED';
+  /**
+   * Set when the promised supply sits on a different island from the buyer.
+   *
+   * Present as a field rather than inferred from the allocations because the
+   * approval this commitment needs is a different one — `INTER_ISLAND_COMMITMENT`
+   * rather than `ALLOCATION` — and because the route was chosen at proposal
+   * time and must not be re-derived later against a network that may have been
+   * scoped differently.
+   */
+  interIsland?: InterIslandCommitmentDetail;
+}
+
+export interface InterIslandCommitmentDetail {
+  originIslandId: string;
+  destinationIslandId: string;
+  route: MaritimeRoute;
+  /** Approval subject vocabulary shared with `contracts/openapi.yaml`. */
+  approvalSubjectType: 'INTER_ISLAND_COMMITMENT';
+}
+
+/** Where a consignment has got to. Distinct from the mission's own status. */
+export type MaritimeShipmentStatus = 'SCHEDULED' | 'DEPARTED' | 'DELAYED' | 'ARRIVED' | 'DELIVERED' | 'FAILED';
+
+export type MaritimeLegKind = 'PICKUP' | 'SEA' | 'DELIVERY';
+
+/**
+ * One leg of a port-to-port produce mission.
+ *
+ * The two road legs are ordinary local transport. The sea leg is the one that
+ * rests on a public reference, and it is the only one that carries
+ * `journeyHoursSource`, which says whether the operator published that duration
+ * or whether this package substituted its synthetic default.
+ */
+export interface MaritimeLeg {
+  kind: MaritimeLegKind;
+  fromLabel: string;
+  toLabel: string;
+  from: GeoPoint;
+  to: GeoPoint;
+  startsAt: SimulationInstant;
+  endsAt: SimulationInstant;
+  /** Sea legs only. */
+  journeyHoursSource?: 'PUBLIC_TIMETABLE' | 'SYNTHETIC_DEFAULT';
+}
+
+/**
+ * The synthetic border checkpoint at the destination port.
+ *
+ * Not a legal customs model, and `disclaimer` says so on every instance so the
+ * caveat travels with the data rather than living only in a README.
+ */
+export interface CustomsCheckpoint {
+  portId: string;
+  status: 'PENDING' | 'CLEARED' | 'HELD';
+  /** A synthetic paperwork identifier, so the UI has something to show. */
+  documentationReference: string;
+  inspected: boolean;
+  delayHours: number;
+  clearedAt: SimulationInstant | null;
+  feeXcd: number;
+  disclaimer: string;
+  provenance: 'SYNTHETIC';
+}
+
+/** What one cross-island consignment cost, in both currencies. */
+export interface MaritimeShipmentCost {
+  freight: DualCurrencyAmount;
+  customsFee: DualCurrencyAmount;
+  total: DualCurrencyAmount;
+}
+
+/**
+ * A deterministic port-to-port produce mission.
+ *
+ * It always accompanies a `DeliveryMission` whose `mode` is `MARITIME`; the
+ * mission holds the parts every delivery has (vehicle, load, arrival) and this
+ * holds the parts only a sailing has.
+ */
+export interface MaritimeShipment {
+  shipmentId: string;
+  missionId: string;
+  commitmentId: string;
+  demandId: string;
+  originIslandId: string;
+  destinationIslandId: string;
+  route: MaritimeRoute;
+  status: MaritimeShipmentStatus;
+  /** SYNTHETIC allowance per sailing, not an operator figure. */
+  capacityKg: number;
+  loadedKg: number;
+  legs: MaritimeLeg[];
+  customs: CustomsCheckpoint;
+  cost: MaritimeShipmentCost;
+  scheduledDepartureAt: SimulationInstant;
+  scheduledArrivalAt: SimulationInstant;
+  actualDepartureAt: SimulationInstant | null;
+  actualArrivalAt: SimulationInstant | null;
+  deliveredAt: SimulationInstant | null;
+  /** Why a sailing failed, in the words a participant would be told. */
+  failureReason: string | null;
+  /** Hours the realised weather added to the sea leg. */
+  weatherDelayHours: number;
 }
 
 export interface DeliveryMission {
@@ -270,12 +385,25 @@ export interface DeliveryMission {
   commitmentId: string;
   transporterId: string;
   status: 'PLANNED' | 'ACTIVE' | 'DELAYED' | 'COMPLETED' | 'CANCELLED';
+  /** Road-only, or a farm-port-sea-port-buyer chain. */
+  mode: 'ROAD' | 'MARITIME';
   /** Pickup points then the drop-off, in visiting order. */
   path: GeoPoint[];
   plannedDepartureAt: SimulationInstant;
   plannedArrivalAt: SimulationInstant;
   actualArrivalAt: SimulationInstant | null;
   loadedKg: number;
+  /**
+   * Which of the commitment's allocations this vehicle collects.
+   *
+   * Every allocation for a road-only commitment, and only the sea half or only
+   * the road half for a commitment that splits across a sailing. Carried on the
+   * mission rather than recomputed at departure, so the vehicle that leaves is
+   * the vehicle that was planned.
+   */
+  batchIds: string[];
+  /** Set only on a `MARITIME` mission. */
+  shipmentId?: string;
 }
 
 /** A disruption that has become visible. Severity is deliberately absent. */
@@ -297,9 +425,33 @@ export interface ObservedWorld {
   demands: Map<string, BuyerDemand>;
   commitments: Map<string, Commitment>;
   missions: Map<string, DeliveryMission>;
+  /**
+   * Cross-island consignments, keyed by shipment id.
+   *
+   * Always empty for a run whose scope has no published link between two of its
+   * islands, which includes every one-island run.
+   */
+  shipments: Map<string, MaritimeShipment>;
   disruptions: ObservedDisruption[];
   /** Road segments currently known to be impassable or slow. */
   degradedRoadSegmentIds: Set<string>;
+}
+
+/**
+ * Weather as a participant, a policy or an agent may see it.
+ *
+ * `current` and `realisedOn` refuse a date that has not occurred; `forecast` is
+ * the only forward-looking answer any of them gets. Handing out this object
+ * rather than the `WeatherModel` is what keeps the exposure rule in one place
+ * instead of at every call site.
+ */
+export interface ObservableWeatherAccess {
+  /** Today's realised weather for an island, or null if the run has none. */
+  current(islandId: string): RealisedWeather | null;
+  /** Realised weather for a date that has already occurred, else null. */
+  realisedOn(islandId: string, date: string): RealisedWeather | null;
+  /** The forecast issued today, covering the days ahead. Never the truth. */
+  forecast(islandId: string): ForecastDay[];
 }
 
 // --------------------------------------------------------------------------
@@ -313,6 +465,15 @@ export interface World {
   roads: Map<string, RoadSegment>;
   referencePlaces: ReferencePlace[];
   referenceDataSources: ReferenceDataSource[];
+  /**
+   * Ports, published links and exchange rates, already restricted to this
+   * run's island scope.
+   *
+   * Static furniture rather than observed state: it is public reference data
+   * that does not change during a run, and scoping it once here is what stops
+   * any later code from reaching a port outside the scope.
+   */
+  maritime: ScopedMaritimeNetwork;
   truth: HiddenTruth;
   observed: ObservedWorld;
 }

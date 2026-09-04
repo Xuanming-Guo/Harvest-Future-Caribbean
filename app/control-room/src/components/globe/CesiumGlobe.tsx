@@ -24,6 +24,9 @@ import { missionPositionAt } from "@harvest/simulation";
 import { flyToRegion } from "./camera";
 import { syncFrame, syncScene, type CesiumModule } from "./entities";
 import { createTerrariumTerrainProvider } from "./terrain";
+import { isWeatherEntityId, prefersLowerDetail, syncWeatherLayer } from "./weather";
+import { buildWeatherOverlay } from "@/lib/weather-overlay";
+import { prefersReducedMotion } from "@/lib/playback";
 
 declare global {
   interface Window {
@@ -39,6 +42,8 @@ export interface CesiumGlobeProps {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   focusRegion: string | null;
+  /** Whether the weather overlay draws. False hides its entities and nothing else. */
+  showWeather?: boolean;
 }
 
 function overviewPoint(scene: ControlRoomScene): GeoPoint {
@@ -206,6 +211,49 @@ function applyPhotorealisticScene(Cesium: CesiumModule, viewer: Viewer): void {
 const TILE_WAIT_TIMEOUT_MS = 12_000;
 
 /**
+ * How deep a click drills before giving up.
+ *
+ * A drilled pick is a full pick render per layer, and this is only reached
+ * when the topmost thing under the cursor is a weather entity. Four covers a
+ * disc, a storm ring, a wind arrow and the marker beneath them; a demo machine
+ * on a software renderer crashed its GPU process at eight, which is exactly
+ * the hardware this has to degrade gracefully on.
+ */
+const DRILL_PICK_LIMIT = 4;
+
+/** The entity a click selected, or null. Weather is drilled through, never selected. */
+function pickSelectableEntity(
+  Cesium: CesiumModule,
+  viewer: Viewer,
+  position: Cartesian2,
+): string | null {
+  // `pick` first, because it is one pick render and it is the answer for every
+  // click that does not land on the overlay. `picked.id` is the Cesium.Entity
+  // for anything built in entities.ts (each given its matching domain id), and
+  // undefined for empty space or unpickable primitives such as the imagery.
+  const top = viewer.scene.pick(position)?.id;
+  if (top instanceof Cesium.Entity && !isWeatherEntityId(top.id)) return String(top.id);
+  if (!(top instanceof Cesium.Entity)) return null;
+
+  // The overlay covers the whole island, so a plain pick would return a cloud
+  // disc for every click over it and make the farms, buyers, vehicles, routes
+  // and disruption markers underneath unselectable. Entity graphics have no
+  // `allowPicking` flag, so the layer marks its own entities with the
+  // `weather::` id prefix and only those clicks pay for a drilled pick.
+  try {
+    const drilled = viewer.scene.drillPick(position, DRILL_PICK_LIMIT) as Array<{ id?: unknown }>;
+    const selected = drilled
+      .map((candidate) => candidate?.id)
+      .find((entity) => entity instanceof Cesium.Entity && !isWeatherEntityId(entity.id));
+    return selected instanceof Cesium.Entity ? String(selected.id) : null;
+  } catch {
+    // A drilled pick is the expensive path; if the renderer refuses it, treat
+    // the click as landing on the overlay rather than taking the viewer down.
+    return null;
+  }
+}
+
+/**
  * Resolves once the globe has no outstanding tiles, or the timeout expires.
  *
  * The timeout is not optional. If the tile service is unreachable the queue
@@ -278,7 +326,7 @@ function resolveFocusPoint(
 }
 
 export default function CesiumGlobe(props: CesiumGlobeProps): React.JSX.Element {
-  const { scene, frame, atMs, selectedId, onSelect, focusRegion } = props;
+  const { scene, frame, atMs, selectedId, onSelect, focusRegion, showWeather = true } = props;
   const sceneRef = useRef(scene);
   sceneRef.current = scene;
 
@@ -362,13 +410,7 @@ export default function CesiumGlobe(props: CesiumGlobeProps): React.JSX.Element 
       handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
       handler.setInputAction((movement: { position: Cartesian2 }) => {
         if (viewer.isDestroyed()) return;
-        const picked = viewer.scene.pick(movement.position);
-        // `picked.id` is the Cesium.Entity for anything built in entities.ts
-        // (every one of which is given the matching domain id), and
-        // `undefined` for empty space or unpickable primitives such as the
-        // OSM imagery itself.
-        const entity = picked?.id;
-        onSelectRef.current(entity instanceof Cesium.Entity ? String(entity.id) : null);
+        onSelectRef.current(pickSelectableEntity(Cesium, viewer, movement.position));
       }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
       // Open on the island rather than Cesium's default whole-earth view, so
@@ -422,6 +464,29 @@ export default function CesiumGlobe(props: CesiumGlobeProps): React.JSX.Element 
     if (!ready || !viewer || !Cesium || viewer.isDestroyed()) return;
     syncFrame(Cesium, viewer, scene, frame, atMs, selectedId);
   }, [ready, scene, frame, atMs, selectedId]);
+
+  // Whether the overlay animates at all. Settled once, on mount, because both
+  // inputs are properties of the machine rather than of the run: an OS-level
+  // reduced-motion preference, and hardware that should not be asked to animate
+  // sixty entity writes a second on top of Cesium's own loop.
+  const [animateWeather, setAnimateWeather] = useState(false);
+  useEffect(() => {
+    setAnimateWeather(!prefersReducedMotion() && !prefersLowerDetail());
+  }, []);
+
+  // The weather layer. Reads the frame the transport already selected — play,
+  // pause, rewind, reset, speed and scrub all arrive here as a new `frame` and
+  // `atMs` — and never fetches anything. Turning it off hides its entities
+  // without touching the replay or any other layer.
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    const Cesium = cesiumRef.current;
+    if (!ready || !viewer || !Cesium || viewer.isDestroyed()) return;
+    const descriptors = showWeather
+      ? buildWeatherOverlay(scene, frame, { atMs, animated: animateWeather })
+      : [];
+    syncWeatherLayer(Cesium, viewer, descriptors, showWeather);
+  }, [ready, scene, frame, atMs, showWeather, animateWeather]);
 
   // The camera flight: only fires when `focusRegion` actually changes value,
   // not on every frame tick that happens to re-run this effect.

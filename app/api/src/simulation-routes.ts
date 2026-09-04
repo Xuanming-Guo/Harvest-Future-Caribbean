@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   ActorRole,
+  EstimationMode,
   Prisma,
   type PairedRun,
   type SimulationRun,
@@ -27,7 +28,7 @@ import { prisma } from "./db.js";
 import { eventDto } from "./events.js";
 import { assertObjectBody, httpError, idempotent } from "./http.js";
 import { buildOperationsSnapshot } from "./operations-snapshot.js";
-import { runConnectedHarvest } from "./simulation-agents.js";
+import { ModelUnavailableError, runConnectedHarvest } from "./simulation-agents.js";
 
 type JsonObject = Record<string, unknown>;
 type RunScope =
@@ -88,6 +89,20 @@ function readSeed(value: unknown) {
 function readDecisionMode(value: unknown): "DETERMINISTIC" | "LLM_ASSISTED" {
   if (value !== "DETERMINISTIC" && value !== "LLM_ASSISTED") {
     throw httpError(422, "INVALID_DECISION_MODE", "decisionMode must be DETERMINISTIC or LLM_ASSISTED.");
+  }
+  return value;
+}
+
+/**
+ * The estimation method is a per-run input, so an omitted field is not an
+ * error: it selects the labelled deterministic fallback. The contract states
+ * that default in prose rather than as a schema `default`, because generated
+ * TypeScript would otherwise make the field required on every request.
+ */
+function readEstimationMode(value: unknown): EstimationMode {
+  if (value === undefined) return EstimationMode.DETERMINISTIC_FALLBACK;
+  if (value !== "LEARNED_MODEL" && value !== "DETERMINISTIC_FALLBACK") {
+    throw httpError(422, "INVALID_ESTIMATION_MODE", "estimationMode must be LEARNED_MODEL or DETERMINISTIC_FALLBACK.");
   }
   return value;
 }
@@ -199,6 +214,7 @@ function simulationRunDto(row: SimulationRun) {
     seed: Number(row.seed),
     decisionMode: row.decisionMode,
     decisionAdapter: row.decisionAdapter,
+    estimationMode: row.estimationMode,
     scope: row.scope,
     resolvedIslandIds: row.resolvedIslandIds,
     disruptions: row.disruptions,
@@ -243,6 +259,7 @@ interface SavedRunInput {
   policy: PolicyName;
   seed: number;
   decisionMode: "DETERMINISTIC" | "LLM_ASSISTED";
+  estimationMode: EstimationMode;
   scope: RunScope;
   resolvedIslandIds: string[];
   disruptions: InjectedDisruption[];
@@ -270,6 +287,7 @@ async function executeAndSaveRun(server: FastifyInstance, input: SavedRunInput) 
       policy: input.policy,
       seed: BigInt(input.seed),
       decisionMode: input.decisionMode,
+      estimationMode: input.estimationMode,
       scope: json(input.scope),
       resolvedIslandIds: json(input.resolvedIslandIds),
       disruptions: json(input.disruptions),
@@ -286,7 +304,7 @@ async function executeAndSaveRun(server: FastifyInstance, input: SavedRunInput) 
           islandIds: input.resolvedIslandIds,
           seed: input.seed,
           disruptions: input.disruptions,
-        }, input.decisionMode)
+        }, input.decisionMode, input.estimationMode)
       : (() => {
           const result = runScenario({
             runId: input.runId,
@@ -355,6 +373,16 @@ async function executeAndSaveRun(server: FastifyInstance, input: SavedRunInput) 
     if (input.policy === "BASELINE") await saveActorMappings(input.runId, timeline.scene);
     return completed;
   } catch (error) {
+    // A selected learned model that is unreachable or rejects must fail the
+    // run outright. Completing it with fixture numbers would produce a run
+    // labelled LEARNED_MODEL whose forecasts were nothing of the kind.
+    if (error instanceof ModelUnavailableError) {
+      await prisma.simulationRun.update({
+        where: { id: input.runId },
+        data: { status: "FAILED", errorCode: "MODEL_UNAVAILABLE", errorMessage: error.message },
+      });
+      throw httpError(502, "MODEL_UNAVAILABLE", `Run ${input.runId} selected the learned harvest-estimation model, but ${error.message}`);
+    }
     const detail = error instanceof Error ? error.message : "Simulation execution failed.";
     await prisma.simulationRun.update({
       where: { id: input.runId },
@@ -506,14 +534,14 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
     return idempotent(request, reply, 201, async () => {
       const body = assertObjectBody(
         request.body,
-        ["scenarioId", "policy", "seed", "decisionMode", "scope", "disruptions", "derivedFromRunId"],
+        ["scenarioId", "policy", "seed", "decisionMode", "estimationMode", "scope", "disruptions", "derivedFromRunId"],
       );
 
       if (body.derivedFromRunId !== undefined) {
         const allowed = new Set(["derivedFromRunId", "disruptions"]);
         const incompatible = Object.keys(body).filter((key) => !allowed.has(key));
         if (incompatible.length) {
-          throw httpError(400, "VALIDATION_FAILED", "A derived run inherits scenario, policy, seed, decision mode, and scope from its source run.");
+          throw httpError(400, "VALIDATION_FAILED", "A derived run inherits scenario, policy, seed, decision mode, estimation mode, and scope from its source run.");
         }
         const sourceId = asString(body.derivedFromRunId, "derivedFromRunId");
         const source = await prisma.simulationRun.findUnique({ where: { id: sourceId } });
@@ -532,6 +560,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
           policy: readPolicy(source.policy),
           seed: Number(source.seed),
           decisionMode: source.decisionMode,
+          estimationMode: source.estimationMode,
           scope: source.scope as unknown as RunScope,
           resolvedIslandIds: source.resolvedIslandIds as unknown as string[],
           disruptions,
@@ -555,6 +584,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
         policy: readPolicy(body.policy),
         seed: readSeed(body.seed),
         decisionMode,
+        estimationMode: readEstimationMode(body.estimationMode),
         scope,
         resolvedIslandIds,
         disruptions: readDisruptions(body.disruptions, scenario.durationDays),
@@ -613,6 +643,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
     }
     return {
       runId: row.id,
+      estimationMode: row.estimationMode,
       evidenceLabel: row.evidenceLabel,
       provenanceNote: row.provenanceNote,
       scene: normalizeReplayScene(row.scene),
@@ -637,7 +668,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
     if (frameIndex >= frames.length) {
       throw httpError(422, "INVALID_FRAME_INDEX", `frameIndex must be between 0 and ${Math.max(0, frames.length - 1)}.`);
     }
-    return { runId: row.id, frameIndex, frameCount: frames.length, frame: frames[frameIndex] };
+    return { runId: row.id, estimationMode: row.estimationMode, frameIndex, frameCount: frames.length, frame: frames[frameIndex] };
   });
 
   server.post("/v1/paired-runs", async (request, reply) => {
@@ -679,6 +710,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
           policy: "BASELINE",
           seed,
           decisionMode,
+          estimationMode: EstimationMode.DETERMINISTIC_FALLBACK,
           scope,
           resolvedIslandIds,
           disruptions,
@@ -690,6 +722,7 @@ export async function registerSimulationRoutes(server: FastifyInstance) {
           policy: "HARVEST",
           seed,
           decisionMode,
+          estimationMode: EstimationMode.DETERMINISTIC_FALLBACK,
           scope,
           resolvedIslandIds,
           disruptions,
