@@ -31,7 +31,7 @@ import type {
   RecoveryProposal,
 } from './types.js';
 import type { BuyerDemand, Commitment, ObservedCropBatch, ObservedDisruption } from '../world/types.js';
-import { DAY_MS } from '../core/time.js';
+import { DAY_MS, formatDate } from '../core/time.js';
 import { STALE_OBSERVATION_MS } from './baseline.js';
 
 /**
@@ -92,6 +92,7 @@ export const harvestPolicy: CoordinationPolicy = {
     collectOnReadiness: true,
     maxHoldMs: MAX_READY_HOLD_MS,
     rematchOnNewSupply: true,
+    readsForecast: true,
   },
 
   estimateAvailableKg(context: PolicyContext, batch: ObservedCropBatch): number {
@@ -154,6 +155,18 @@ export const harvestPolicy: CoordinationPolicy = {
     const staleBy = (batch: ObservedCropBatch, horizonMs: number): boolean =>
       batch.lastObservedAt === null || context.now - batch.lastObservedAt > horizonMs;
 
+    // Heavy rain that has *already fallen* invalidates evidence written before
+    // it. A report from the morning before a 40 mm night describes a field that
+    // no longer exists, however fresh the timestamp looks, so the staleness
+    // clock is not the right test on a day like that.
+    //
+    // This reads realised weather, not a forecast, and only for days that have
+    // occurred — the accessor refuses anything else. Nothing here changes what
+    // the crop does; it changes only who gets asked to go and look.
+    const soakedSince = heavyRainSince(context, buyer.islandId);
+    const reportPredatesRain = (batch: ObservedCropBatch): boolean =>
+      soakedSince !== null && (batch.lastObservedAt === null || batch.lastObservedAt < soakedSince);
+
     const worthChecking = [...context.observed.batches.values()]
       .filter((batch) => batch.crop === demand.crop)
       .filter((batch) => context.farms.get(batch.farmId)?.islandId === buyer.islandId)
@@ -161,10 +174,24 @@ export const harvestPolicy: CoordinationPolicy = {
       .filter((batch) => batch.expectedReadyFrom <= demand.neededBy)
       .filter((batch) =>
         batch.lastReportedStage === 'READY'
-          ? staleBy(batch, STALE_OBSERVATION_MS)
-          : promised0 < wanted && staleBy(batch, STALE_OBSERVATION_MS / 2),
+          ? staleBy(batch, STALE_OBSERVATION_MS) || reportPredatesRain(batch)
+          : (promised0 < wanted && staleBy(batch, STALE_OBSERVATION_MS / 2)) || reportPredatesRain(batch),
       )
       .sort((a, b) => a.batchId.localeCompare(b.batchId));
+
+    if (soakedSince !== null && worthChecking.length > 0) {
+      context.record({
+        kind: 'HARVEST_RECHECK_AFTER_RAIN',
+        summary: `Heavy rain has fallen since these reports were written, so ${worthChecking.length} grower(s) were asked to look again.`,
+        evidence: {
+          demandId: demand.demandId,
+          islandId: buyer.islandId,
+          batchesAsked: worthChecking.length,
+          rainThresholdMm: RECHECK_AFTER_RAIN_MM,
+          source: 'REALISED_WEATHER',
+        },
+      });
+    }
 
     for (const batch of worthChecking) context.requestObservation(batch.batchId);
 
@@ -306,6 +333,38 @@ export const harvestPolicy: CoordinationPolicy = {
     };
   },
 };
+
+/**
+ * Realised rain, in mm, past which a report written before it is not evidence.
+ *
+ * A judgement call rather than an agronomic figure: enough rain to knock fruit
+ * about and flood a row, not so much that only a named storm qualifies.
+ */
+export const RECHECK_AFTER_RAIN_MM = 25;
+
+/** How many days back the policy looks for a soaking. Reports older than this are stale anyway. */
+const RAIN_LOOKBACK_DAYS = 2;
+
+/**
+ * The most recent instant at or before now when heavy rain fell on an island.
+ *
+ * Returns null if none has. Only days that have already occurred are consulted;
+ * `context.weather.realisedOn` returns null for anything later, so this cannot
+ * become a back door to tomorrow.
+ */
+function heavyRainSince(context: PolicyContext, islandId: string): number | null {
+  let soakedSince: number | null = null;
+  for (let daysAgo = 0; daysAgo <= RAIN_LOOKBACK_DAYS; daysAgo += 1) {
+    const at = context.now - daysAgo * DAY_MS;
+    const reading = context.weather.realisedOn(islandId, formatDate(at));
+    if (reading && reading.rainMm >= RECHECK_AFTER_RAIN_MM) {
+      // The report has to predate the *start* of that day to be invalidated by it.
+      const dayStart = Math.floor(at / DAY_MS) * DAY_MS;
+      soakedSince = soakedSince === null ? dayStart : Math.max(soakedSince, dayStart);
+    }
+  }
+  return soakedSince;
+}
 
 /** How far ahead the Harvest policy is willing to plan a pickup. */
 export const PLANNING_HORIZON_MS = 3 * DAY_MS;

@@ -721,6 +721,42 @@ scope, not only the role name.
   Snapshot and SSE use the same run boundary and never combine real records or
   records from two runs.
 
+#### `GET /v1/weather`
+
+- Callers: every product role, human or simulated. Deliberately unfiltered by
+  role: the point of issue #37 is that a farmer, a coordinator, a transporter
+  and any simulated actor plan from the *same* conditions and the same
+  forecast, so a role-narrowed answer would defeat the feature. The payload
+  carries no operational state, so there is nothing to filter.
+- Request: optional `islandId` (defaults to `saint-lucia`), optional `asOf`
+  calendar date, optional `simulationRunId`.
+- Response: `current`, the realised reading for a day that has already
+  occurred, labelled `SYNTHETIC`; and `forecast`, up to five days ahead,
+  labelled `MODEL_PREDICTED`. Each forecast day carries `leadDays` and a
+  `confidence` that decays with lead time.
+- **Realised weather for a day that has not occurred is never written**, so no
+  query against this endpoint can return it. `asOf` past the last recorded day
+  returns that day rather than an error or an invented one, which keeps a
+  client asking for "today" working inside a completed replay without giving it
+  a way to probe the horizon. An `asOf` before the run returns the newest
+  recorded day at or before it, with the forecast that day issued.
+- The forecast is deliberately imperfect: a noised model of the realised series
+  whose error grows with the square root of lead time. It misses storms and
+  predicts storms that never arrive, and the simulation tests assert both.
+  Nothing in it changes crop biology; it changes only what a participant or a
+  policy decides to do.
+- Product state/event: none. This is a read.
+- Simulation effect: none. The connected simulation *writes* here as each day
+  occurs, from the same frame the replay saves, so the website and a simulated
+  participant read one series rather than two that agree until they do not.
+- Consumers: farmer workspace weather panel, coordinator island table, the
+  `read_weather` agent tool, and the control-room masthead.
+- Rules/failures: a run-scoped actor is forced to its own run and gets `403`
+  `RUN_SCOPE_FORBIDDEN` for another; only operations/admin may name a run. A
+  malformed `asOf` returns `422` `INVALID_WEATHER_DATE`. An island with no
+  recorded day returns an empty forecast and no `current` rather than inventing
+  weather. No live weather service is contacted, by demo and test requirement.
+
 #### `GET /v1/events/stream`
 
 - Callers: authenticated website clients; run-scoped simulation and 3D

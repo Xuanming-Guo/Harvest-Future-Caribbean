@@ -21,6 +21,7 @@ import { DAY_MS, HOUR_MS, formatDate } from '../core/time.js';
 import type { Scenario, ScenarioContext } from './types.js';
 import { caribbeanIslandScenarios, caribbeanIslandsV1 } from './caribbean-islands-v1.js';
 import { referencePlacesByCategory, referencePlacesForIslands, referenceSourcesForPlaces } from './reference-places.js';
+import { WeatherModel } from '../world/weather.js';
 import type {
   Buyer,
   Farm,
@@ -336,6 +337,20 @@ export const saintLuciaDemoV1: Scenario = {
 
     disruptions.sort((a, b) => a.startsAt - b.startsAt);
 
+    // Realised weather is built *on top of* the rainfall drawn above rather
+    // than instead of it. `rainfallMm` reads the values back unchanged, so
+    // every rainfall figure a previously recorded seed produced still holds;
+    // only wind, bearing and temperature are new, and they come from streams of
+    // their own so they cannot shift a single existing draw.
+    const weather = new WeatherModel({
+      islandIds: ['saint-lucia'],
+      startsAt,
+      days: DURATION_DAYS + 1,
+      rainfallMm: (_islandId, date) => rainfallMmByDate.get(date) ?? 0,
+      realisedStream: random.stream('scenario:weather:realised'),
+      forecastStream: random.stream('weather:forecast'),
+    });
+
     return {
       farms,
       buyers,
@@ -343,7 +358,7 @@ export const saintLuciaDemoV1: Scenario = {
       roads,
       referencePlaces,
       referenceDataSources,
-      truth: { crops, disruptions, rainfallMmByDate },
+      truth: { crops, disruptions, rainfallMmByDate, weather },
       observed: {
         batches,
         demands: new Map(),

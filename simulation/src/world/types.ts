@@ -20,6 +20,7 @@
  */
 
 import type { SimulationInstant } from '../core/time.js';
+import type { ForecastDay, RealisedWeather, WeatherModel } from './weather.js';
 
 /** Mirrors `Provenance` in contracts/common.schema.json. */
 export type Provenance = 'OBSERVED' | 'INFERRED' | 'SYNTHETIC' | 'STAKEHOLDER_CALIBRATED' | 'MODEL_PREDICTED';
@@ -203,6 +204,17 @@ export interface HiddenTruth {
   disruptions: ScheduledDisruption[];
   /** Daily rainfall in mm, keyed by ISO date. Drives road and crop effects. */
   rainfallMmByDate: Map<string, number>;
+  /**
+   * Realised weather for every island-day of the run, and the forecasts issued
+   * against it.
+   *
+   * Realised weather for a day that has not occurred is hidden truth in exactly
+   * the sense a scheduled disruption is: the engine may act on it, and nothing
+   * facing a participant may read it. The forecasts the same object holds are
+   * observable, which is why the model lives here rather than being split in
+   * two — a forecast is only meaningful beside the series it approximates.
+   */
+  weather: WeatherModel;
 }
 
 // --------------------------------------------------------------------------
@@ -300,6 +312,23 @@ export interface ObservedWorld {
   disruptions: ObservedDisruption[];
   /** Road segments currently known to be impassable or slow. */
   degradedRoadSegmentIds: Set<string>;
+}
+
+/**
+ * Weather as a participant, a policy or an agent may see it.
+ *
+ * `current` and `realisedOn` refuse a date that has not occurred; `forecast` is
+ * the only forward-looking answer any of them gets. Handing out this object
+ * rather than the `WeatherModel` is what keeps the exposure rule in one place
+ * instead of at every call site.
+ */
+export interface ObservableWeatherAccess {
+  /** Today's realised weather for an island, or null if the run has none. */
+  current(islandId: string): RealisedWeather | null;
+  /** Realised weather for a date that has already occurred, else null. */
+  realisedOn(islandId: string, date: string): RealisedWeather | null;
+  /** The forecast issued today, covering the days ahead. Never the truth. */
+  forecast(islandId: string): ForecastDay[];
 }
 
 // --------------------------------------------------------------------------

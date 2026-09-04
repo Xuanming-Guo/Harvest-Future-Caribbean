@@ -10,7 +10,9 @@
  * right next to the claim.
  */
 
-import type { ControlRoomScene } from "@harvest/simulation";
+import type { ControlRoomFrame, ControlRoomScene } from "@harvest/simulation";
+
+import { weatherHeadline } from "@/lib/run";
 
 import type { EstimationMode } from "@/lib/run";
 
@@ -41,6 +43,11 @@ export default function Masthead({ scene, estimationMode, estimationModeUsed = t
 
       <span className="pill">{scene.policy.toLowerCase()}</span>
       <span className="pill">seed {scene.seed}</span>
+      {weather && (
+        <span className="pill" title="Synthetic realised weather; forecasts are model predictions and can be wrong.">
+          {weather}
+        </span>
+      )}
 
       {/*
        * The estimation method belongs beside the run's other immutable inputs.

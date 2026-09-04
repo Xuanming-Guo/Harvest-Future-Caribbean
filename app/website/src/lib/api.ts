@@ -233,6 +233,15 @@ export const api = {
       body: reference ? { reference } : {},
     }));
   },
+  /**
+   * Conditions and the shared forecast for one island.
+   *
+   * The same answer every role gets, human or simulated. Omitting `islandId`
+   * asks the API for the caller's own island rather than guessing one here.
+   */
+  async weather(islandId?: string, asOf?: string) {
+    return unwrap(await client.GET("/v1/weather", { params: { query: { islandId, asOf } } }));
+  },
   async agentTrace(traceId: string) {
     return unwrap(await client.GET("/v1/agent-traces/{traceId}", { params: { path: { traceId } } }));
   },
