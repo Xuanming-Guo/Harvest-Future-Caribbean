@@ -8,6 +8,7 @@ import { FormEvent, useState } from "react";
 
 import { ApprovalList } from "@/components/approval-list";
 import { DecisionReasonFields, ReasonChooser, decisionReasonLabel } from "@/components/decision-reason";
+import { DeliveryJourney } from "@/components/delivery-world";
 import { OfflineHint, useOnlineStatus } from "@/components/offline";
 import { useSession } from "@/components/providers";
 import { Badge, Card, ErrorState, LoadingState, PageHeader, SectionTitle } from "@/components/ui";
@@ -44,6 +45,12 @@ export default function OrderDetailPage() {
     refetchInterval: 15_000,
   });
   const mission = order.data?.deliveryMission;
+  const missionUpdates = useQuery({
+    queryKey: ["mission-updates", mission?.missionId],
+    queryFn: () => api.missionUpdates(mission!.missionId),
+    enabled: Boolean(mission),
+    refetchInterval: 5_000,
+  });
   const allocationLines = order.data?.allocation?.lines ?? [];
   const resolvedLines = allocationLines.map((line) => ({ cropBatchId: line.cropBatchId, quantity: line.quantity.value, ...(lineValues[line.cropBatchId] ?? { accepted: line.quantity.value, rejected: 0 }) }));
   const accepted = resolvedLines.reduce((sum, line) => sum + line.accepted, 0);
@@ -88,6 +95,12 @@ export default function OrderDetailPage() {
     <>
       <Link className="back-link" href="/orders"><ArrowLeft size={16} />Back to orders</Link>
       <PageHeader eyebrow="Order" title={`${order.data.requestedQuantity.value} kg ${titleCase(order.data.cropType)}`} description={`Needed by ${formatDate(order.data.neededBy)}`} actions={<Badge tone={order.data.atRisk ? "high" : undefined}>{order.data.lifecycleStatus}</Badge>} />
+      {mission && (
+        <div className="delivery-readonly-section delivery-readonly-primary">
+          <DeliveryJourney mission={mission} updates={missionUpdates.data?.items} compact />
+          {missionUpdates.error && <p className="form-error">Live delivery updates are unavailable. The order-linked route is still shown.</p>}
+        </div>
+      )}
       <Card>
         <SectionTitle title="Order progress" detail={order.data.atRisk ? "Needs attention" : "On track"} />
         {partialCommitment && (

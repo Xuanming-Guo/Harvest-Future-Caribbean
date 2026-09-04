@@ -407,12 +407,14 @@ scope, not only the role name.
   record, deadline, lifecycle status, optional `cropStandardId`, `atRisk`,
   active exception IDs, timestamps, safe allocation, approval totals and the
   caller's approval,
-  trace ID, related delivery mission, immutable delivery acceptance when
+  trace ID, related enriched delivery mission, immutable delivery acceptance when
   recorded (including its `reasonCode`/`nextAction` and any per-line reasons, so
   the affected farmer reads the same explanation the buyer recorded), and
   `outcomeCause`/`outcomeNote` (the latest recorded reason the
   order is not fulfilled: `NO_READY_SUPPLY`, `INSUFFICIENT_SUPPLY`,
   `SUPPLY_CHANGED`, `APPROVAL_REJECTED`, `DELIVERY_REJECTED`, `CANCELLED`).
+  The mission view includes role-safe route labels and only the crop batches
+  allocated to this order.
   Private farm coordinates are not exposed here.
 - `payment` is present once an approved commitment prices the order and absent
   before then, because nothing is owed until supply is reserved. It carries
@@ -510,9 +512,10 @@ scope, not only the role name.
 - Callers: transporter (available/owned jobs) and actors participating in the
   related order; coordinators remain limited to relevant orders.
 - Request: optional status, cursor, limit.
-- Response: visible mission page with route stops, quantity, deadline,
-  assignment/status, pickup batch quantities, estimated distance/duration/
-  arrival, and `pageInfo`.
+- Response: visible mission page with route stops, safe farm/buyer labels,
+  order crop and risk, allocated cargo, quantity, deadline, assignment/status,
+  estimated distance/duration/arrival, and `pageInfo`. Crop status is withheld
+  from an available job until that transporter accepts it.
 - Product state/event: none.
 - Simulation effect: none until a simulated transporter takes its scheduled
   browse/accept action.
@@ -525,7 +528,9 @@ scope, not only the role name.
   related order.
 - Request: mission UUID.
 - Response: mission/order IDs, status, assignment, vehicle, quantity, deadline,
-  and ordered stops.
+  ordered labelled stops, order crop/risk, buyer name, and allocated cargo.
+  Buyers see crop status only for batches committed to their own order;
+  transporters see it only after assignment.
 - Product state/event: none.
 - Simulation effect: none.
 - Consumers: transporter job detail and participant delivery tracking.
@@ -866,6 +871,17 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
 - Response: current identity, role, synthetic flag, optional run scope/location,
   run status and `readOnly` flag.
 - Consumers: website session bootstrap and replay banner/routing.
+
+#### `GET /v1/world-map`
+
+- Callers: every authenticated Product API role.
+- Response: role-filtered farm and hotel locations with safe crop summaries or
+  actionable open demand where the caller is allowed to see it.
+- Product state/simulation effect: none; this is a read-only projection.
+- Consumers: the website island world and its farm/hotel zoom views.
+- Rules/failures: exact private coordinates, unrelated crop progress and private
+  orders are omitted. Website marker placement is deterministic but explicitly
+  illustrative; new accessible farms and hotels appear without UI changes.
 
 #### `POST /v1/paired-runs`
 
