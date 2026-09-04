@@ -35,6 +35,16 @@ enum SimulationDecisionMode {
   LLM_ASSISTED
 }
 
+/**
+ * Which harvest-estimation method a run (and each forecast it produced) used.
+ * DETERMINISTIC_FALLBACK is the rule-based fixture and must stay visibly
+ * distinct from learned-model output.
+ */
+enum EstimationMode {
+  LEARNED_MODEL
+  DETERMINISTIC_FALLBACK
+}
+
 enum PairedRunStatus {
   CREATING
   COMPLETED
@@ -48,6 +58,7 @@ model SimulationRun {
   seed              BigInt
   decisionMode      SimulationDecisionMode @map("decision_mode")
   decisionAdapter   String                 @default("deterministic") @map("decision_adapter")
+  estimationMode    EstimationMode         @default(DETERMINISTIC_FALLBACK) @map("estimation_mode")
   scope             Json
   resolvedIslandIds Json                    @map("resolved_island_ids")
   disruptions       Json
@@ -256,6 +267,7 @@ model YieldPrediction {
   requestId      String     @map("request_id") @db.Uuid
   cropBatchId    String     @map("crop_batch_id") @db.Uuid
   modelVersion   String     @map("model_version")
+  estimationMode EstimationMode @default(DETERMINISTIC_FALLBACK) @map("estimation_mode")
   q10            Float
   q50            Float
   q90            Float

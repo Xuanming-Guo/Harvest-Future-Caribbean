@@ -32,7 +32,8 @@ and handles play, pause, speed, rewind, scrub and reset locally:
 - source and licence attribution remains visible whenever reference places are
   present;
 - injecting a disruption creates a new derived run and preserves the source;
-- Harvest agent actions and adapter provenance appear in purple in the feed;
+- Harvest agent actions and adapter provenance appear in purple in the feed,
+  and a forecast-producing action also names the estimation method that ran;
 - selecting a purple action opens its role, tool, status, approval class and
   safe trace/event references in the Inspector, and offers **Preview in
   Harvest**;
@@ -70,6 +71,31 @@ The issue #29 backend can be tested independently using
 Harvest runs contain run-scoped participant actors, crops, marketplace work,
 orders, approvals, missions, events and safe traces. Baseline runs remain
 engine-only and deliberately do not create those Product API records.
+
+## Harvest estimation method
+
+The setup toolbar carries a **Harvest estimation** segmented control with two
+alternatives, saved with the run rather than set on the server:
+
+- **Harvest estimation model** calls the FastAPI quantile service. If that
+  service is unreachable or rejects the request, the run fails with
+  `MODEL_UNAVAILABLE` and writes no forecasts. It never quietly falls back,
+  because a run labelled as learned-model output has to be exactly that.
+- **Deterministic fallback** uses the rule-based fixture, so crop, safe-supply,
+  listing and marketplace workflows all keep working without the model service.
+  Every forecast it produces is labelled in the API payload, the saved trace,
+  the agent-action provenance and the participant crop page, so it cannot be
+  read as a learned prediction.
+
+Two alternatives that stay visible beat a collapsed menu here, because the
+choice changes what the run actually does. The control is disabled while
+**Baseline** is selected: baseline participants never call the Product API or
+a forecast model, so the run records the choice and ignores it. The masthead
+badge names the loaded run's method, and marks it `(unused)` on a Baseline run,
+so a screenshot cannot separate a fallback run from a learned one.
+
+Participants cannot change the method. The website's crop page shows an
+**Estimated by** line naming the method and model version, and nothing else.
 
 ## Preview in Harvest
 

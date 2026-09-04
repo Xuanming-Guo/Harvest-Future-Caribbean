@@ -242,21 +242,26 @@ scope, not only the role name.
 - Request: `reason` = `NEW_OBSERVATION`, `MANUAL_REFRESH`, or
   `SCHEDULED_REFRESH`.
 - Response: forecast request ID, batch ID, queue status, request time.
-- Product state/event: store an idempotent job and invoke the internal model.
-  When its result validates, store a prediction snapshot, calculate ATP, and
-  emit `FORECAST_PRODUCED`.
+- Product state/event: store an idempotent job and invoke the harvest-
+  estimation method that applies to the batch. When its result validates,
+  store a prediction snapshot, calculate ATP, and emit `FORECAST_PRODUCED`.
 - Simulation effect: the request itself changes no world state; the produced
   forecast is retained for predicted-versus-actual evaluation.
 - Consumers: farmer forecast, crop map, Model Lab, operations feed.
 - Rules/failures: concurrent equivalent jobs return their existing receipt;
   reject missing evidence, inaccessible batches, and invalid job transitions.
+  A batch whose run selected `LEARNED_MODEL` returns `502 MODEL_UNAVAILABLE`
+  when that service is unreachable or rejects the request; the deterministic
+  fallback is never substituted silently.
 
 #### `GET /v1/yield-predictions/{predictionId}`
 
 - Callers: actors authorised for the related crop batch and operations roles.
 - Response: the Product API's validated prediction, allow-listed feature
-  snapshot, version, interval, confidence, warnings, provenance, and optional
-  accepted-outcome evaluation.
+  snapshot, `estimationMode`, `modelVersion`, interval, confidence, warnings,
+  provenance, and optional accepted-outcome evaluation. `provenance` is
+  `MODEL_PREDICTED` for both methods, so `estimationMode` is what separates a
+  labelled deterministic-fallback estimate from learned-model output.
 - Product state/event and simulation effect: none.
 - Consumers: technical evidence and crop evidence panels. The website never calls the
   internal model endpoint directly and never receive model artefacts or hidden
@@ -796,8 +801,10 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
 
 - Callers: operations/admin/control-room operator.
 - Request for a new run: `scenarioId`, policy, integer seed, `decisionMode`,
-  island scope and optional deterministic disruptions. A derived request sends
-  only a completed `derivedFromRunId` and one or more additional disruptions.
+  optional `estimationMode`, island scope and optional deterministic
+  disruptions. A derived request sends only a completed `derivedFromRunId` and
+  one or more additional disruptions; it inherits the estimation method with
+  the rest of its immutable inputs.
 - Response: completed saved-run metadata, metrics, frame/decision counts and
   explicit synthetic evidence labels.
 - Product state/event: store `CREATING`, execute the whole run synchronously,
@@ -806,7 +813,14 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
 - Simulation effect: initialise and execute from scenario/seed. A derived run
   inherits immutable inputs and never edits its source.
 - Consumers: 3D control room and benchmark setup.
-- Rules/failures: seed/scenario/policy/scope are immutable. `LLM_ASSISTED`
+- Rules/failures: seed/scenario/policy/scope/estimation mode are immutable.
+  `estimationMode` is `LEARNED_MODEL` or `DETERMINISTIC_FALLBACK`; anything
+  else returns `422 INVALID_ESTIMATION_MODE` and an omitted field selects
+  `DETERMINISTIC_FALLBACK`. A `HARVEST` run that selected `LEARNED_MODEL`
+  fails as `FAILED` with `MODEL_UNAVAILABLE` and returns `502` the moment the
+  learned service is unreachable or rejects a request, so no run mixes learned
+  and fallback forecasts. `BASELINE` records the choice and never uses it.
+  `LLM_ASSISTED`
   uses a labelled predetermined fixture when all four LLM settings are blank.
   A complete `openai-compatible` configuration calls that provider; partial,
   failed or invalid output fails safely before unchecked tools execute. An
@@ -1061,7 +1075,17 @@ truth and undisclosed disruption severity are immutable.
 
 ## Yield model interface and ATP
 
-The Product API alone calls
+Harvest estimates come from one of two methods, chosen per simulation run and
+never by a global runtime switch. `LEARNED_MODEL` calls the FastAPI quantile
+service; `DETERMINISTIC_FALLBACK` uses the rule-based fixture, which stamps a
+`fixture-` model version and a leading `Deterministic fallback estimate, not a
+learned-model prediction` warning on every forecast it writes. A crop batch
+that belongs to a run inherits that run's stored `estimationMode`, so two runs
+executing at once can use different methods; a real participant's batch has no
+run and keeps the server's `MODEL_ADAPTER` configuration. Replay reads saved
+predictions and provenance and never requests a new one.
+
+When the learned method applies, the Product API alone calls
 `POST /internal/v1/yield-predictions` from the
 [model OpenAPI](../contracts/model/openapi.yaml). It sends batch/farm/crop IDs,
 request time/run context, provenance, and allow-listed observation/weather/

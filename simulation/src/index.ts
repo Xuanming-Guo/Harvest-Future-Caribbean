@@ -34,6 +34,7 @@ export type {
   ControlRoomWeather,
   ReplayTimeline,
   SimulationAgentAction,
+  SimulationEstimationMode,
   SimulationOperationsSnapshot,
   SimulationOrderOutcomes,
   SimulationParticipant,

@@ -256,6 +256,27 @@ a:focus-visible {
 .custom-menu-option:hover, .custom-menu-option.is-selected { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); color: var(--text); }
 .custom-menu-checkmark { width: 15px; height: 15px; flex: none; fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
+/*
+ * Segmented control. Two alternatives that stay visible beat a collapsed menu
+ * when the choice changes what a run actually does, and native radio inputs
+ * keep the group semantics and arrow-key movement while the visible chrome
+ * stays entirely ours.
+ *
+ * Every option rule is scoped under `.segmented` on purpose: the toolbar
+ * styles a bare `label` as a 9px uppercase caption, and an option label has
+ * to read as a control value like the selects beside it, not as a caption.
+ */
+.segmented-field { display: grid; gap: 4px; }
+.segmented { display: flex; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-raised); }
+.segmented[data-disabled] { opacity: .45; }
+.segmented .segmented-option { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; gap: 0; min-height: 31px; padding: 4px 11px; border-right: 1px solid var(--line); color: var(--text-dim); font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; white-space: nowrap; text-align: center; cursor: pointer; }
+.segmented .segmented-option:last-child { border-right: 0; }
+.segmented .segmented-option input { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.segmented .segmented-option:hover { color: var(--text); }
+.segmented .segmented-option.is-selected { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); color: var(--text); font-weight: 700; }
+.segmented .segmented-option:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+.segmented[data-disabled] .segmented-option { cursor: not-allowed; }
+
 .run-button {
   min-height: 31px;
   padding: 6px 13px;
