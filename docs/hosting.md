@@ -16,13 +16,12 @@ runs). Nothing here represents a real farm, buyer, or delivery.
    - **Root Directory:** repository root (`/`) — the API needs the npm
      workspace install (`@harvest/shared`, `@harvest/simulation`) from the
      repo root, not just `app/api`.
-   - `app/api/railway.json` documents the intended build/start/healthcheck
-     commands, but Railway's Config-as-Code (`railway.json`) is deprecated
-     in favor of Infrastructure-as-Code — set the same values directly on
-     the service instead (Settings → Build → Build Command, Settings →
-     Deploy → Start Command / Healthcheck Path), or via
-     `railway api` against `serviceInstanceUpdate`. Use the exact commands
-     from `app/api/railway.json`.
+   - **Config File Path:** `app/api/railway.json` — this scopes the build
+     and start commands to the `@harvest/api` workspace while installing
+     from the repo root. Alternatively, set the same build/start/healthcheck
+     values directly in the service settings. The build explicitly includes
+     development dependencies for TypeScript, Prisma and contract generation,
+     even when `NODE_ENV=production`.
 4. Set service environment variables:
    - `DATABASE_URL` — reference the Postgres plugin's connection string
      (Railway → Variables → "Add Reference" → the Postgres service's
@@ -42,12 +41,15 @@ runs). Nothing here represents a real farm, buyer, or delivery.
      (e.g. a Vercel preview URL).
    - Railway sets `PORT` automatically; the API listens on
      `process.env.PORT ?? PRODUCT_API_PORT`, so no action needed.
-5. Deploy. Railway runs the build command, then on boot the `start` script
-   (`npm run start --workspace @harvest/api`) recompiles the API
-   (`tsc`), runs `prisma migrate deploy`, then boots. The rebuild-on-start
-   is deliberate: `app/api/dist` is gitignored, and Railway's build layer
-   does not reliably carry gitignored build output into the run image, so
-   `start` treats the build as ephemeral rather than depending on it.
+5. Deploy. Railway runs the build command to generate clients and validate
+   the API compilation. On boot, `npm run start --workspace @harvest/api`
+   runs `prisma migrate deploy`, then starts `src/index.ts` using Node's
+   `tsx` loader. The shared and simulation workspaces export TypeScript
+   source with `.js` import specifiers, so they also need this loader at
+   runtime. `tsx` is an API runtime dependency. Startup does not depend on
+   gitignored `dist` output: the compiler emits `dist/src/index.js`, not
+   `dist/index.js`, and a plain Node launch cannot resolve those workspace
+   imports even with the corrected output path.
 6. Generate a public domain for the service (Railway → Settings →
    Networking → Generate Domain).
 7. Confirm `GET https://<railway-domain>/health` returns
