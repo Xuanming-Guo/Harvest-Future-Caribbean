@@ -42,19 +42,24 @@ runs). Nothing here represents a real farm, buyer, or delivery.
      (e.g. a Vercel preview URL).
    - Railway sets `PORT` automatically; the API listens on
      `process.env.PORT ?? PRODUCT_API_PORT`, so no action needed.
-5. Deploy. Railway runs the build command, then on boot the `start` script
-   (`npm run start --workspace @harvest/api`) recompiles the API
-   (`tsc`), runs `prisma migrate deploy`, then boots. The rebuild-on-start
-   is deliberate: `app/api/dist` is gitignored, and Railway's build layer
-   does not reliably carry gitignored build output into the run image, so
-   `start` treats the build as ephemeral rather than depending on it.
+5. Deploy. Railway runs the build command from `app/api/railway.json`
+   (`npm ci --include=dev`, contract generation, Prisma client generation),
+   then on boot the `start` script (`npm run start --workspace @harvest/api`)
+   runs `prisma migrate deploy` and boots the API under `tsx`
+   (`tsx src/index.ts`). The API runs from TypeScript source in production
+   because `@harvest/simulation` is consumed as `.ts` source (its package
+   `exports` point at `src/index.ts`), which plain `node` cannot load from a
+   `tsc` build. `--include=dev` keeps `tsx` installed even with
+   `NODE_ENV=production`.
 6. Generate a public domain for the service (Railway → Settings →
    Networking → Generate Domain).
 7. Confirm `GET https://<railway-domain>/health` returns
    `{"status":"ok",...}`.
-8. Seed the database once: `railway run --service <api-service> npm run db:seed --workspace @harvest/api`
-   (or trigger a one-off command from the Railway dashboard with the
-   service's environment attached). Safe to re-run; seeding is idempotent.
+8. Seed the database once. The Railway Postgres has no public port, so run
+   the seed inside the API container: register a local SSH key with
+   `railway ssh keys add`, then
+   `railway ssh -s <api-service> -- sh -c "cd /app/app/api && npx tsx prisma/seed.ts"`.
+   Safe to re-run; seeding is idempotent.
 
 ## 2. Vercel: website + control room
 
