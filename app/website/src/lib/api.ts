@@ -108,7 +108,8 @@ export async function consumeDevelopmentPersona(): Promise<SessionActor | null> 
   const persona = developmentPersonaFromHash(window.location.hash);
   window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
   clearDevelopmentSession();
-  if (process.env.NODE_ENV === "production" || !persona) return null;
+  const demoPersonasEnabled = process.env.NEXT_PUBLIC_HARVEST_DEMO_PERSONAS === "true";
+  if ((process.env.NODE_ENV === "production" && !demoPersonasEnabled) || !persona) return null;
   return createDevelopmentSession(persona);
 }
 

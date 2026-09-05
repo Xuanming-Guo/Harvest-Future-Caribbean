@@ -342,6 +342,7 @@ export async function buildServer() {
   const allowedOrigins = [...new Set([
     ...localOriginAliases(config.websiteOrigin),
     ...localOriginAliases(config.controlRoomOrigin),
+    ...config.extraOrigins.flatMap(localOriginAliases),
   ])];
   await server.register(cors, {
     origin: allowedOrigins,
