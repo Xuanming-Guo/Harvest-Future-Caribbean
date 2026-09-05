@@ -38,6 +38,9 @@ function unwrap<T>(result: { data?: T; error?: unknown; response: Response }): T
 
 export async function ensureOperationsSession() {
   if (accessToken) return;
+  if (process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_HARVEST_DEMO_PERSONAS !== "true") {
+    throw new Error("Demo persona sign-in is disabled in this deployment.");
+  }
   const response = await fetch(`${PRODUCT_API_URL}/dev/session`, {
     method: "POST",
     headers: { "content-type": "application/json" },

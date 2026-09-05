@@ -80,6 +80,9 @@ areas must follow the definitions in [`contracts/`](contracts/).
 
 See [Architecture](docs/architecture.md) for the system boundaries.
 
+See [Hosting the public demo](docs/hosting.md) for deploying the website,
+control room, and Product API publicly (Vercel + Railway).
+
 ## Team
 
 - **Xuanming:** product direction, full-stack development, Product API,
