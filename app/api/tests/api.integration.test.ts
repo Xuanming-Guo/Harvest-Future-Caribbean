@@ -454,6 +454,18 @@ describe("participant Product API", () => {
 
   it("runs the 14 kg + 6 kg commitment, route, recovery, and delivery workflow", async () => {
     const orderId = "20202020-2020-4020-8020-202020202020";
+    const allocation = await prisma.allocation.findFirstOrThrow({ where: { orderId, status: "PROPOSED" } });
+    const proposalLines = await prisma.allocationLine.findMany({ where: { allocationId: allocation.id }, orderBy: { creationOrder: "asc" } });
+    expect(proposalLines).toHaveLength(2);
+    // Move the first row physically behind the second without changing its
+    // identity or persisted order. Reads must survive PostgreSQL heap changes.
+    await prisma.$transaction(async (tx) => {
+      await tx.allocationLine.delete({ where: { id: proposalLines[0]!.id } });
+      await tx.allocationLine.create({ data: proposalLines[0]! });
+    });
+    const reordered = await server.inject({ method: "GET", url: `/v1/orders/${orderId}`, headers: auth("buyer-hotel") });
+    expect(reordered.json().allocation.lines.map((line: { cropBatchId: string }) => line.cropBatchId))
+      .toEqual(proposalLines.map((line) => line.cropBatchId));
 
     const buyerApprovals = (await server.inject({ method: "GET", url: "/v1/approvals?status=PENDING", headers: auth("buyer-hotel") })).json().items;
     const anaApprovals = (await server.inject({ method: "GET", url: "/v1/approvals?status=PENDING", headers: auth("farmer-ana") })).json().items;
@@ -471,6 +483,9 @@ describe("participant Product API", () => {
 
     const committed = await server.inject({ method: "GET", url: `/v1/orders/${orderId}`, headers: auth("buyer-hotel") });
     expect(committed.json().lifecycleStatus).toBe("COMMITTED");
+    const approvedEvent = await prisma.domainEvent.findFirstOrThrow({ where: { eventType: "ALLOCATION_APPROVED", entityId: allocation.id } });
+    expect((approvedEvent.payload as { lines: Array<{ cropBatchId: string }> }).lines.map((line) => line.cropBatchId))
+      .toEqual(proposalLines.map((line) => line.cropBatchId));
     expect(committed.json().approvalSummary).toMatchObject({ required: 3, approved: 3, pending: 0 });
     expect(committed.json().traceId).toBe("c0000000-0000-4000-8000-000000000001");
     const missionId = committed.json().deliveryMission.missionId as string;
@@ -1956,7 +1971,17 @@ describe("connected run reproducibility (#83)", () => {
     const stored = await prisma.simulationRun.findUniqueOrThrow({ where: { id: created.json().runId as string } });
     const frames = (stored.frames as unknown as SavedFrame[]) ?? [];
     const closing = frames.at(-1)?.operationsSnapshot;
+    const rejectedDeliveries = await prisma.deliveryAcceptance.findMany({ where: { simulationRunId: stored.id, rejectedQuantity: { gt: 0 }, acceptedQuantity: { gt: 0 } } });
+    let multiLineRejections = 0;
+    for (const delivery of rejectedDeliveries) {
+      const approved = await prisma.allocation.findFirst({ where: { orderId: delivery.orderId, status: "APPROVED" } });
+      if (approved && await prisma.allocationLine.count({ where: { allocationId: approved.id } }) > 1) multiLineRejections += 1;
+    }
+    // Explicitly keep the two-batch partial-rejection case in this repeated-seed
+    // suite: first-line attribution feeds crop state and the world digest (#86).
+    if (seed === 42) expect(multiLineRejections).toBeGreaterThan(0);
     return {
+      multiLineRejections,
       digest: stored.determinismDigest,
       frameCount: stored.frameCount,
       metrics: stored.metrics,
@@ -1988,6 +2013,7 @@ describe("connected run reproducibility (#83)", () => {
       expect(first.outcomeSummary).not.toBeNull();
       expect(first.toolSequence.length).toBeGreaterThan(0);
       for (const repeat of repeats) {
+        expect(repeat.multiLineRejections).toBe(first.multiLineRejections);
         expect(repeat.digest).toBe(first.digest);
         expect(repeat.frameCount).toBe(first.frameCount);
         expect(repeat.outcomeSummary).toEqual(first.outcomeSummary);

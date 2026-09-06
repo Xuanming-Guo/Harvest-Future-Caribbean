@@ -26,7 +26,7 @@ export async function visibleOrderIds(actor: AuthActor) {
   if (actor.role === "FARMER" || actor.role === "COORDINATOR") {
     const batchIds = await visibleBatchIds(actor);
     if (!batchIds.length) return [];
-    const allocationIds = (await prisma.allocationLine.findMany({ where: { cropBatchId: { in: batchIds }, ...actorRunScope(actor) }, select: { allocationId: true } })).map((row) => row.allocationId);
+    const allocationIds = (await prisma.allocationLine.findMany({ orderBy: { creationOrder: "asc" }, where: { cropBatchId: { in: batchIds }, ...actorRunScope(actor) }, select: { allocationId: true } })).map((row) => row.allocationId);
     const allocationOrderIds = allocationIds.length
       ? (await prisma.allocation.findMany({ where: { id: { in: allocationIds }, ...actorRunScope(actor) }, select: { orderId: true } })).map((row) => row.orderId)
       : [];
@@ -137,7 +137,7 @@ export async function identityDisclosure(actor: AuthActor): Promise<IdentityDisc
 
   const allocationIds = (await prisma.allocation.findMany({ where: { orderId: { in: agreed }, ...actorRunScope(actor) }, select: { id: true } })).map((row) => row.id);
   const batchIds = allocationIds.length
-    ? [...new Set((await prisma.allocationLine.findMany({ where: { allocationId: { in: allocationIds }, ...actorRunScope(actor) }, select: { cropBatchId: true } })).map((row) => row.cropBatchId))]
+    ? [...new Set((await prisma.allocationLine.findMany({ orderBy: { creationOrder: "asc" }, where: { allocationId: { in: allocationIds }, ...actorRunScope(actor) }, select: { cropBatchId: true } })).map((row) => row.cropBatchId))]
     : [];
   if (batchIds.length) {
     for (const batch of await prisma.cropBatch.findMany({ where: { id: { in: batchIds }, ...actorRunScope(actor) }, select: { farmId: true } })) farms.add(batch.farmId);

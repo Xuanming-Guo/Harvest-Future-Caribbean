@@ -370,6 +370,7 @@ model Allocation {
 }
 
 model AllocationLine {
+  creationOrder BigInt @unique @default(autoincrement()) @map("creation_order")
   id            String @id @default(uuid()) @db.Uuid
   allocationId  String @map("allocation_id") @db.Uuid
   cropBatchId   String @map("crop_batch_id") @db.Uuid

@@ -53,7 +53,7 @@ export async function deliveryMissionViews(rows: DeliveryMission[], viewer: Auth
   }
   const allocationIds = [...allocationByOrder.values()].map((allocation) => allocation.id);
   const lines = allocationIds.length
-    ? await prisma.allocationLine.findMany({ where: { allocationId: { in: allocationIds } } })
+    ? await prisma.allocationLine.findMany({ orderBy: { creationOrder: "asc" }, where: { allocationId: { in: allocationIds } } })
     : [];
   const linesByAllocation = new Map<string, typeof lines>();
   for (const line of lines) {

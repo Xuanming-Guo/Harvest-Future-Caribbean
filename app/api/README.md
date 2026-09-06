@@ -125,3 +125,13 @@ inherit `simulationRunId` from authentication, and all created operational
 records and events retain that scope so real data and separate runs cannot mix.
 After completion, short-lived participant sessions expose the same pages
 read-only and the API rejects every attempted mutation.
+
+## Allocation order
+
+Allocation lines carry an internal, unique `creationOrder` sequence. Proposal
+`createMany` inserts the matching algorithm's line order, and every reader uses
+that persisted order, including approval events and delivery projections. Random
+UUIDs are never ordering keys. The migration assigns legacy rows a one-time
+stable order; their original insertion order was not stored and is not claimed
+to be recoverable. Sequence values are internal and are not API identifiers or
+part of the normalized simulation digest.
