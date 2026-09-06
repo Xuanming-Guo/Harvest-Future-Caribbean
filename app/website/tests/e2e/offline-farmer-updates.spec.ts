@@ -43,6 +43,18 @@ test("keeps a farmer crop update on the device while offline and sends it exactl
   // Give the persisted read cache a moment to hold this page before the signal drops.
   await expect(page.getByRole("heading", { name: "Harvest outlook" })).toBeVisible();
 
+  // This crop page was reached by a click, so its HTML never crossed the
+  // network: the worker warms the document and the scripts it references in the
+  // background. Waiting for that to finish is what makes the offline reload
+  // below a test of the cached shell rather than a race with the warm fetch.
+  await page.waitForFunction(async () => {
+    const document = await caches.match(location.pathname, { ignoreSearch: true, ignoreVary: true });
+    if (!document) return false;
+    const html = await document.text();
+    const assets = [...new Set([...html.matchAll(/(?:src|href)="(\/_next\/static\/[^"]+)"/g)].map((match) => match[1]!.replaceAll("&amp;", "&")))];
+    return (await Promise.all(assets.map((asset) => caches.match(asset)))).every(Boolean);
+  }, null, { timeout: 30_000 });
+
   await context.setOffline(true);
   await expect(page.getByText(/^Offline · showing/)).toBeVisible();
 

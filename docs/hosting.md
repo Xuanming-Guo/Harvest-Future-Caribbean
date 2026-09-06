@@ -16,13 +16,12 @@ runs). Nothing here represents a real farm, buyer, or delivery.
    - **Root Directory:** repository root (`/`) — the API needs the npm
      workspace install (`@harvest/shared`, `@harvest/simulation`) from the
      repo root, not just `app/api`.
-   - `app/api/railway.json` documents the intended build/start/healthcheck
-     commands, but Railway's Config-as-Code (`railway.json`) is deprecated
-     in favor of Infrastructure-as-Code — set the same values directly on
-     the service instead (Settings → Build → Build Command, Settings →
-     Deploy → Start Command / Healthcheck Path), or via
-     `railway api` against `serviceInstanceUpdate`. Use the exact commands
-     from `app/api/railway.json`.
+   - **Config File Path:** `app/api/railway.json` — this scopes the build
+     and start commands to the `@harvest/api` workspace while installing
+     from the repo root. Alternatively, set the same build/start/healthcheck
+     values directly in the service settings. The build explicitly includes
+     development dependencies for TypeScript, Prisma and contract generation,
+     even when `NODE_ENV=production`.
 4. Set service environment variables:
    - `DATABASE_URL` — reference the Postgres plugin's connection string
      (Railway → Variables → "Add Reference" → the Postgres service's
@@ -42,24 +41,26 @@ runs). Nothing here represents a real farm, buyer, or delivery.
      (e.g. a Vercel preview URL).
    - Railway sets `PORT` automatically; the API listens on
      `process.env.PORT ?? PRODUCT_API_PORT`, so no action needed.
-5. Deploy. Railway runs the build command from `app/api/railway.json`
-   (`npm ci --include=dev`, contract generation, Prisma client generation),
-   then on boot the `start` script (`npm run start --workspace @harvest/api`)
-   runs `prisma migrate deploy` and boots the API under `tsx`
-   (`tsx src/index.ts`). The API runs from TypeScript source in production
-   because `@harvest/simulation` is consumed as `.ts` source (its package
-   `exports` point at `src/index.ts`), which plain `node` cannot load from a
-   `tsc` build. `--include=dev` keeps `tsx` installed even with
-   `NODE_ENV=production`.
+5. Deploy. Railway runs the build command to generate clients and validate
+   the API compilation. On boot, `npm run start --workspace @harvest/api`
+   runs `prisma migrate deploy`, then starts `src/index.ts` using Node's
+   `tsx` loader. The shared and simulation workspaces export TypeScript
+   source with `.js` import specifiers, so they also need this loader at
+   runtime. `tsx` is an API runtime dependency. Startup does not depend on
+   gitignored `dist` output: the compiler emits `dist/src/index.js`, not
+   `dist/index.js`, and a plain Node launch cannot resolve those workspace
+   imports even with the corrected output path.
 6. Generate a public domain for the service (Railway → Settings →
    Networking → Generate Domain).
 7. Confirm `GET https://<railway-domain>/health` returns
    `{"status":"ok",...}`.
-8. Seed the database once. The Railway Postgres has no public port, so run
-   the seed inside the API container: register a local SSH key with
-   `railway ssh keys add`, then
-   `railway ssh -s <api-service> -- sh -c "cd /app/app/api && npx tsx prisma/seed.ts"`.
-   Safe to re-run; seeding is idempotent.
+8. Seed an empty synthetic demo database inside the deployed API container.
+   `railway run` executes locally and cannot resolve a private Postgres hostname.
+   Register an SSH key with `railway ssh keys add`, then run:
+   `railway ssh -s <api-service> -- sh -c "cd /app && npm run db:seed --workspace @harvest/api"`.
+   The seed resets demo state, including saved runs; do not re-run it on a demo
+   whose state you want to preserve. See Railway's [SSH documentation](https://docs.railway.com/cli/ssh)
+   and [local run documentation](https://docs.railway.com/cli/run).
 
 ## 2. Vercel: website + control room
 
