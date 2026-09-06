@@ -485,6 +485,7 @@
       }
     },
     "OrderOutcomePayload": {
+      "description": "Canonical Product outcome. Connected simulation retains fulfilled, partial or rejected status through settlement instead of re-scoring it with standalone buyer thresholds.",
       "type": "object",
       "additionalProperties": false,
       "required": ["orderId", "status", "acceptedQuantity", "releasedReservationQuantity"],

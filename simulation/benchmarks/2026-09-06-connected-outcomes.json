@@ -1,0 +1,429 @@
+{
+  "evidenceLabel": "SYNTHETIC CONNECTED PRODUCT API OUTPUT, NOT DEPLOYED IMPACT",
+  "demandDays": 21,
+  "settlementDays": 7,
+  "seeds": [
+    42,
+    8675309
+  ],
+  "repeatsPerSeed": 2,
+  "runs": [
+    {
+      "seed": 42,
+      "digest": "f822ef6bcc100344",
+      "metrics": {
+        "weather": {
+          "wetDays": 6,
+          "stormDays": 0,
+          "qualityLost": 0.42,
+          "weatherSpoilageKg": 297.21,
+          "readinessDelayDays": 2.76,
+          "weatherDelayedMissions": 2
+        },
+        "maritime": {
+          "shippedKg": 0,
+          "scopedLinks": 0,
+          "scopedPorts": 1,
+          "totalCostXcd": 0,
+          "shipmentsFailed": 0,
+          "shipmentsApproved": 0,
+          "shipmentsProposed": 0,
+          "customsInspections": 0,
+          "shipmentsDelivered": 0,
+          "weatherDelayedSailings": 0,
+          "demandsWithoutPublicRoute": 0
+        },
+        "causeCounts": {
+          "MISSION_LATE": 0,
+          "NO_PUBLIC_ROUTE": 0,
+          "NO_READY_SUPPLY": 0,
+          "SHIPMENT_FAILED": 0,
+          "APPROVAL_REJECTED": 0,
+          "DELIVERY_REJECTED": 0,
+          "HORIZON_TRUNCATED": 0,
+          "NOT_READY_IN_TIME": 7,
+          "INSUFFICIENT_SUPPLY": 0,
+          "SPOILED_BEFORE_PICKUP": 1
+        },
+        "demandsUnmet": 5,
+        "wasteQuantity": {
+          "unit": "kg",
+          "value": 3264.77
+        },
+        "fulfilmentRate": 0.272727,
+        "productActions": {
+          "rejected": 0,
+          "attempted": 217,
+          "succeeded": 217,
+          "finalCounts": {
+            "openDemands": 11,
+            "orderOutcomes": {
+              "total": 11,
+              "causes": {
+                "DELIVERY_REJECTED": 8
+              },
+              "pending": 0,
+              "fulfilled": 3,
+              "unfulfilled": 5,
+              "partiallyFulfilled": 3
+            },
+            "activeListings": 5,
+            "activeMissions": 0,
+            "openExceptions": 0,
+            "ordersByStatus": {
+              "REJECTED": 5,
+              "FULFILLED": 3,
+              "PARTIALLY_FULFILLED": 3
+            },
+            "deliveryAcceptedKg": 885.68,
+            "completedMissionCount": 11,
+            "approvedCommitmentCount": 11
+          },
+          "domainEventsCreated": 337
+        },
+        "demandsFullyMet": 3,
+        "eventsProcessed": 108,
+        "totalAcceptedKg": 885.68,
+        "totalDemandedKg": 2956,
+        "totalPromisedKg": 2956,
+        "missionsCancelled": 0,
+        "missionsCompleted": 11,
+        "totalSubstitutedKg": 2070.32,
+        "commitmentsApproved": 11,
+        "commitmentsProposed": 11,
+        "demandsPartiallyMet": 3,
+        "observationRequests": 0,
+        "commitmentsDelivered": 11,
+        "localProcurementRate": 0.299621
+      },
+      "outcomes": {
+        "total": 11,
+        "causes": {
+          "DELIVERY_REJECTED": 8
+        },
+        "pending": 0,
+        "fulfilled": 3,
+        "unfulfilled": 5,
+        "partiallyFulfilled": 3
+      },
+      "acceptedKg": 885.68,
+      "actions": {
+        "SUCCEEDED": 271
+      },
+      "orders": [
+        {
+          "order": 1,
+          "requestedKg": 154,
+          "committedKg": 154,
+          "acceptedKg": 0,
+          "status": "REJECTED",
+          "cause": "DELIVERY_REJECTED",
+          "note": "154 kg of 154 kg rejected at delivery (MATURITY_OR_QUALITY): Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected."
+        },
+        {
+          "order": 2,
+          "requestedKg": 466,
+          "committedKg": 466,
+          "acceptedKg": 0,
+          "status": "REJECTED",
+          "cause": "DELIVERY_REJECTED",
+          "note": "466 kg of 466 kg rejected at delivery (MATURITY_OR_QUALITY): Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected."
+        },
+        {
+          "order": 3,
+          "requestedKg": 165,
+          "committedKg": 165,
+          "acceptedKg": 0,
+          "status": "REJECTED",
+          "cause": "DELIVERY_REJECTED",
+          "note": "165 kg of 165 kg rejected at delivery (MATURITY_OR_QUALITY): Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected."
+        },
+        {
+          "order": 4,
+          "requestedKg": 226,
+          "committedKg": 226,
+          "acceptedKg": 0,
+          "status": "REJECTED",
+          "cause": "DELIVERY_REJECTED",
+          "note": "226 kg of 226 kg rejected at delivery (MATURITY_OR_QUALITY): Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected."
+        },
+        {
+          "order": 5,
+          "requestedKg": 164,
+          "committedKg": 164,
+          "acceptedKg": 164,
+          "status": "FULFILLED",
+          "cause": null,
+          "note": null
+        },
+        {
+          "order": 6,
+          "requestedKg": 315,
+          "committedKg": 315,
+          "acceptedKg": 1.55,
+          "status": "PARTIALLY_FULFILLED",
+          "cause": "DELIVERY_REJECTED",
+          "note": "313.45 kg of 315 kg rejected at delivery (MATURITY_OR_QUALITY): Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected."
+        },
+        {
+          "order": 7,
+          "requestedKg": 225,
+          "committedKg": 225,
+          "acceptedKg": 225,
+          "status": "FULFILLED",
+          "cause": null,
+          "note": null
+        },
+        {
+          "order": 8,
+          "requestedKg": 468,
+          "committedKg": 468,
+          "acceptedKg": 0,
+          "status": "REJECTED",
+          "cause": "DELIVERY_REJECTED",
+          "note": "468 kg of 468 kg rejected at delivery (MATURITY_OR_QUALITY): Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected."
+        },
+        {
+          "order": 9,
+          "requestedKg": 171,
+          "committedKg": 171,
+          "acceptedKg": 151.94,
+          "status": "PARTIALLY_FULFILLED",
+          "cause": "DELIVERY_REJECTED",
+          "note": "19.06 kg of 171 kg rejected at delivery (MATURITY_OR_QUALITY): Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected."
+        },
+        {
+          "order": 10,
+          "requestedKg": 188,
+          "committedKg": 188,
+          "acceptedKg": 188,
+          "status": "FULFILLED",
+          "cause": null,
+          "note": null
+        },
+        {
+          "order": 11,
+          "requestedKg": 414,
+          "committedKg": 414,
+          "acceptedKg": 155.19,
+          "status": "PARTIALLY_FULFILLED",
+          "cause": "DELIVERY_REJECTED",
+          "note": "258.81 kg of 414 kg rejected at delivery (MATURITY_OR_QUALITY): Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected."
+        }
+      ]
+    },
+    {
+      "seed": 8675309,
+      "digest": "101fcbb13a37646a",
+      "metrics": {
+        "weather": {
+          "wetDays": 10,
+          "stormDays": 1,
+          "qualityLost": 0.92,
+          "weatherSpoilageKg": 204.62,
+          "readinessDelayDays": 5.52,
+          "weatherDelayedMissions": 4
+        },
+        "maritime": {
+          "shippedKg": 0,
+          "scopedLinks": 0,
+          "scopedPorts": 1,
+          "totalCostXcd": 0,
+          "shipmentsFailed": 0,
+          "shipmentsApproved": 0,
+          "shipmentsProposed": 0,
+          "customsInspections": 0,
+          "shipmentsDelivered": 0,
+          "weatherDelayedSailings": 0,
+          "demandsWithoutPublicRoute": 0
+        },
+        "causeCounts": {
+          "MISSION_LATE": 2,
+          "NO_PUBLIC_ROUTE": 0,
+          "NO_READY_SUPPLY": 0,
+          "SHIPMENT_FAILED": 0,
+          "APPROVAL_REJECTED": 0,
+          "DELIVERY_REJECTED": 0,
+          "HORIZON_TRUNCATED": 0,
+          "NOT_READY_IN_TIME": 6,
+          "INSUFFICIENT_SUPPLY": 0,
+          "SPOILED_BEFORE_PICKUP": 3
+        },
+        "demandsUnmet": 3,
+        "wasteQuantity": {
+          "unit": "kg",
+          "value": 2603.36
+        },
+        "fulfilmentRate": 0.083333,
+        "productActions": {
+          "rejected": 0,
+          "attempted": 295,
+          "succeeded": 295,
+          "finalCounts": {
+            "openDemands": 12,
+            "orderOutcomes": {
+              "total": 12,
+              "causes": {
+                "DELIVERY_REJECTED": 11
+              },
+              "pending": 0,
+              "fulfilled": 1,
+              "unfulfilled": 3,
+              "partiallyFulfilled": 8
+            },
+            "activeListings": 8,
+            "activeMissions": 0,
+            "openExceptions": 0,
+            "ordersByStatus": {
+              "REJECTED": 3,
+              "FULFILLED": 1,
+              "PARTIALLY_FULFILLED": 8
+            },
+            "deliveryAcceptedKg": 1323.21,
+            "completedMissionCount": 12,
+            "approvedCommitmentCount": 12
+          },
+          "domainEventsCreated": 460
+        },
+        "demandsFullyMet": 1,
+        "eventsProcessed": 116,
+        "totalAcceptedKg": 1323.21,
+        "totalDemandedKg": 2933,
+        "totalPromisedKg": 2933,
+        "missionsCancelled": 0,
+        "missionsCompleted": 12,
+        "totalSubstitutedKg": 1609.79,
+        "commitmentsApproved": 12,
+        "commitmentsProposed": 12,
+        "demandsPartiallyMet": 8,
+        "observationRequests": 0,
+        "commitmentsDelivered": 12,
+        "localProcurementRate": 0.451146
+      },
+      "outcomes": {
+        "total": 12,
+        "causes": {
+          "DELIVERY_REJECTED": 11
+        },
+        "pending": 0,
+        "fulfilled": 1,
+        "unfulfilled": 3,
+        "partiallyFulfilled": 8
+      },
+      "acceptedKg": 1323.21,
+      "actions": {
+        "SUCCEEDED": 357
+      },
+      "orders": [
+        {
+          "order": 1,
+          "requestedKg": 208,
+          "committedKg": 208,
+          "acceptedKg": 0,
+          "status": "REJECTED",
+          "cause": "DELIVERY_REJECTED",
+          "note": "208 kg of 208 kg rejected at delivery (MATURITY_OR_QUALITY): Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected."
+        },
+        {
+          "order": 2,
+          "requestedKg": 245,
+          "committedKg": 245,
+          "acceptedKg": 0,
+          "status": "REJECTED",
+          "cause": "DELIVERY_REJECTED",
+          "note": "245 kg of 245 kg rejected at delivery (MATURITY_OR_QUALITY): Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected."
+        },
+        {
+          "order": 3,
+          "requestedKg": 306,
+          "committedKg": 306,
+          "acceptedKg": 0,
+          "status": "REJECTED",
+          "cause": "DELIVERY_REJECTED",
+          "note": "306 kg of 306 kg rejected at delivery (MATURITY_OR_QUALITY): Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected."
+        },
+        {
+          "order": 4,
+          "requestedKg": 155,
+          "committedKg": 155,
+          "acceptedKg": 29.55,
+          "status": "PARTIALLY_FULFILLED",
+          "cause": "DELIVERY_REJECTED",
+          "note": "125.45 kg of 155 kg rejected at delivery (MATURITY_OR_QUALITY): Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected."
+        },
+        {
+          "order": 5,
+          "requestedKg": 185,
+          "committedKg": 185,
+          "acceptedKg": 185,
+          "status": "FULFILLED",
+          "cause": null,
+          "note": null
+        },
+        {
+          "order": 6,
+          "requestedKg": 438,
+          "committedKg": 438,
+          "acceptedKg": 296.53,
+          "status": "PARTIALLY_FULFILLED",
+          "cause": "DELIVERY_REJECTED",
+          "note": "141.47 kg of 438 kg rejected at delivery (MATURITY_OR_QUALITY): Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected."
+        },
+        {
+          "order": 7,
+          "requestedKg": 182,
+          "committedKg": 182,
+          "acceptedKg": 46.67,
+          "status": "PARTIALLY_FULFILLED",
+          "cause": "DELIVERY_REJECTED",
+          "note": "135.33 kg of 182 kg rejected at delivery (MATURITY_OR_QUALITY): Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected."
+        },
+        {
+          "order": 8,
+          "requestedKg": 397,
+          "committedKg": 396.9999999999999,
+          "acceptedKg": 140.75,
+          "status": "PARTIALLY_FULFILLED",
+          "cause": "DELIVERY_REJECTED",
+          "note": "256.25 kg of 396.9999999999999 kg rejected at delivery (MATURITY_OR_QUALITY): Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected."
+        },
+        {
+          "order": 9,
+          "requestedKg": 200,
+          "committedKg": 200,
+          "acceptedKg": 185.84,
+          "status": "PARTIALLY_FULFILLED",
+          "cause": "DELIVERY_REJECTED",
+          "note": "14.16 kg of 200 kg rejected at delivery (MATURITY_OR_QUALITY): Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected."
+        },
+        {
+          "order": 10,
+          "requestedKg": 230,
+          "committedKg": 230,
+          "acceptedKg": 108.07,
+          "status": "PARTIALLY_FULFILLED",
+          "cause": "DELIVERY_REJECTED",
+          "note": "121.93 kg of 230 kg rejected at delivery (MATURITY_OR_QUALITY): Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected."
+        },
+        {
+          "order": 11,
+          "requestedKg": 107,
+          "committedKg": 107,
+          "acceptedKg": 89.02,
+          "status": "PARTIALLY_FULFILLED",
+          "cause": "DELIVERY_REJECTED",
+          "note": "17.98 kg of 107 kg rejected at delivery (MATURITY_OR_QUALITY): Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected."
+        },
+        {
+          "order": 12,
+          "requestedKg": 280,
+          "committedKg": 280,
+          "acceptedKg": 241.78,
+          "status": "PARTIALLY_FULFILLED",
+          "cause": "DELIVERY_REJECTED",
+          "note": "38.22 kg of 280 kg rejected at delivery (MATURITY_OR_QUALITY): Synthetic buyer recorded the physically loaded quantity; unavailable promised produce is rejected."
+        }
+      ]
+    }
+  ]
+}

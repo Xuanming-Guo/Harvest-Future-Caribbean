@@ -841,6 +841,13 @@ describe("participant Product API", () => {
     const finalSnapshot = finalFrame.operationsSnapshot;
     const finalOutcomes = finalSnapshot.orderOutcomes;
     expect(finalOutcomes.total).toBeGreaterThan(0);
+    const recordedMetrics = created.json().metrics;
+    expect(recordedMetrics.demandsFullyMet).toBe(finalOutcomes.fulfilled);
+    expect(recordedMetrics.demandsPartiallyMet).toBe(finalOutcomes.partiallyFulfilled);
+    expect(recordedMetrics.demandsUnmet).toBe(finalOutcomes.unfulfilled);
+    expect(finalFrame.demands.filter((demand: { status: string }) => demand.status === "FULFILLED")).toHaveLength(finalOutcomes.fulfilled);
+    expect(finalFrame.demands.filter((demand: { status: string }) => demand.status === "PARTIALLY_FULFILLED")).toHaveLength(finalOutcomes.partiallyFulfilled);
+
     expect(finalOutcomes.fulfilled + finalOutcomes.partiallyFulfilled + finalOutcomes.unfulfilled + finalOutcomes.pending).toBe(finalOutcomes.total);
     // Every order that did not fully settle carries exactly one cause, and each
     // cause is one the contract names. The counts themselves are recorded in
