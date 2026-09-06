@@ -54,9 +54,13 @@ runs). Nothing here represents a real farm, buyer, or delivery.
    Networking → Generate Domain).
 7. Confirm `GET https://<railway-domain>/health` returns
    `{"status":"ok",...}`.
-8. Seed the database once: `railway run --service <api-service> npm run db:seed --workspace @harvest/api`
-   (or trigger a one-off command from the Railway dashboard with the
-   service's environment attached). Safe to re-run; seeding is idempotent.
+8. Seed an empty synthetic demo database inside the deployed API container.
+   `railway run` executes locally and cannot resolve a private Postgres hostname.
+   Register an SSH key with `railway ssh keys add`, then run:
+   `railway ssh -s <api-service> -- sh -c "cd /app && npm run db:seed --workspace @harvest/api"`.
+   The seed resets demo state, including saved runs; do not re-run it on a demo
+   whose state you want to preserve. See Railway's [SSH documentation](https://docs.railway.com/cli/ssh)
+   and [local run documentation](https://docs.railway.com/cli/run).
 
 ## 2. Vercel: website + control room
 
