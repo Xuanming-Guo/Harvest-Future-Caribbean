@@ -1,5 +1,7 @@
 "use client";
 
+import SelectControl from "@/components/SelectControl";
+
 /**
  * The timeline transport: play/pause/step, a scrubber doubling as a
  * disruption summary, and a speed selector.
@@ -111,12 +113,6 @@ export default function PlaybackControls(props: PlaybackControlsProps): React.JS
     [controls],
   );
 
-  const handleSpeedChange = useCallback(
-    (event: React.ChangeEvent<HTMLSelectElement>) => {
-      controls.setSpeed(Number(event.target.value) as PlaybackSpeed);
-    },
-    [controls],
-  );
 
   const clockText = useMemo(() => CLOCK_FORMAT.format(new Date(atMs)), [atMs]);
 
@@ -187,13 +183,13 @@ export default function PlaybackControls(props: PlaybackControlsProps): React.JS
         />
       </div>
 
-      <select className="speed-select" value={speed} onChange={handleSpeedChange} aria-label="Playback speed">
+      <SelectControl className="speed-select" value={speed} onValueChange={(value) => controls.setSpeed(Number(value) as PlaybackSpeed)} aria-label="Playback speed">
         {SPEED_OPTIONS.map((option) => (
           <option key={option} value={option}>
             {option}×
           </option>
         ))}
-      </select>
+      </SelectControl>
     </div>
   );
 }

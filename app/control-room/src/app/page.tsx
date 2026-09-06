@@ -5,6 +5,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ActionPreviewMessage } from "@harvest/shared";
 import type { InjectedDisruption, ReplayTimeline, SimulationAgentAction } from "@harvest/simulation";
 
+import SelectControl from "@/components/SelectControl";
+import HarvestMark from "@/components/HarvestMark";
+import MapExplorer from "@/components/MapExplorer";
+import { mapStops, shortestMapRoute } from "@/lib/map-route";
 import EstimationModeControl from "@/components/EstimationModeControl";
 import InjectionPanel from "@/components/InjectionPanel";
 import IslandScopeControls from "@/components/IslandScopeControls";
@@ -46,6 +50,13 @@ const CesiumGlobe = dynamic(() => import("@/components/globe/CesiumGlobe"), {
 });
 
 export default function ControlRoomPage() {
+  const [explorerOpen, setExplorerOpen] = useState(true);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [showActivity, setShowActivity] = useState(false);
+  const [activeIsland, setActiveIsland] = useState<string | null>(null);
+  const [routeMode, setRouteMode] = useState(false);
+  const [routeFrom, setRouteFrom] = useState("");
+  const [routeTo, setRouteTo] = useState("");
   const [scenarioId, setScenarioId] = useState(DEFAULT_SCENARIO);
   const [scenarios, setScenarios] = useState<SimulationScenario[]>([]);
   const [policy, setPolicy] = useState<PolicyName>("HARVEST");
@@ -80,6 +91,7 @@ export default function ControlRoomPage() {
     try {
       const loaded = await loadTimeline(run.runId);
       setTimeline(loaded);
+      setRouteFrom(""); setRouteTo(""); setActiveIsland(null); setSetupOpen(false);
       setCurrentRun(run);
       setScenarioId(run.scenarioId);
       setPolicy(run.policy);
@@ -212,13 +224,27 @@ export default function ControlRoomPage() {
     }
   }, [currentRun, timeline]);
 
+  const stops = useMemo(() => timeline ? mapStops(timeline.scene) : [], [timeline]);
+  const routeEndpoints = useMemo(() => [routeFrom, routeTo].flatMap((id) => stops.filter((stop) => stop.id === id)), [stops, routeFrom, routeTo]);
+  const route = useMemo(() => {
+    const from = stops.find((stop) => stop.id === routeFrom), to = stops.find((stop) => stop.id === routeTo);
+    return timeline && from && to ? shortestMapRoute(timeline.scene, from, to) : null;
+  }, [timeline, stops, routeFrom, routeTo]);
+  const catalogue = scenarios.find((scenario) => scenario.scenarioId === DEFAULT_SCENARIO)?.islands ?? [];
+  const island = catalogue.find((item) => item.islandId === activeIsland);
+  const mapTarget = useMemo(() => island
+    ? { ...island.camera, heightM: island.camera.heightKm * 1200, key: island.islandId }
+    : { latitude: 18.8, longitude: -72.5, heightM: 3_900_000, key: "caribbean" }, [island]);
   const handleSelect = useCallback((id: string | null) => {
-    setSelectedAction(null);
-    setSelectedId(id);
-    if (id) setFocusRegion(id);
+    if (routeMode && id && stops.some((stop) => stop.id === id)) {
+      if (!routeFrom || routeTo) { setRouteFrom(id); setRouteTo(""); }
+      else setRouteTo(id);
+      return;
+    }
+    setSelectedAction(null); setSelectedId(id);
     const mapped = timeline?.scene.participants.find((item) => item.simulationActorId === id);
     if (mapped?.productActorId) setParticipantId(mapped.productActorId);
-  }, [timeline]);
+  }, [timeline, routeMode, stops, routeFrom, routeTo]);
 
   const handleSelectAction = useCallback((action: SimulationAgentAction) => {
     setSelectedId(null);
@@ -266,18 +292,18 @@ export default function ControlRoomPage() {
   const setup = (
     <div className="run-toolbar">
       <label>Scenario
-        <select value={scenarioId} onChange={(event) => { const next = event.target.value; setScenarioId(next); const scenario = scenarios.find((item) => item.scenarioId === next); if (scenario?.islands[0]) setIslandIds([scenario.islands[0].islandId]); }}>
+        <SelectControl aria-label="Scenario" value={scenarioId} onValueChange={(value) => { const next = value; setScenarioId(next); const scenario = scenarios.find((item) => item.scenarioId === next); if (scenario?.islands[0]) setIslandIds([scenario.islands[0].islandId]); }}>
           {scenarios.length === 0 && <option value={DEFAULT_SCENARIO}>Saint Lucia demo</option>}
           {scenarios.map((scenario) => (
-            <option key={scenario.scenarioId} value={scenario.scenarioId}>{scenario.description}</option>
+            <option key={scenario.scenarioId} value={scenario.scenarioId}>{scenario.scenarioId === "saint-lucia-demo-v1" ? "Saint Lucia · detailed benchmark" : scenario.scenarioId === DEFAULT_SCENARIO ? "Whole Caribbean · regional network" : `${scenario.islands[0]?.name ?? scenario.scenarioId} · island study`}</option>
           ))}
-        </select>
+        </SelectControl>
       </label>
       <label>Policy
-        <select value={policy} onChange={(event) => setPolicy(event.target.value as PolicyName)}>
+        <SelectControl aria-label="Policy" value={policy} onValueChange={(value) => setPolicy(value as PolicyName)}>
           <option value="HARVEST">Harvest</option>
           <option value="BASELINE">Baseline</option>
-        </select>
+        </SelectControl>
       </label>
       <IslandScopeControls
         islands={scenarios.find((scenario) => scenario.scenarioId === scenarioId)?.islands ?? []}
@@ -299,24 +325,24 @@ export default function ControlRoomPage() {
         */}
       <EstimationModeControl value={estimationMode} onChange={setEstimationMode} disabled={policy === "BASELINE"} />
       <label>Decision mode
-        <select value={decisionMode} onChange={(event) => setDecisionMode(event.target.value as DecisionMode)}>
+        <SelectControl aria-label="Decision mode" value={decisionMode} onValueChange={(value) => setDecisionMode(value as DecisionMode)}>
           <option value="DETERMINISTIC">Deterministic</option>
           <option value="LLM_ASSISTED">LLM assisted</option>
-        </select>
+        </SelectControl>
       </label>
       <button type="button" className="run-button" onClick={() => void runSimulation()} disabled={loading}>
-        {loading ? "Generating…" : "Run simulation"}
+        {loading ? "Loading…" : "Run simulation"}
       </button>
       <label>Saved run
-        <select value={currentRun?.runId ?? ""} onChange={(event) => {
-          const run = savedRuns.find((item) => item.runId === event.target.value);
+        <SelectControl aria-label="Saved run" value={currentRun?.runId ?? ""} onValueChange={(value) => {
+          const run = savedRuns.find((item) => item.runId === value);
           if (run) void loadRun(run);
         }}>
           <option value="" disabled>Select a run</option>
           {savedRuns.filter((run) => run.status === "COMPLETED").map((run) => (
             <option key={run.runId} value={run.runId}>{run.policy} · seed {run.seed} · {run.runId.slice(0, 8)}</option>
           ))}
-        </select>
+        </SelectControl>
       </label>
     </div>
   );
@@ -326,8 +352,8 @@ export default function ControlRoomPage() {
     return (
       <main className="control-room launch-screen">
         <section className="launch-card">
-          <span className="masthead-mark">H</span>
-          <div><h1>Harvest control room</h1><p>Create or load a saved synthetic simulation run.</p></div>
+          <HarvestMark />
+          <div><h1>Harvest control room</h1><p>Explore the islands. See how food moves. Compare what changes.</p></div>
           {setup}
           {error && <p className="run-error" role="alert">{error}</p>}
           <p className="launch-note">Runs are synthetic evidence. Harvest-mode agents use the Product API; baseline runs remain isolated.</p>
@@ -341,13 +367,20 @@ export default function ControlRoomPage() {
   return (
     <main className="control-room">
       <div className="globe-layer">
-        <CesiumGlobe scene={scene} frame={frame} atMs={state.atMs} selectedId={selectedId} onSelect={handleSelect} focusRegion={focusRegion} showWeather={weatherEnabled} />
+        <CesiumGlobe scene={scene} frame={frame} atMs={state.atMs} selectedId={selectedId} onSelect={handleSelect} focusRegion={focusRegion} showWeather={weatherEnabled} mapTarget={mapTarget} route={route} routeEndpoints={routeEndpoints} />
       </div>
       <ReferenceAttribution sources={scene.referenceDataSources} maritime={scene.maritimeAttributions ?? []} maritimeNote={scene.maritimeDisclaimer} recordedWeather={recordedWeather} />
       <div className="chrome">
         <div className="chrome-header">
           <Masthead scene={scene} frame={frame} estimationMode={currentRun?.estimationMode} estimationModeUsed={currentRun?.policy !== "BASELINE"} />
-          {setup}
+          <div className="workspace-actions">
+            <span className="workspace-location">{island?.name ?? "Caribbean overview"}</span>
+            <button type="button" aria-expanded={explorerOpen} onClick={() => setExplorerOpen(!explorerOpen)}>Explore</button>
+            <button type="button" aria-expanded={setupOpen} onClick={() => setSetupOpen(!setupOpen)}>Run setup</button>
+            <button type="button" aria-pressed={showActivity} onClick={() => setShowActivity(!showActivity)}>Activity</button>
+            <a href={PARTICIPANT_WEBSITE_URL} target="_blank" rel="noreferrer">Participant workspace ↗</a>
+          </div>
+          {setupOpen && setup}
           {error && <p className="run-error" role="alert">{error}</p>}
         </div>
         {/*
@@ -358,7 +391,12 @@ export default function ControlRoomPage() {
           * rather than `auto` because an over-full grid shrinks `auto` rows back
           * down to their min-content, which clipped the metric tiles instead.
           */}
-        <div className="chrome-left" style={{ display: "grid", gridTemplateRows: "repeat(4, max-content)", alignContent: "start", gap: 16, minHeight: 0 }}>
+        <div className="chrome-left" hidden={!explorerOpen} style={{ display: "grid", gridTemplateRows: "repeat(4, max-content)", alignContent: "start", gap: 16, minHeight: 0 }}>
+          <MapExplorer islands={catalogue} scene={scene} frame={frame} activeIsland={activeIsland}
+            onIsland={(id) => { setActiveIsland(id); setFocusRegion(null); setSelectedId(null); }}
+            routeMode={routeMode} onRouteMode={setRouteMode} fromId={routeFrom} toId={routeTo}
+            onFrom={setRouteFrom} onTo={setRouteTo} stops={stops} route={route} />
+          <details className="workspace-details"><summary>Outcomes & scenario tools</summary>
           <MetricsPanel frame={frame} policy={policy} />
           <InjectionPanel
             scene={scene}
@@ -371,11 +409,11 @@ export default function ControlRoomPage() {
           <section className="panel">
             <header className="panel-header"><span className="panel-title">Participants</span></header>
             <div className="panel-body">
-              <select className="speed-select" style={{ width: "100%" }} value={participantId} onChange={(event) => setParticipantId(event.target.value)}>
+              <SelectControl aria-label="Participant" className="speed-select" style={{ width: "100%" }} value={participantId} onValueChange={(value) => setParticipantId(value)}>
                 {scene.participants.filter((item) => item.productActorId).map((participant) => (
                   <option key={participant.simulationActorId} value={participant.productActorId ?? ""}>{participant.displayName} · {participant.role.toLowerCase()}</option>
                 ))}
-              </select>
+              </SelectControl>
               <button type="button" className="run-button participant-button" disabled={!selectedParticipant || policy !== "HARVEST"} onClick={() => void openParticipant()}>
                 Open participant website
               </button>
@@ -393,8 +431,9 @@ export default function ControlRoomPage() {
               />
             </div>
           </section>
+          </details>
         </div>
-        <div className="chrome-right" style={{ display: "grid", gridTemplateRows: "1fr 1fr", gap: 16, minHeight: 0 }}>
+        <div className="chrome-right" style={{ display: selectedId || selectedAction || showActivity ? "grid" : "none", gridTemplateRows: "1fr 1fr", gap: 16, minHeight: 0 }}>
           <Inspector
             scene={scene}
             frame={frame}

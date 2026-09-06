@@ -361,3 +361,27 @@ dismissible: a screenshot must not be able to separate a claim from its label.
 
 Nothing shown here is measured impact from a deployed system, and it must never
 be presented as such.
+
+
+## Caribbean explorer (#112)
+
+The saved-run workspace opens on a Caribbean overview. **Islands** searches all
+28 catalogue islands and territories; choosing one flies to its published camera
+location without altering the run scope. Islands outside the saved run are
+explicitly geographic context, with no implied simulated activity.
+
+**A → B route** accepts two clicks on mapped participants or two accessible point
+selections. It finds the shortest distance on the saved, undirected road graph,
+using each segment's recorded distance. Unconnected public places and cross-island
+pairs show **No recorded road connection**. No access roads, maritime transfers,
+travel times or actual road geometry are invented. Routes are clearly labelled
+synthetic/schematic; this is an exploration tool and creates no operational state.
+Recorded degraded segments are flagged, rather than equated with road closures.
+Roads and sea-link lines are hidden by default; mission paths appear only when
+selected, while vehicle markers and weather remain visible.
+
+Run setup is collapsible; outcomes, disruptions, participant replay and the map
+key remain under **Outcomes & scenario tools**. **Activity** reveals the inspector
+and event feed. Custom searchable menus preserve keyboard selection and Escape.
+The map pauses rendering when its WebGL drawing buffer has zero dimensions during
+an embedded-browser resize, and resumes when a drawable surface is available.

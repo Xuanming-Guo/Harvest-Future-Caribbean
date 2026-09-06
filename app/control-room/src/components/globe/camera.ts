@@ -92,7 +92,7 @@ export async function flyToRegion(
   const destination = target ?? options?.overview ?? ISLAND_OVERVIEW;
   const destinationHeight = target ? APPROACH_HEIGHT_M : options?.overviewHeightM ?? ISLAND_OVERVIEW_HEIGHT_M;
   const destinationPitch = target ? APPROACH_PITCH_DEGREES : OVERVIEW_PITCH_DEGREES;
-  const immediate = options?.immediate === true || prefersReducedMotion();
+  const immediate = options?.immediate === true || prefersReducedMotion() || document.hidden;
 
   const finalDestination = Cesium.Cartesian3.fromDegrees(
     destination.longitude,

@@ -21,6 +21,7 @@ import type { Cartesian2, ScreenSpaceEventHandler, Viewer } from "cesium";
 import type { ControlRoomFrame, ControlRoomScene, GeoPoint } from "@harvest/simulation";
 import { missionPositionAt } from "@harvest/simulation";
 
+import type { MapRoute, MapStop } from "@/lib/map-route";
 import { flyToRegion } from "./camera";
 import { syncFrame, syncScene, type CesiumModule } from "./entities";
 import { createTerrariumTerrainProvider } from "./terrain";
@@ -44,6 +45,9 @@ export interface CesiumGlobeProps {
   focusRegion: string | null;
   /** Whether the weather overlay draws. False hides its entities and nothing else. */
   showWeather?: boolean;
+  mapTarget?: { latitude: number; longitude: number; heightM: number; key: string };
+  route?: MapRoute | null;
+  routeEndpoints?: MapStop[];
 }
 
 function overviewPoint(scene: ControlRoomScene): GeoPoint {
@@ -232,7 +236,7 @@ function pickSelectableEntity(
   // for anything built in entities.ts (each given its matching domain id), and
   // undefined for empty space or unpickable primitives such as the imagery.
   const top = viewer.scene.pick(position)?.id;
-  if (top instanceof Cesium.Entity && !isWeatherEntityId(top.id)) return String(top.id);
+  if (top instanceof Cesium.Entity && !isWeatherEntityId(top.id) && !top.id.startsWith("map-route::")) return String(top.id);
   if (!(top instanceof Cesium.Entity)) return null;
 
   // The overlay covers the whole island, so a plain pick would return a cloud
@@ -244,7 +248,7 @@ function pickSelectableEntity(
     const drilled = viewer.scene.drillPick(position, DRILL_PICK_LIMIT) as Array<{ id?: unknown }>;
     const selected = drilled
       .map((candidate) => candidate?.id)
-      .find((entity) => entity instanceof Cesium.Entity && !isWeatherEntityId(entity.id));
+      .find((entity) => entity instanceof Cesium.Entity && !isWeatherEntityId(entity.id) && !entity.id.startsWith("map-route::"));
     return selected instanceof Cesium.Entity ? String(selected.id) : null;
   } catch {
     // A drilled pick is the expensive path; if the renderer refuses it, treat
@@ -326,7 +330,7 @@ function resolveFocusPoint(
 }
 
 export default function CesiumGlobe(props: CesiumGlobeProps): React.JSX.Element {
-  const { scene, frame, atMs, selectedId, onSelect, focusRegion, showWeather = true } = props;
+  const { scene, frame, atMs, selectedId, onSelect, focusRegion, showWeather = true, mapTarget, route, routeEndpoints = [] } = props;
   const sceneRef = useRef(scene);
   sceneRef.current = scene;
 
@@ -350,6 +354,7 @@ export default function CesiumGlobe(props: CesiumGlobeProps): React.JSX.Element 
   // context against the same container.
   useEffect(() => {
     let cancelled = false;
+    let renderFrame = 0;
     let handler: ScreenSpaceEventHandler | null = null;
 
     async function setup(): Promise<void> {
@@ -373,6 +378,7 @@ export default function CesiumGlobe(props: CesiumGlobeProps): React.JSX.Element 
         // ConstructorOptions in favour of `baseLayer` (valid precisely when
         // `baseLayerPicker` is false, which it is here).
         baseLayer,
+        useDefaultRenderLoop: false,
         animation: false,
         timeline: false,
         baseLayerPicker: false,
@@ -394,6 +400,17 @@ export default function CesiumGlobe(props: CesiumGlobeProps): React.JSX.Element 
       cesiumRef.current = Cesium;
 
       applyPhotorealisticScene(Cesium, viewer);
+      // A hidden or resizing embedded browser can temporarily expose a zero-
+      // sized WebGL drawing buffer even while the canvas has CSS dimensions.
+      // Cesium's normal loop checks only CSS size and then crashes allocating
+      // depth textures. Wait for an actual drawable surface and resume naturally.
+      const render = () => {
+        if (cancelled || viewer.isDestroyed()) return;
+        viewer.resize();
+        if (viewer.scene.drawingBufferWidth > 0 && viewer.scene.drawingBufferHeight > 0) viewer.render();
+        renderFrame = requestAnimationFrame(render);
+      };
+      renderFrame = requestAnimationFrame(render);
 
       // Real elevation. Attached after construction rather than passed as a
       // viewer option so a failure here degrades to a smooth globe instead of
@@ -436,6 +453,7 @@ export default function CesiumGlobe(props: CesiumGlobeProps): React.JSX.Element 
 
     return () => {
       cancelled = true;
+      cancelAnimationFrame(renderFrame);
       handler?.destroy();
       const viewer = viewerRef.current;
       viewerRef.current = null;
@@ -464,6 +482,29 @@ export default function CesiumGlobe(props: CesiumGlobeProps): React.JSX.Element 
     if (!ready || !viewer || !Cesium || viewer.isDestroyed()) return;
     syncFrame(Cesium, viewer, scene, frame, atMs, selectedId);
   }, [ready, scene, frame, atMs, selectedId]);
+
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!ready || !viewer || viewer.isDestroyed() || !mapTarget) return;
+    previousFocusRef.current = null;
+    void flyToRegion(viewer, null, { overview: mapTarget, overviewHeightM: mapTarget.heightM });
+  }, [ready, mapTarget, scene]);
+
+  useEffect(() => {
+    const viewer = viewerRef.current, Cesium = cesiumRef.current;
+    if (!ready || !viewer || !Cesium || viewer.isDestroyed()) return;
+    for (const entity of [...viewer.entities.values]) if (entity.id.startsWith("map-route::")) viewer.entities.remove(entity);
+    if (route && route.points.length > 1) viewer.entities.add({ id: "map-route::path", polyline: {
+      positions: Cesium.Cartesian3.fromDegreesArray(route.points.flatMap((point) => [point.longitude, point.latitude])),
+      width: 6, material: Cesium.Color.fromCssColorString("#f1c55b"), clampToGround: true,
+    } });
+    routeEndpoints.forEach((stop, index) => viewer.entities.add({ id: `map-route::${index}`, position: Cesium.Cartesian3.fromDegrees(stop.position.longitude, stop.position.latitude),
+      label: { text: index === 0 ? "A" : "B", font: "bold 18px sans-serif", fillColor: Cesium.Color.WHITE,
+        showBackground: true, backgroundColor: Cesium.Color.fromCssColorString(index === 0 ? "#1d5c45" : "#ac7330"),
+        pixelOffset: new Cesium.Cartesian2(0, -30), disableDepthTestDistance: Infinity, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
+    }));
+    viewer.scene.requestRender();
+  }, [ready, scene, route, routeEndpoints]);
 
   // Whether the overlay animates at all. Settled once, on mount, because both
   // inputs are properties of the machine rather than of the run: an OS-level
