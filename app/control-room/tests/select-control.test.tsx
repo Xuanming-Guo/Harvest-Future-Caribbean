@@ -1,0 +1,21 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
+import SelectControl from "../src/components/SelectControl";
+it("offers keyboard selection and Escape without native select chrome", () => {
+  const change = vi.fn();
+  const { container } = render(<SelectControl aria-label="Island" value="a" onValueChange={change}><option value="a">Anguilla</option><option value="b">Barbados</option></SelectControl>);
+  const trigger = screen.getByRole("combobox", { name: "Island" });
+  fireEvent.keyDown(trigger, { key: "ArrowDown" });
+  const first = screen.getByRole("option", { name: "Anguilla" });
+  expect(first).toHaveFocus();
+  fireEvent.keyDown(first, { key: "ArrowDown" });
+  const second = screen.getByRole("option", { name: "Barbados" });
+  expect(second).toHaveFocus();
+  fireEvent.click(second);
+  expect(change).toHaveBeenCalledWith("b");
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  fireEvent.click(trigger);
+  fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
+  expect(trigger).toHaveFocus();
+  expect(container.querySelector("select")).toBeNull();
+});

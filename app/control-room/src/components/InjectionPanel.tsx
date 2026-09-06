@@ -1,5 +1,7 @@
 "use client";
 
+import SelectControl from "@/components/SelectControl";
+
 /**
  * Event injection.
  *
@@ -177,19 +179,19 @@ export default function InjectionPanel({ scene, injections, comparison, onChange
         <label className="metric-label" htmlFor="injection-kind">
           What happens
         </label>
-        <select
+        <SelectControl
           id="injection-kind"
           className="speed-select"
           style={{ width: "100%", marginTop: 6 }}
           value={pending}
-          onChange={(event) => setPending(event.target.value)}
+          onValueChange={(value) => setPending(value)}
         >
           {OPTIONS.map((option) => (
             <option key={option.id} value={option.id}>
               {option.label}
             </option>
           ))}
-        </select>
+        </SelectControl>
 
         <p style={{ margin: "10px 0 12px", fontSize: 12, lineHeight: 1.5, color: "var(--text-muted)" }}>
           {option?.description}
