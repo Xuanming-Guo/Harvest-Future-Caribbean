@@ -750,7 +750,7 @@ export async function approveAllocation(
       if (!order || order.lifecycleStatus !== "AWAITING_APPROVAL") {
         throw httpError(409, "STALE_APPROVAL", "The order is no longer awaiting this approval.");
       }
-      const lines = await tx.allocationLine.findMany({ where: { allocationId: allocation.id } });
+      const lines = await tx.allocationLine.findMany({ orderBy: { creationOrder: "asc" }, where: { allocationId: allocation.id } });
       const decidedAt = operationNow();
       const updatedApproval = await tx.approval.update({
         where: { id: approvalId },

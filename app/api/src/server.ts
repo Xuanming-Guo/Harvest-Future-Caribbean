@@ -195,7 +195,7 @@ type StoredLineOutcome = { cropBatchId?: unknown; rejectedQuantity?: { value?: u
 /** Narrows the caller's visible orders to those committing one crop batch. */
 async function orderIdsForCropBatch(cropBatchId: string, visible: string[]) {
   if (!visible.length) return [];
-  const lines = await prisma.allocationLine.findMany({ where: { cropBatchId }, select: { allocationId: true } });
+  const lines = await prisma.allocationLine.findMany({ orderBy: { creationOrder: "asc" }, where: { cropBatchId }, select: { allocationId: true } });
   if (!lines.length) return [];
   const allocations = await prisma.allocation.findMany({ where: { id: { in: [...new Set(lines.map((line) => line.allocationId))] } }, select: { orderId: true } });
   const matched = new Set(allocations.map((allocation) => allocation.orderId));
@@ -290,7 +290,7 @@ async function approvalContext(row: { subjectType: string; subjectId: string; re
   if (!allocation) return undefined;
   const order = await prisma.order.findUnique({ where: { id: allocation.orderId } });
   if (!order) return undefined;
-  const lines = await prisma.allocationLine.findMany({ where: { allocationId: allocation.id } });
+  const lines = await prisma.allocationLine.findMany({ orderBy: { creationOrder: "asc" }, where: { allocationId: allocation.id } });
   const listings = await prisma.listing.findMany({ where: { id: { in: lines.map((line) => line.listingId) } } });
   const listingById = new Map(listings.map((listing) => [listing.id, listing]));
   const requestedActor = await prisma.actor.findUnique({ where: { id: row.requestedFromActorId } });
@@ -854,7 +854,7 @@ export async function buildServer() {
     const row = await prisma.order.findUnique({ where: { id: orderId } });
     if (!row) throw httpError(404, "ORDER_NOT_FOUND", "Order was not found.");
     const allocation = await prisma.allocation.findFirst({ where: { orderId }, orderBy: { createdAt: "desc" } });
-    const allLines = allocation ? await prisma.allocationLine.findMany({ where: { allocationId: allocation.id } }) : [];
+    const allLines = allocation ? await prisma.allocationLine.findMany({ orderBy: { creationOrder: "asc" }, where: { allocationId: allocation.id } }) : [];
     // A farmer reads its own committed quantity, the way the approval card
     // already shows it. What a second farm contributed to the same order is
     // that farm's business, not this one's.
@@ -1458,7 +1458,7 @@ export async function buildServer() {
     if (!Array.isArray(body.lineOutcomes) || body.lineOutcomes.length === 0) throw httpError(400, "VALIDATION_FAILED", "lineOutcomes must contain each committed crop batch.");
     const allocation = await prisma.allocation.findFirst({ where: { orderId: order.id, status: "APPROVED" }, orderBy: { createdAt: "desc" } });
     if (!allocation) throw httpError(409, "ALLOCATION_NOT_FOUND", "The committed allocation was not found.");
-    const allocationLines = await prisma.allocationLine.findMany({ where: { allocationId: allocation.id } });
+    const allocationLines = await prisma.allocationLine.findMany({ orderBy: { creationOrder: "asc" }, where: { allocationId: allocation.id } });
     const committedByBatch = new Map<string, number>();
     for (const line of allocationLines) committedByBatch.set(line.cropBatchId, (committedByBatch.get(line.cropBatchId) ?? 0) + line.quantity);
     const sharedReason = readDecisionReason(body);
