@@ -1,4 +1,5 @@
 import { PrismaClient, Provenance } from "@prisma/client";
+import { RandomSource, WeatherModel } from "@harvest/simulation";
 
 const databaseUrl =
   process.env.DATABASE_URL ??
@@ -12,10 +13,21 @@ const ids = {
   coordinator: "a0000000-0000-4000-8000-000000000003",
   transporter: "a0000000-0000-4000-8000-000000000004",
   operations: "a0000000-0000-4000-8000-000000000006",
+  buyerPiton: "a0000000-0000-4000-8000-000000000007",
+  buyerSavannes: "a0000000-0000-4000-8000-000000000008",
+  buyerRodney: "a0000000-0000-4000-8000-000000000009",
   farmOne: "14141414-1414-4414-8414-141414141414",
   farmTwo: "14141414-1414-4414-8414-141414141415",
+  farmCanaries: "14141414-1414-4414-8414-141414141416",
+  farmDennery: "14141414-1414-4414-8414-141414141417",
+  farmChoiseul: "14141414-1414-4414-8414-141414141418",
+  farmBabonneau: "14141414-1414-4414-8414-141414141419",
   batchOne: "11111111-1111-4111-8111-111111111111",
   batchTwo: "11111111-1111-4111-8111-111111111112",
+  batchCanaries: "11111111-1111-4111-8111-111111111113",
+  batchDennery: "11111111-1111-4111-8111-111111111114",
+  batchChoiseul: "11111111-1111-4111-8111-111111111115",
+  batchBabonneau: "11111111-1111-4111-8111-111111111116",
   observationOne: "12121212-1212-4212-8212-121212121212",
   observationTwo: "12121212-1212-4212-8212-121212121213",
   predictionOne: "44444444-4444-4444-8444-444444444444",
@@ -23,6 +35,9 @@ const ids = {
   listingOne: "16161616-1616-4616-8616-161616161616",
   listingTwo: "16161616-1616-4616-8616-161616161617",
   demand: "18181818-1818-4818-8818-181818181818",
+  demandPiton: "18181818-1818-4818-8818-181818181819",
+  demandSavannes: "18181818-1818-4818-8818-181818181820",
+  demandRodney: "18181818-1818-4818-8818-181818181821",
   order: "20202020-2020-4020-8020-202020202020",
   allocation: "22222222-2222-4222-8222-222222222222",
   buyerApproval: "21212121-2121-4121-8121-212121212121",
@@ -68,6 +83,7 @@ async function main() {
     prisma.cropObservationIntake.deleteMany(),
     prisma.traceStep.deleteMany(),
     prisma.domainEvent.deleteMany(),
+    prisma.weatherObservation.deleteMany(),
     prisma.simulationActorMapping.deleteMany(),
     prisma.pairedRun.deleteMany(),
     prisma.simulationRun.deleteMany(),
@@ -91,6 +107,9 @@ async function main() {
     [ids.coordinator, "coordinator-maya", "Maya Charles", "COORDINATOR"],
     [ids.transporter, "transporter-daniel", "Daniel Felix", "TRANSPORTER"],
     [ids.operations, "operations-demo", "Harvest Operations", "OPERATIONS"],
+    [ids.buyerPiton, "buyer-piton-demo", "Piton Lantern Hotel", "BUYER"],
+    [ids.buyerSavannes, "buyer-savannes-demo", "Savannes Bay Inn", "BUYER"],
+    [ids.buyerRodney, "buyer-rodney-demo", "Rodney Bay House", "BUYER"],
   ] as const;
 
   for (const [id, authSubject, name, role] of actors) {
@@ -104,6 +123,16 @@ async function main() {
     where: { id: ids.buyer },
     data: { defaultLatitude: 14.0101, defaultLongitude: -60.9875, serviceZone: "Castries" },
   });
+  for (const hotel of [
+    { id: ids.buyerPiton, latitude: 13.826, longitude: -61.058, serviceZone: "Soufrière" },
+    { id: ids.buyerSavannes, latitude: 13.768, longitude: -60.922, serviceZone: "Micoud" },
+    { id: ids.buyerRodney, latitude: 14.073, longitude: -60.951, serviceZone: "Gros Islet" },
+  ]) {
+    await prisma.actor.update({
+      where: { id: hotel.id },
+      data: { defaultLatitude: hotel.latitude, defaultLongitude: hotel.longitude, serviceZone: hotel.serviceZone },
+    });
+  }
 
   // These published buyer standards are stakeholder/reference material for the
   // demo. Their guidance is paraphrased only from the linked public documents.
@@ -224,12 +253,32 @@ async function main() {
     update: { name: "Mabouya Growers", farmerId: ids.farmerTwo, latitude: 13.941, longitude: -60.918, productionZone: "Mabouya Valley" },
     create: { id: ids.farmTwo, name: "Mabouya Growers", farmerId: ids.farmerTwo, latitude: 13.941, longitude: -60.918, productionZone: "Mabouya Valley" },
   });
+  for (const farm of [
+    { id: ids.farmCanaries, name: "Canaries Hillside Farm", latitude: 13.902, longitude: -61.071, productionZone: "Canaries" },
+    { id: ids.farmDennery, name: "Dennery Coast Fields", latitude: 13.899, longitude: -60.888, productionZone: "Dennery" },
+    { id: ids.farmChoiseul, name: "Choiseul Roots Cooperative", latitude: 13.775, longitude: -61.047, productionZone: "Choiseul" },
+    { id: ids.farmBabonneau, name: "Babonneau Garden", latitude: 14.005, longitude: -60.945, productionZone: "Babonneau" },
+  ]) {
+    await prisma.farm.upsert({
+      where: { id: farm.id },
+      update: { ...farm, farmerId: ids.farmerOne },
+      create: { ...farm, farmerId: ids.farmerOne },
+    });
+  }
 
   for (const { farmId, actorId, role } of [
     { farmId: ids.farmOne, actorId: ids.farmerOne, role: "FARMER" },
     { farmId: ids.farmTwo, actorId: ids.farmerTwo, role: "FARMER" },
     { farmId: ids.farmOne, actorId: ids.coordinator, role: "COORDINATOR" },
     { farmId: ids.farmTwo, actorId: ids.coordinator, role: "COORDINATOR" },
+    { farmId: ids.farmCanaries, actorId: ids.farmerOne, role: "FARMER" },
+    { farmId: ids.farmDennery, actorId: ids.farmerOne, role: "FARMER" },
+    { farmId: ids.farmChoiseul, actorId: ids.farmerOne, role: "FARMER" },
+    { farmId: ids.farmBabonneau, actorId: ids.farmerOne, role: "FARMER" },
+    { farmId: ids.farmCanaries, actorId: ids.coordinator, role: "COORDINATOR" },
+    { farmId: ids.farmDennery, actorId: ids.coordinator, role: "COORDINATOR" },
+    { farmId: ids.farmChoiseul, actorId: ids.coordinator, role: "COORDINATOR" },
+    { farmId: ids.farmBabonneau, actorId: ids.coordinator, role: "COORDINATOR" },
   ] as const) {
     await prisma.farmPermission.upsert({
       where: { farmId_actorId: { farmId, actorId } },
@@ -259,6 +308,18 @@ async function main() {
       where: { id: batch.id },
       update: { ...batch, cropType: "CUCUMBER", status: "HARVEST_READY", provenance: Provenance.MODEL_PREDICTED },
       create: { ...batch, cropType: "CUCUMBER", status: "HARVEST_READY", provenance: Provenance.MODEL_PREDICTED },
+    });
+  }
+  for (const batch of [
+    { id: ids.batchCanaries, farmId: ids.farmCanaries, cropType: "DASHEEN", status: "GROWING", availableToPromise: 12 },
+    { id: ids.batchDennery, farmId: ids.farmDennery, cropType: "CUCUMBER", status: "PLANNED", availableToPromise: 9 },
+    { id: ids.batchChoiseul, farmId: ids.farmChoiseul, cropType: "DASHEEN", status: "HARVEST_READY", availableToPromise: 18 },
+    { id: ids.batchBabonneau, farmId: ids.farmBabonneau, cropType: "CUCUMBER", status: "HARVESTED", availableToPromise: 7 },
+  ]) {
+    await prisma.cropBatch.upsert({
+      where: { id: batch.id },
+      update: { ...batch, provenance: Provenance.SYNTHETIC },
+      create: { ...batch, provenance: Provenance.SYNTHETIC },
     });
   }
 
@@ -303,6 +364,7 @@ async function main() {
       create: {
         ...prediction,
         modelVersion: "fixture-yield-v0.1.0",
+        estimationMode: "DETERMINISTIC_FALLBACK",
         harvestStart: at("2026-09-05T00:00:00Z"),
         harvestEnd: at("2026-09-08T00:00:00Z"),
         featureSnapshot: {
@@ -354,6 +416,22 @@ async function main() {
       createdAt: at("2026-09-04T08:10:00Z"),
     },
   });
+  for (const demand of [
+    { id: ids.demandPiton, buyerId: ids.buyerPiton, cropType: "DASHEEN", quantity: 24, neededBy: "2026-09-06T14:00:00Z", latitude: 13.826, longitude: -61.058, maxUnitPrice: 9.5, status: "OPEN" },
+    { id: ids.demandSavannes, buyerId: ids.buyerSavannes, cropType: "CUCUMBER", quantity: 32, neededBy: "2026-09-07T16:00:00Z", latitude: 13.768, longitude: -60.922, maxUnitPrice: 8.25, status: "OPEN" },
+    { id: ids.demandRodney, buyerId: ids.buyerRodney, cropType: "CUCUMBER", quantity: 18, neededBy: "2026-09-08T13:00:00Z", latitude: 14.073, longitude: -60.951, maxUnitPrice: 8.75, status: "MATCHING" },
+  ]) {
+    await prisma.buyerDemand.upsert({
+      where: { id: demand.id },
+      update: { status: demand.status },
+      create: {
+        ...demand,
+        neededBy: at(demand.neededBy),
+        currency: "XCD",
+        createdAt: at("2026-09-04T08:11:00Z"),
+      },
+    });
+  }
 
   await prisma.order.upsert({
     where: { id: ids.order },
@@ -511,6 +589,8 @@ async function main() {
     ],
   });
 
+  await seedIslandWeather();
+
   const eventBase = {
     traceId: ids.trace,
     correlationId: "d0000000-0000-4000-8000-000000000001",
@@ -528,6 +608,68 @@ async function main() {
       { ...eventBase, id: "e0000000-0000-4000-8000-000000000006", eventType: "ALLOCATION_PROPOSED", occurredAt: at("2026-09-04T08:13:00Z"), actorId: ids.coordinator, entityId: ids.allocation, causationId: "e0000000-0000-4000-8000-000000000005", provenance: Provenance.INFERRED, payload: { allocationId: ids.allocation, orderId: ids.order, lines: [{ cropBatchId: ids.batchOne, quantity: { value: 14, unit: "kg" } }, { cropBatchId: ids.batchTwo, quantity: { value: 6, unit: "kg" } }] } },
     ],
   });
+}
+
+/**
+ * A week of realised weather for the development island, and the forecast each
+ * of those days issued.
+ *
+ * Built with the simulation's own `WeatherModel` rather than by hand, so the
+ * seeded world and a saved run are the same weather implementation and cannot
+ * drift apart. Days after `LAST_SEEDED_DAY` are generated because a forecast
+ * needs something to approximate, and are then deliberately not stored: the
+ * table holds only days that have occurred, which is what makes it structurally
+ * unable to leak future weather to a participant.
+ *
+ * Everything written here is SYNTHETIC. No live weather service is contacted.
+ */
+async function seedIslandWeather() {
+  const ISLAND_ID = "saint-lucia";
+  const FIRST_SEEDED_DAY = "2026-08-29";
+  const LAST_SEEDED_DAY = "2026-09-04";
+  const GENERATED_DAYS = 12;
+
+  const startsAt = Date.parse(`${FIRST_SEEDED_DAY}T00:00:00Z`);
+  const random = new RandomSource(20260904);
+  const rainStream = random.stream("seed:weather:rain");
+  const rainfall = new Map<string, number>();
+  for (let day = 0; day < GENERATED_DAYS; day += 1) {
+    const date = new Date(startsAt + day * 86_400_000).toISOString().slice(0, 10);
+    rainfall.set(date, Number(Math.max(0, rainStream.normal(12, 8)).toFixed(2)));
+  }
+
+  const model = new WeatherModel({
+    islandIds: [ISLAND_ID],
+    startsAt,
+    days: GENERATED_DAYS,
+    rainfallMm: (_islandId, date) => rainfall.get(date) ?? 0,
+    realisedStream: random.stream("seed:weather:realised"),
+    forecastStream: random.stream("seed:weather:forecast"),
+  });
+
+  const rows = model.dates
+    .filter((date) => date <= LAST_SEEDED_DAY)
+    .map((date) => {
+      const realised = model.truthOn(ISLAND_ID, date);
+      if (!realised) return null;
+      return {
+        islandId: ISLAND_ID,
+        observedOn: at(`${date}T00:00:00Z`),
+        condition: realised.condition,
+        rainMm: realised.rainMm,
+        windKph: realised.windKph,
+        windFromDegrees: realised.windFromDegrees,
+        cloudCoverFraction: realised.cloudCoverFraction,
+        tempBand: realised.tempBand,
+        provenance: Provenance.SYNTHETIC,
+        forecast: model.forecastIssuedOn(ISLAND_ID, date).map((day) => ({ ...day, provenance: Provenance.MODEL_PREDICTED })),
+        forecastProvenance: Provenance.MODEL_PREDICTED,
+        simulationRunId: null,
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null);
+
+  await prisma.weatherObservation.createMany({ data: rows, skipDuplicates: true });
 }
 
 main()

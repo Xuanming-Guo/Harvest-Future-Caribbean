@@ -5,9 +5,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ActionPreviewMessage } from "@harvest/shared";
 import type { InjectedDisruption, ReplayTimeline, SimulationAgentAction } from "@harvest/simulation";
 
-import ActionPreview from "@/components/panels/ActionPreview";
+import EstimationModeControl from "@/components/EstimationModeControl";
 import InjectionPanel from "@/components/InjectionPanel";
 import IslandScopeControls from "@/components/IslandScopeControls";
+import ActionPreview from "@/components/panels/ActionPreview";
 import EventFeed from "@/components/panels/EventFeed";
 import Inspector from "@/components/panels/Inspector";
 import ReferenceAttribution from "@/components/panels/ReferenceAttribution";
@@ -18,6 +19,7 @@ import PlaybackControls from "@/components/transport/PlaybackControls";
 import { actionPreviewFrameUrl, toActionPreviewMessage } from "@/lib/action-preview";
 import { usePlayback } from "@/lib/playback";
 import {
+  DEFAULT_ESTIMATION_MODE,
   DEFAULT_SEED,
   DEFAULT_SCENARIO,
   PARTICIPANT_WEBSITE_URL,
@@ -31,6 +33,7 @@ import {
   loadTimeline,
   loadWorldFrame,
   type DecisionMode,
+  type EstimationMode,
   type PolicyName,
   type RunOutcomeComparison,
   type SavedRun,
@@ -48,6 +51,7 @@ export default function ControlRoomPage() {
   const [policy, setPolicy] = useState<PolicyName>("HARVEST");
   const [seedInput, setSeedInput] = useState(String(DEFAULT_SEED));
   const [decisionMode, setDecisionMode] = useState<DecisionMode>("DETERMINISTIC");
+  const [estimationMode, setEstimationMode] = useState<EstimationMode>(DEFAULT_ESTIMATION_MODE);
   const [scopeMode, setScopeMode] = useState<"SELECTED" | "ALL">("ALL");
   const [islandIds, setIslandIds] = useState<string[]>(["saint-lucia"]);
   const [injections, setInjections] = useState<InjectedDisruption[]>([]);
@@ -60,6 +64,10 @@ export default function ControlRoomPage() {
   const [participantId, setParticipantId] = useState("");
   const [preview, setPreview] = useState<{ message: ActionPreviewMessage; frameUrl: string | null; error: string | null } | null>(null);
   const [focusRegion, setFocusRegion] = useState<string | null>(null);
+  // The weather overlay is on by default: weather is what the saved run says
+  // happened, and hiding it by default would make the physical world the
+  // simulation models invisible until someone went looking for a switch.
+  const [weatherEnabled, setWeatherEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const playback = usePlayback(timeline);
@@ -77,6 +85,7 @@ export default function ControlRoomPage() {
       setPolicy(run.policy);
       setSeedInput(String(run.seed));
       setDecisionMode(run.decisionMode);
+      setEstimationMode(run.estimationMode);
       setInjections(run.disruptions as InjectedDisruption[]);
       const firstMapped = loaded.scene.participants.find((item) => item.productActorId);
       setParticipantId(firstMapped?.productActorId ?? "");
@@ -142,14 +151,14 @@ export default function ControlRoomPage() {
     setLoading(true);
     setError(null);
     try {
-      const created = await createSavedRun({ scenarioId, policy, seed, decisionMode, disruptions: injections, scope: scopeMode === "ALL" ? { mode: "ALL" } : { mode: "SELECTED", islandIds } });
+      const created = await createSavedRun({ scenarioId, policy, seed, decisionMode, estimationMode, disruptions: injections, scope: scopeMode === "ALL" ? { mode: "ALL" } : { mode: "SELECTED", islandIds } });
       const run = await refreshRuns(created.runId) ?? created;
       await loadRun(run);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
       setLoading(false);
     }
-  }, [decisionMode, injections, islandIds, loadRun, policy, refreshRuns, scenarioId, scopeMode, seedInput]);
+  }, [decisionMode, estimationMode, injections, islandIds, loadRun, policy, refreshRuns, scenarioId, scopeMode, seedInput]);
 
   const changeInjections = useCallback(async (next: InjectedDisruption[]) => {
     const additions = next.slice(injections.length);
@@ -233,6 +242,16 @@ export default function ControlRoomPage() {
     () => timeline ? timeline.frames.slice(0, state.frameIndex + 1) : [],
     [timeline, state.frameIndex],
   );
+  /*
+   * Whether this run ever drew a recorded weather day, computed over the whole
+   * saved timeline rather than the frame on screen: the attribution line names
+   * the datasets a run *uses*, and a line that appeared and vanished as
+   * playback crossed a generated day would be noise, not provenance.
+   */
+  const recordedWeather = useMemo(
+    () => (timeline?.frames ?? []).some((item) => (item.weather ?? []).some((reading) => reading.evidenceType === "PUBLIC_REFERENCE")),
+    [timeline],
+  );
   const disruptionMarkers = useMemo(() => {
     if (!timeline) return [];
     const seen = new Set<number>();
@@ -273,6 +292,12 @@ export default function ControlRoomPage() {
           if (/^\d*$/.test(next)) setSeedInput(next);
         }} />
       </label>
+      {/*
+        * Baseline participants never call the Product API, so the control is
+        * disabled rather than hidden: the run still records a value, and
+        * hiding it would make the stored field look like a bug.
+        */}
+      <EstimationModeControl value={estimationMode} onChange={setEstimationMode} disabled={policy === "BASELINE"} />
       <label>Decision mode
         <select value={decisionMode} onChange={(event) => setDecisionMode(event.target.value as DecisionMode)}>
           <option value="DETERMINISTIC">Deterministic</option>
@@ -316,16 +341,24 @@ export default function ControlRoomPage() {
   return (
     <main className="control-room">
       <div className="globe-layer">
-        <CesiumGlobe scene={scene} frame={frame} atMs={state.atMs} selectedId={selectedId} onSelect={handleSelect} focusRegion={focusRegion} />
+        <CesiumGlobe scene={scene} frame={frame} atMs={state.atMs} selectedId={selectedId} onSelect={handleSelect} focusRegion={focusRegion} showWeather={weatherEnabled} />
       </div>
-      <ReferenceAttribution sources={scene.referenceDataSources} />
+      <ReferenceAttribution sources={scene.referenceDataSources} maritime={scene.maritimeAttributions ?? []} maritimeNote={scene.maritimeDisclaimer} recordedWeather={recordedWeather} />
       <div className="chrome">
         <div className="chrome-header">
-          <Masthead scene={scene} />
+          <Masthead scene={scene} frame={frame} estimationMode={currentRun?.estimationMode} estimationModeUsed={currentRun?.policy !== "BASELINE"} />
           {setup}
           {error && <p className="run-error" role="alert">{error}</p>}
         </div>
-        <div className="chrome-left" style={{ display: "grid", gridTemplateRows: "auto auto 1fr", gap: 16, minHeight: 0 }}>
+        {/*
+          * Content-sized rows with the column itself scrolling. A `1fr` last
+          * row gave the final panel whatever the two above it left over, which
+          * at 1080p was nothing: the map key — and with it the weather switch
+          * and reading — sat under the transport bar, unreachable. `max-content`
+          * rather than `auto` because an over-full grid shrinks `auto` rows back
+          * down to their min-content, which clipped the metric tiles instead.
+          */}
+        <div className="chrome-left" style={{ display: "grid", gridTemplateRows: "repeat(4, max-content)", alignContent: "start", gap: 16, minHeight: 0 }}>
           <MetricsPanel frame={frame} policy={policy} />
           <InjectionPanel
             scene={scene}
@@ -346,8 +379,18 @@ export default function ControlRoomPage() {
               <button type="button" className="run-button participant-button" disabled={!selectedParticipant || policy !== "HARVEST"} onClick={() => void openParticipant()}>
                 Open participant website
               </button>
-              <p className="panel-help">Opens the participant’s normal workspace in read-only replay mode.</p>
-              <Legend />
+              <p className="panel-help" style={{ marginBottom: 0 }}>Opens the participant’s normal workspace in read-only replay mode.</p>
+            </div>
+          </section>
+          <section className="panel">
+            <header className="panel-header"><span className="panel-title">Map key</span></header>
+            <div className="panel-body">
+              <Legend
+                frame={frame}
+                weatherLegend={scene.weatherLegend}
+                weatherEnabled={weatherEnabled}
+                onWeatherEnabledChange={setWeatherEnabled}
+              />
             </div>
           </section>
         </div>

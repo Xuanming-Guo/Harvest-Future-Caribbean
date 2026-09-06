@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { prisma } from "../src/db.js";
 import { buildServer } from "../src/server.js";
@@ -62,13 +62,19 @@ function cropStandardPayload(status: "DRAFT" | "PUBLISHED" = "PUBLISHED") {
 }
 
 beforeAll(async () => {
+  // The seeded workflow has dated September orders; only freeze Date, not I/O timers.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-06T08:00:00Z"));
   await server.listen({ host: "127.0.0.1", port: 0 });
   const address = server.server.address() as AddressInfo;
   apiBaseUrl = `http://127.0.0.1:${address.port}`;
   for (const persona of ["buyer-hotel", "farmer-ana", "farmer-marcus", "transporter-daniel", "coordinator-maya", "operations-demo"]) await signIn(persona);
 });
 
-afterAll(async () => server.close());
+afterAll(async () => {
+  await server.close();
+  vi.useRealTimers();
+});
 
 describe("participant Product API", () => {
   it("accepts the loopback spelling used by the local control-room preview", async () => {
@@ -92,9 +98,10 @@ describe("participant Product API", () => {
 
     const ana = await server.inject({ method: "GET", url: "/v1/crop-batches", headers: auth("farmer-ana") });
     expect(ana.statusCode).toBe(200);
-    expect(ana.json().items).toHaveLength(1);
-    expect(ana.json().items[0].verificationStatus).toBe("OPEN");
-    expect(ana.json().items[0].latestDecision).toMatchObject({
+    const anaCucumber = ana.json().items.find((item: { cropBatchId: string }) => item.cropBatchId === "11111111-1111-4111-8111-111111111111");
+    expect(anaCucumber).toBeDefined();
+    expect(anaCucumber.verificationStatus).toBe("OPEN");
+    expect(anaCucumber.latestDecision).toMatchObject({
       source: "DELIVERY",
       reasonCode: "SIZE_OR_GRADE",
       nextAction: "Grade cucumbers to at least 15 cm before the next pickup and keep smaller fruit for the local market.",
@@ -125,6 +132,233 @@ describe("participant Product API", () => {
     expect(coordinatorTasks.json().items).toHaveLength(1);
     const farmerTasks = await server.inject({ method: "GET", url: "/v1/verification-tasks", headers: auth("farmer-ana") });
     expect(farmerTasks.statusCode).toBe(403);
+  });
+
+  it("builds the island world from newly accessible farms and actionable hotel demand", async () => {
+    const farmId = randomUUID();
+    const batchId = randomUUID();
+    await prisma.farm.create({ data: { id: farmId, name: "Canaries Hillside Plot", farmerId: "a0000000-0000-4000-8000-000000000001", latitude: 13.90, longitude: -61.07, productionZone: "Canaries" } });
+    await prisma.cropBatch.create({ data: { id: batchId, farmId, cropType: "DASHEEN", status: "GROWING", availableToPromise: 9, provenance: "OBSERVED" } });
+
+    try {
+      const farmer = await server.inject({ method: "GET", url: "/v1/world-map", headers: auth("farmer-ana") });
+      expect(farmer.statusCode).toBe(200);
+      expect(farmer.json()).toMatchObject({ region: "Saint Lucia" });
+      expect(farmer.json().locations).toEqual(expect.arrayContaining([
+        expect.objectContaining({ locationId: farmId, kind: "FARM", displayName: "Canaries Hillside Plot", identified: true, access: "CROP_PROGRESS", crops: [expect.objectContaining({ cropBatchId: batchId, cropType: "DASHEEN", status: "GROWING" })] }),
+        // Bay Gardens already took a delivery from Ana, so it keeps its name.
+        expect.objectContaining({ kind: "HOTEL", displayName: "Bay Gardens Hotel", identified: true, access: "BUYER_DEMAND", opportunities: [expect.objectContaining({ cropType: "CUCUMBER", quantity: { value: 20, unit: "kg" } })] }),
+        expect.objectContaining({ kind: "FARM", displayName: "Choiseul Roots Cooperative", identified: true, serviceZone: "Choiseul", access: "CROP_PROGRESS", crops: [expect.objectContaining({ cropType: "DASHEEN", status: "HARVEST_READY" })] }),
+        // Piton Lantern has an open request Ana can fill and no agreed order
+        // with her, so the request is actionable while the hotel stays a
+        // zone-level marker.
+        expect.objectContaining({ kind: "HOTEL", displayName: "A buyer in Soufrière", identified: false, serviceZone: "Soufrière", access: "BUYER_DEMAND", opportunities: [expect.objectContaining({ cropType: "DASHEEN", quantity: { value: 24, unit: "kg" } })] }),
+      ]));
+      expect(farmer.body).not.toContain("Piton Lantern Hotel");
+      expect(farmer.body).not.toContain("13.9");
+      expect(farmer.body).not.toContain("-61.07");
+
+      const transporter = await server.inject({ method: "GET", url: "/v1/world-map", headers: auth("transporter-daniel") });
+      expect(transporter.statusCode).toBe(200);
+      expect(transporter.json().locations.every((location: { crops: unknown[]; opportunities: unknown[] }) => !location.crops.length && !location.opportunities.length)).toBe(true);
+      expect(transporter.body).not.toContain(farmId);
+    } finally {
+      await prisma.cropBatch.delete({ where: { id: batchId } });
+      await prisma.farm.delete({ where: { id: farmId } });
+    }
+  });
+
+  it("scopes the map and the delivery view to what each role may see", async () => {
+    const ids = {
+      ana: "a0000000-0000-4000-8000-000000000001",
+      marcus: "a0000000-0000-4000-8000-000000000005",
+      bayGardens: "a0000000-0000-4000-8000-000000000002",
+      piton: "a0000000-0000-4000-8000-000000000007",
+      rodney: "a0000000-0000-4000-8000-000000000009",
+      farmAna: "14141414-1414-4414-8414-141414141414",
+      farmMarcus: "14141414-1414-4414-8414-141414141415",
+      farmChoiseul: "14141414-1414-4414-8414-141414141418",
+      batchAna: "11111111-1111-4111-8111-111111111111",
+      batchMarcus: "11111111-1111-4111-8111-111111111112",
+      bayGardensOrder: "20202020-2020-4020-8020-202020202020",
+    };
+    const pitonOrderId = randomUUID();
+    const sharedOrderId = randomUUID();
+    const sharedAllocationId = randomUUID();
+    const sharedMissionId = randomUUID();
+    const rivalTransporterId = randomUUID();
+    const rivalMissionId = randomUUID();
+
+    await prisma.order.create({ data: { id: pitonOrderId, buyerId: ids.piton, cropType: "DASHEEN", requestedQuantity: 8, neededBy: new Date("2026-09-10T12:00:00Z"), latitude: 13.826, longitude: -61.058, listingIds: [], lifecycleStatus: "REQUESTED", activeExceptionIds: [] } });
+    // One order, two farms, no approval yet: the shape the demo commits to and
+    // the sharpest test of what each side may read before anyone has agreed.
+    await prisma.order.create({ data: { id: sharedOrderId, buyerId: ids.rodney, cropType: "CUCUMBER", requestedQuantity: 16, neededBy: new Date("2026-09-11T12:00:00Z"), latitude: 14.073, longitude: -60.951, listingIds: [], lifecycleStatus: "AWAITING_APPROVAL", activeExceptionIds: [] } });
+    await prisma.allocation.create({ data: { id: sharedAllocationId, orderId: sharedOrderId, status: "PROPOSED" } });
+    await prisma.allocationLine.createMany({ data: [
+      { allocationId: sharedAllocationId, cropBatchId: ids.batchAna, listingId: "16161616-1616-4616-8616-161616161616", quantity: 10 },
+      { allocationId: sharedAllocationId, cropBatchId: ids.batchMarcus, listingId: "16161616-1616-4616-8616-161616161617", quantity: 6 },
+    ] });
+    await prisma.deliveryMission.create({ data: {
+      id: sharedMissionId,
+      orderId: sharedOrderId,
+      status: "AVAILABLE",
+      quantity: 16,
+      deadline: new Date("2026-09-11T12:00:00Z"),
+      currentStopSequence: 0,
+      stops: [
+        { sequence: 1, kind: "PICKUP", farmId: ids.farmAna, cropBatchIds: [ids.batchAna], quantity: { value: 10, unit: "kg" }, location: { latitude: 13.953, longitude: -61.005 } },
+        { sequence: 2, kind: "PICKUP", farmId: ids.farmMarcus, cropBatchIds: [ids.batchMarcus], quantity: { value: 6, unit: "kg" }, location: { latitude: 13.941, longitude: -60.918 } },
+        { sequence: 3, kind: "DROPOFF", quantity: { value: 16, unit: "kg" }, location: { latitude: 14.073, longitude: -60.951 } },
+      ],
+    } });
+    await prisma.actor.create({ data: { id: rivalTransporterId, authSubject: "transporter-rival-" + rivalTransporterId, name: "Rival Haulage", role: "TRANSPORTER", isSynthetic: true } });
+    await prisma.deliveryMission.create({ data: {
+      id: rivalMissionId,
+      orderId: pitonOrderId,
+      status: "ASSIGNED",
+      transporterId: rivalTransporterId,
+      quantity: 8,
+      deadline: new Date("2026-09-10T12:00:00Z"),
+      currentStopSequence: 0,
+      stops: [
+        { sequence: 1, kind: "PICKUP", farmId: ids.farmChoiseul, cropBatchIds: [], quantity: { value: 8, unit: "kg" }, location: { latitude: 13.775, longitude: -61.047 } },
+        { sequence: 2, kind: "DROPOFF", quantity: { value: 8, unit: "kg" }, location: { latitude: 13.826, longitude: -61.058 } },
+      ],
+    } });
+    await signIn("buyer-piton-demo");
+
+    try {
+      // FARMER: another grower's farm is not a place, and its crop is not a read.
+      const marcusMap = await server.inject({ method: "GET", url: "/v1/world-map", headers: auth("farmer-marcus") });
+      expect(marcusMap.statusCode).toBe(200);
+      expect(marcusMap.json().locations.filter((location: { kind: string }) => location.kind === "FARM").map((location: { locationId: string }) => location.locationId)).toEqual([ids.farmMarcus]);
+      expect(marcusMap.body).not.toContain("Roseau Valley Farm");
+      expect(marcusMap.body).not.toContain(ids.farmAna);
+      expect(marcusMap.body).not.toContain(ids.batchAna);
+      expect((await server.inject({ method: "GET", url: "/v1/crop-batches/" + ids.batchAna, headers: auth("farmer-marcus") })).statusCode).toBe(404);
+      expect((await server.inject({ method: "GET", url: "/v1/crop-batches", headers: auth("farmer-marcus") })).json().items.map((item: { cropBatchId: string }) => item.cropBatchId)).toEqual([ids.batchMarcus]);
+
+      // FARMER: a buyer stays anonymous until an order with it has been agreed.
+      const anaMap = await server.inject({ method: "GET", url: "/v1/world-map", headers: auth("farmer-ana") });
+      const rodney = anaMap.json().locations.find((location: { locationId: string }) => location.locationId === ids.rodney);
+      expect(rodney).toMatchObject({ kind: "HOTEL", displayName: "A buyer in Gros Islet", identified: false, serviceZone: "Gros Islet" });
+      expect(anaMap.body).not.toContain("Rodney Bay House");
+      expect(anaMap.json().locations.find((location: { locationId: string }) => location.locationId === ids.bayGardens)).toMatchObject({ displayName: "Bay Gardens Hotel", identified: true });
+
+      // FARMER: a shared order shows this farm's own line and nobody else's.
+      const marcusOrder = await server.inject({ method: "GET", url: "/v1/orders/" + sharedOrderId, headers: auth("farmer-marcus") });
+      expect(marcusOrder.statusCode).toBe(200);
+      expect(marcusOrder.json().allocation.lines).toEqual([{ cropBatchId: ids.batchMarcus, quantity: { value: 6, unit: "kg" } }]);
+      expect(marcusOrder.json().deliveryMission.cargo).toEqual([expect.objectContaining({ farmId: ids.farmMarcus, farmName: "Mabouya Growers" })]);
+      expect(marcusOrder.json().deliveryMission.buyerName).toBe("A buyer in Gros Islet");
+      expect(marcusOrder.json().deliveryMission.stops[0]).toMatchObject({ kind: "PICKUP", displayName: "A farm in Roseau Valley", location: { latitude: 13.95, longitude: -61 } });
+      expect(marcusOrder.json().deliveryMission.stops[0].farmId).toBeUndefined();
+      expect(marcusOrder.json().deliveryMission.stops[1]).toMatchObject({ kind: "PICKUP", displayName: "Mabouya Growers", farmId: ids.farmMarcus, location: { latitude: 13.941, longitude: -60.918 } });
+      expect(marcusOrder.body).not.toContain("Roseau Valley Farm");
+      expect(marcusOrder.body).not.toContain(ids.batchAna);
+      expect(marcusOrder.body).not.toContain("Rodney Bay House");
+
+      // BUYER: one hotel never lists, opens, or maps another hotel's business.
+      const pitonOrders = await server.inject({ method: "GET", url: "/v1/orders", headers: auth("buyer-piton-demo") });
+      expect(pitonOrders.statusCode).toBe(200);
+      expect(pitonOrders.json().items.map((item: { orderId: string }) => item.orderId)).toEqual([pitonOrderId]);
+      expect((await server.inject({ method: "GET", url: "/v1/orders/" + ids.bayGardensOrder, headers: auth("buyer-piton-demo") })).statusCode).toBe(404);
+      const bayOrders = await server.inject({ method: "GET", url: "/v1/orders", headers: auth("buyer-hotel") });
+      expect(bayOrders.json().items.map((item: { orderId: string }) => item.orderId)).not.toContain(pitonOrderId);
+      expect((await server.inject({ method: "GET", url: "/v1/orders/" + pitonOrderId, headers: auth("buyer-hotel") })).statusCode).toBe(404);
+      const pitonMap = await server.inject({ method: "GET", url: "/v1/world-map", headers: auth("buyer-piton-demo") });
+      expect(pitonMap.json().locations.filter((location: { kind: string }) => location.kind === "HOTEL").map((location: { locationId: string }) => location.locationId)).toEqual([ids.piton]);
+      expect(pitonMap.body).not.toContain("Bay Gardens Hotel");
+      // Listed supply is a crop and a quantity; the seller is a zone until agreed.
+      const pitonFarms = pitonMap.json().locations.filter((location: { kind: string }) => location.kind === "FARM");
+      expect(pitonFarms.length).toBeGreaterThan(0);
+      expect(pitonFarms.every((location: { identified: boolean; displayName: string }) => location.identified === false && location.displayName.startsWith("A farm in "))).toBe(true);
+      expect(pitonMap.body).not.toContain("Roseau Valley Farm");
+
+      // TRANSPORTER: mission stops, and no other transporter's job.
+      const transporterMap = await server.inject({ method: "GET", url: "/v1/world-map", headers: auth("transporter-daniel") });
+      const transporterLocationIds = transporterMap.json().locations.map((location: { locationId: string }) => location.locationId);
+      expect(transporterLocationIds).toEqual(expect.arrayContaining([ids.farmAna, ids.farmMarcus, ids.rodney]));
+      expect(transporterLocationIds).not.toContain(ids.farmChoiseul);
+      expect(transporterMap.body).not.toContain("Choiseul Roots Cooperative");
+      expect(transporterMap.json().locations.every((location: { crops: unknown[]; opportunities: unknown[] }) => !location.crops.length && !location.opportunities.length)).toBe(true);
+      const danielMissionIds = (await server.inject({ method: "GET", url: "/v1/delivery-missions", headers: auth("transporter-daniel") })).json().items.map((item: { missionId: string }) => item.missionId);
+      expect(danielMissionIds).toContain(sharedMissionId);
+      expect(danielMissionIds).not.toContain(rivalMissionId);
+      expect((await server.inject({ method: "GET", url: "/v1/delivery-missions/" + rivalMissionId, headers: auth("transporter-daniel") })).statusCode).toBe(404);
+      expect((await server.inject({ method: "GET", url: "/v1/delivery-missions/" + rivalMissionId + "/updates", headers: auth("transporter-daniel") })).statusCode).toBe(404);
+
+      // COORDINATOR: the permitted island, by name.
+      const coordinatorMap = await server.inject({ method: "GET", url: "/v1/world-map", headers: auth("coordinator-maya") });
+      const coordinatorFarms = coordinatorMap.json().locations.filter((location: { kind: string }) => location.kind === "FARM");
+      expect(coordinatorFarms.map((location: { locationId: string }) => location.locationId)).toEqual(expect.arrayContaining([ids.farmAna, ids.farmMarcus, ids.farmChoiseul]));
+      expect(coordinatorMap.json().locations.every((location: { identified: boolean }) => location.identified)).toBe(true);
+      expect(coordinatorMap.body).toContain("Roseau Valley Farm");
+      expect(coordinatorMap.body).toContain("Mabouya Growers");
+      const coordinatorBatches = (await server.inject({ method: "GET", url: "/v1/crop-batches", headers: auth("coordinator-maya") })).json().items.map((item: { cropBatchId: string }) => item.cropBatchId);
+      expect(coordinatorBatches).toEqual(expect.arrayContaining([ids.batchAna, ids.batchMarcus]));
+      const coordinatorOrder = await server.inject({ method: "GET", url: "/v1/orders/" + sharedOrderId, headers: auth("coordinator-maya") });
+      expect(coordinatorOrder.json().allocation.lines).toHaveLength(2);
+      expect(coordinatorOrder.json().deliveryMission.buyerName).toBe("Rodney Bay House");
+    } finally {
+      await prisma.deliveryMission.deleteMany({ where: { id: { in: [sharedMissionId, rivalMissionId] } } });
+      await prisma.allocationLine.deleteMany({ where: { allocationId: sharedAllocationId } });
+      await prisma.allocation.delete({ where: { id: sharedAllocationId } });
+      await prisma.order.deleteMany({ where: { id: { in: [sharedOrderId, pitonOrderId] } } });
+      await prisma.actor.delete({ where: { id: rivalTransporterId } });
+    }
+  });
+
+  it("returns safe delivery labels when enrichment records are incomplete", async () => {
+    const orderId = randomUUID();
+    const missionId = randomUUID();
+    await prisma.order.create({
+      data: {
+        id: orderId,
+        buyerId: "a0000000-0000-4000-8000-000000000002",
+        cropType: "DASHEEN",
+        requestedQuantity: 5,
+        neededBy: new Date("2026-09-09T12:00:00Z"),
+        latitude: 14.0101,
+        longitude: -60.9875,
+        listingIds: [],
+        lifecycleStatus: "COMMITTED",
+        activeExceptionIds: [],
+      },
+    });
+    await prisma.deliveryMission.create({
+      data: {
+        id: missionId,
+        orderId,
+        status: "AVAILABLE",
+        quantity: 5,
+        deadline: new Date("2026-09-09T12:00:00Z"),
+        stops: [
+          { sequence: 1, kind: "PICKUP", farmId: randomUUID(), location: { latitude: 13.95, longitude: -61 } },
+          { sequence: 2, kind: "DROPOFF", quantity: { value: 5, unit: "kg" }, location: { latitude: 14.0101, longitude: -60.9875 } },
+        ],
+      },
+    });
+
+    try {
+      const buyer = await server.inject({ method: "GET", url: "/v1/orders/" + orderId, headers: auth("buyer-hotel") });
+      expect(buyer.statusCode).toBe(200);
+      expect(buyer.json().deliveryMission).toMatchObject({
+        buyerName: "Bay Gardens Hotel",
+        cropType: "DASHEEN",
+        cargo: [],
+        stops: [
+          expect.objectContaining({ displayName: "Pickup 1" }),
+          expect.objectContaining({ displayName: "Bay Gardens Hotel" }),
+        ],
+      });
+      const transporter = await server.inject({ method: "GET", url: "/v1/delivery-missions/" + missionId, headers: auth("transporter-daniel") });
+      expect(transporter.statusCode).toBe(200);
+      expect(transporter.json().cargo).toEqual([]);
+    } finally {
+      await prisma.deliveryMission.delete({ where: { id: missionId } });
+      await prisma.order.delete({ where: { id: orderId } });
+    }
   });
 
   it("versions sourced crop standards, lists them by crop, and snapshots the latest published version on orders", async () => {
@@ -244,6 +478,31 @@ describe("participant Product API", () => {
     expect(committed.json().deliveryMission.stops.slice(0, 2).map((stop: { quantity: { value: number } }) => stop.quantity.value).sort((a: number, b: number) => a - b)).toEqual([6, 14]);
     expect(committed.json().deliveryMission.estimatedDistanceKm).toBeGreaterThan(0);
     expect(committed.json().deliveryMission.estimatedDurationMinutes).toBeGreaterThan(0);
+    expect(committed.json().deliveryMission).toMatchObject({
+      routeRegion: "Saint Lucia",
+      buyerName: "Bay Gardens Hotel",
+      cropType: "CUCUMBER",
+      atRisk: false,
+      stops: [
+        expect.objectContaining({ kind: "PICKUP", displayName: expect.any(String) }),
+        expect.objectContaining({ kind: "PICKUP", displayName: expect.any(String) }),
+        expect.objectContaining({ kind: "DROPOFF", displayName: "Bay Gardens Hotel" }),
+      ],
+    });
+    expect(committed.json().deliveryMission.cargo).toEqual(expect.arrayContaining([
+      expect.objectContaining({ farmName: "Roseau Valley Farm", cropStatus: "HARVEST_READY", quantity: { value: 14, unit: "kg" } }),
+      expect.objectContaining({ farmName: "Mabouya Growers", cropStatus: "HARVEST_READY", quantity: { value: 6, unit: "kg" } }),
+    ]));
+    expect(committed.body).not.toContain("Rain damage visible");
+    const availableView = await server.inject({ method: "GET", url: "/v1/delivery-missions/" + missionId, headers: auth("transporter-daniel") });
+    expect(availableView.statusCode).toBe(200);
+    expect(availableView.json().cargo).toHaveLength(2);
+    expect(availableView.json().cargo.every((item: { cropStatus?: string }) => item.cropStatus === undefined)).toBe(true);
+    const availablePage = await server.inject({ method: "GET", url: "/v1/delivery-missions?status=AVAILABLE", headers: auth("transporter-daniel") });
+    expect(availablePage.json().items.find((item: { missionId: string }) => item.missionId === missionId)).toMatchObject({
+      buyerName: "Bay Gardens Hotel",
+      cropType: "CUCUMBER",
+    });
     const listing = await prisma.listing.findUniqueOrThrow({ where: { id: "16161616-1616-4616-8616-161616161616" } });
     expect(listing).toMatchObject({ quantity: 0, status: "SOLD_OUT" });
     const refreshed = await server.inject({ method: "POST", url: "/v1/crop-batches/11111111-1111-4111-8111-111111111111/forecast-requests", headers: mutationHeaders("farmer-ana", "committed-reforecast"), payload: { reason: "MANUAL_REFRESH" } });
@@ -255,6 +514,8 @@ describe("participant Product API", () => {
     const acceptedMission = await server.inject({ method: "POST", url: `/v1/delivery-missions/${missionId}/acceptance`, headers: mutationHeaders("transporter-daniel", "accept-mission"), payload: { decision: "ACCEPT", vehicleId: "d0000000-0000-4000-8000-000000000001" } });
     expect(acceptedMission.statusCode).toBe(200);
     expect((await prisma.vehicle.findUniqueOrThrow({ where: { id: "d0000000-0000-4000-8000-000000000001" } })).status).toBe("IN_USE");
+    const assignedView = await server.inject({ method: "GET", url: "/v1/delivery-missions/" + missionId, headers: auth("transporter-daniel") });
+    expect(assignedView.json().cargo.every((item: { cropStatus?: string }) => item.cropStatus === "HARVEST_READY")).toBe(true);
 
     let updateTime = Date.now() + 1_000;
     const update = (updateType: string, note?: string) => server.inject({ method: "POST", url: `/v1/delivery-missions/${missionId}/updates`, headers: mutationHeaders("transporter-daniel", `mission-${updateType.toLowerCase()}`), payload: { updateType, recordedAt: new Date(updateTime += 1_000).toISOString(), ...(note ? { note } : {}) } });
@@ -509,6 +770,9 @@ describe("participant Product API", () => {
       seed: 42,
       decisionMode: "DETERMINISTIC",
       decisionAdapter: "deterministic",
+      // This payload omits estimationMode, so the run records the labelled
+      // fallback rather than inheriting the server MODEL_ADAPTER setting.
+      estimationMode: "DETERMINISTIC_FALLBACK",
       status: "COMPLETED",
       resolvedIslandIds: ["saint-lucia"],
       evidenceLabel: expect.stringContaining("SYNTHETIC"),
@@ -654,6 +918,7 @@ describe("participant Product API", () => {
         demands: frame.demands,
         disruptions: frame.disruptions,
         degradedRoadSegmentIds: frame.degradedRoadSegmentIds,
+        weather: frame.weather,
         newDecisions: frame.newDecisions,
         totals: frame.totals,
         agentActions: (frame.agentActions as Array<Record<string, unknown>> | undefined)?.map((action) => ({
@@ -693,6 +958,39 @@ describe("participant Product API", () => {
       prisma.agentTrace.count({ where: { simulationRunId: runId } }),
     ]);
     expect(connectedCounts.every((count) => count > 0)).toBe(true);
+
+    // Weather the run published is the run's own, and it is only ever a day
+    // that had already occurred when it was written.
+    const runWeatherRows = await prisma.weatherObservation.findMany({
+      where: { simulationRunId: runId },
+      orderBy: { observedOn: "asc" },
+    });
+    expect(runWeatherRows.length).toBeGreaterThan(0);
+    expect(runWeatherRows.every((row) => row.provenance === "SYNTHETIC")).toBe(true);
+    expect(runWeatherRows.every((row) => row.forecastProvenance === "MODEL_PREDICTED")).toBe(true);
+    const runWeather = await server.inject({
+      method: "GET",
+      url: `/v1/weather?islandId=saint-lucia&simulationRunId=${runId}`,
+      headers: auth("operations-demo"),
+    });
+    expect(runWeather.statusCode).toBe(200);
+    expect(runWeather.json()).toMatchObject({ islandId: "saint-lucia", simulationRunId: runId });
+    expect(runWeather.json().current.provenance).toBe("SYNTHETIC");
+    // The seeded development world is a different island-day series entirely.
+    const seededWeather = await server.inject({ method: "GET", url: "/v1/weather", headers: auth("farmer-ana") });
+    expect(seededWeather.statusCode).toBe(200);
+    expect(seededWeather.json().simulationRunId).toBeUndefined();
+    expect(seededWeather.json().asOf).not.toBe(runWeather.json().asOf);
+
+    // Every simulated participant that plans around the weather actually read it.
+    const weatherReads = timeline.json().frames
+      .flatMap((frame: { agentActions?: Array<{ toolName: string; role: string; status: string }> }) => frame.agentActions ?? [])
+      .filter((action: { toolName: string }) => action.toolName === "read_weather");
+    expect(weatherReads.length).toBeGreaterThan(0);
+    expect(weatherReads.every((action: { status: string }) => action.status === "SUCCEEDED")).toBe(true);
+    expect(new Set(weatherReads.map((action: { role: string }) => action.role))).toEqual(
+      new Set(["FARMER", "COORDINATOR", "TRANSPORTER"]),
+    );
 
     const derived = await server.inject({
       method: "POST",
@@ -796,6 +1094,17 @@ describe("participant Product API", () => {
     const participantAuth = { authorization: `Bearer ${participantSession.json().accessToken}` };
     const me = await server.inject({ method: "GET", url: "/v1/me", headers: participantAuth });
     expect(me.json()).toMatchObject({ role: "BUYER", synthetic: true, simulationRunId: runId, readOnly: true });
+    const participantWeather = await server.inject({ method: "GET", url: "/v1/weather", headers: participantAuth });
+    expect(participantWeather.statusCode).toBe(200);
+    expect(participantWeather.json().simulationRunId).toBe(runId);
+    const otherRunWeather = await server.inject({
+      method: "GET",
+      url: `/v1/weather?simulationRunId=${pair.json().baselineRunId}`,
+      headers: participantAuth,
+    });
+    expect(otherRunWeather.statusCode).toBe(403);
+    expect(otherRunWeather.json().code).toBe("RUN_SCOPE_FORBIDDEN");
+
     const blockedMutation = await server.inject({
       method: "POST",
       url: "/v1/buyer-demands",
@@ -834,7 +1143,7 @@ describe("participant Product API", () => {
           { id: buyerId, authSubject: `sim-buyer-${index}`, name: `Sim Buyer ${index}`, role: "BUYER", isSynthetic: true, simulationRunId: run.id },
         ] });
         await prisma.farm.create({ data: { id: farmId, name: `Run ${index} Farm`, farmerId, latitude: 13.95, longitude: -61, simulationRunId: run.id } });
-        await prisma.cropBatch.create({ data: { id: batchId, farmId, cropType: "CUCUMBER", status: "HARVEST_READY", availableToPromise: 10, provenance: "SYNTHETIC", simulationRunId: run.id } });
+        await prisma.cropBatch.create({ data: { id: batchId, farmId, cropType: "CUCUMBER", status: "HARVEST_READY", promisableFrom: new Date("2026-09-06"), availableToPromise: 10, provenance: "SYNTHETIC", simulationRunId: run.id } });
         await prisma.listing.create({ data: { id: listingId, cropBatchId: batchId, farmerId, cropType: "CUCUMBER", quantity: 10, unitPrice: 5, availableFrom: new Date("2026-09-01"), availableUntil: new Date("2026-10-01"), status: "ACTIVE", simulationRunId: run.id } });
         await signIn(`sim-buyer-${index}`);
       }
@@ -899,7 +1208,7 @@ describe("participant Product API", () => {
 
 describe("fulfilment defects (#53)", () => {
   const anaBatchId = "11111111-1111-4111-8111-111111111111";
-  const listingPayload = { cropBatchId: anaBatchId, quantity: { value: 5, unit: "kg" }, unitPrice: { amount: 6.5, currency: "XCD" }, availableFrom: "2026-09-05", availableUntil: "2026-09-12" };
+  const listingPayload = { cropBatchId: anaBatchId, quantity: { value: 5, unit: "kg" }, unitPrice: { amount: 6.5, currency: "XCD" }, availableFrom: "2026-09-06", availableUntil: "2026-09-12" };
   const orderPayload = { cropType: "CUCUMBER", neededBy: "2026-09-11T12:00:00Z", deliveryLocation: { latitude: 14.0101, longitude: -60.9875 } };
 
   async function observe(cropStage: string, estimate = 40) {
@@ -953,7 +1262,7 @@ describe("fulfilment defects (#53)", () => {
     const detail = await server.inject({ method: "GET", url: `/v1/orders/${orderId}`, headers: auth("buyer-hotel") });
     expect(detail.json().outcomeCause).toBe("NO_READY_SUPPLY");
 
-    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", availableToPromise: 12 } });
+    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", promisableFrom: new Date("2026-09-06"), availableToPromise: 12 } });
     const published = await server.inject({ method: "POST", url: "/v1/listings", headers: mutationHeaders("farmer-ana", "rematch-supply"), payload: listingPayload });
     expect(published.statusCode).toBe(201);
 
@@ -968,7 +1277,7 @@ describe("fulfilment defects (#53)", () => {
     await prisma.order.updateMany({ where: { cropType: "CUCUMBER", lifecycleStatus: { in: ["REQUESTED", "AWAITING_APPROVAL"] } }, data: { lifecycleStatus: "CANCELLED" } });
     await prisma.allocation.updateMany({ where: { status: "PROPOSED" }, data: { status: "STALE" } });
     await prisma.listing.updateMany({ where: { cropType: "CUCUMBER" }, data: { status: "SOLD_OUT" } });
-    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", availableToPromise: 6 } });
+    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", promisableFrom: new Date("2026-09-06"), availableToPromise: 6 } });
     const published = await server.inject({ method: "POST", url: "/v1/listings", headers: mutationHeaders("farmer-ana", "soft-hold-supply"), payload: { ...listingPayload, quantity: { value: 6, unit: "kg" } } });
     expect(published.statusCode).toBe(201);
 
@@ -989,12 +1298,12 @@ describe("safe partial commitment (#53)", () => {
     await prisma.order.updateMany({ where: { cropType: "CUCUMBER", lifecycleStatus: { in: ["REQUESTED", "AWAITING_APPROVAL"] } }, data: { lifecycleStatus: "CANCELLED" } });
     await prisma.allocation.updateMany({ where: { status: "PROPOSED" }, data: { status: "STALE" } });
     await prisma.listing.updateMany({ where: { cropType: "CUCUMBER" }, data: { status: "SOLD_OUT" } });
-    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", availableToPromise: available } });
+    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", promisableFrom: new Date("2026-09-06"), availableToPromise: available } });
     const published = await server.inject({
       method: "POST",
       url: "/v1/listings",
       headers: mutationHeaders("farmer-ana", "partial-supply"),
-      payload: { cropBatchId: anaBatchId, quantity: { value: available, unit: "kg" }, unitPrice: { amount: 6.5, currency: "XCD" }, availableFrom: "2026-09-05", availableUntil: "2026-09-12" },
+      payload: { cropBatchId: anaBatchId, quantity: { value: available, unit: "kg" }, unitPrice: { amount: 6.5, currency: "XCD" }, availableFrom: "2026-09-06", availableUntil: "2026-09-12" },
     });
     expect(published.statusCode).toBe(201);
   }
@@ -1204,12 +1513,12 @@ describe("payment terms and status (#74)", () => {
     await prisma.order.updateMany({ where: { cropType: "CUCUMBER", lifecycleStatus: { in: ["REQUESTED", "AWAITING_APPROVAL"] } }, data: { lifecycleStatus: "CANCELLED" } });
     await prisma.allocation.updateMany({ where: { status: "PROPOSED" }, data: { status: "STALE" } });
     await prisma.listing.updateMany({ where: { cropType: "CUCUMBER" }, data: { status: "SOLD_OUT" } });
-    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", availableToPromise: available } });
+    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", promisableFrom: new Date("2026-09-06"), availableToPromise: available } });
     const published = await server.inject({
       method: "POST",
       url: "/v1/listings",
       headers: mutationHeaders("farmer-ana", "payment-supply"),
-      payload: { cropBatchId: anaBatchId, quantity: { value: available, unit: "kg" }, unitPrice: { amount: unitPrice, currency: "XCD" }, availableFrom: "2026-09-05", availableUntil: "2026-09-26" },
+      payload: { cropBatchId: anaBatchId, quantity: { value: available, unit: "kg" }, unitPrice: { amount: unitPrice, currency: "XCD" }, availableFrom: "2026-09-06", availableUntil: "2026-09-26" },
     });
     expect(published.statusCode).toBe(201);
   }
@@ -1375,6 +1684,221 @@ describe("payment terms and status (#74)", () => {
     const unrelatedConfirmation = await server.inject({ method: "POST", url: `/v1/orders/${orderId}/payment-confirmations`, headers: mutationHeaders("farmer-marcus", "payment-forbidden"), payload: {} });
     expect(unrelatedConfirmation.statusCode).toBe(403);
   });
+});
+
+/**
+ * The estimation method is chosen per run and stored with it, so these tests
+ * assert what a reader of a saved run can trust: which method ran, that a
+ * fallback forecast is labelled everywhere it surfaces, and that selecting the
+ * learned model while it is unreachable fails the run instead of quietly
+ * producing fixture numbers under a learned-model label.
+ */
+describe("per-run harvest estimation (#51)", () => {
+  const basePayload = {
+    scenarioId: "saint-lucia-demo-v1",
+    policy: "HARVEST",
+    seed: 42,
+    decisionMode: "DETERMINISTIC",
+    scope: { mode: "SELECTED", islandIds: ["saint-lucia"] },
+  };
+
+  const FALLBACK_LABEL = "Deterministic fallback estimate, not a learned-model prediction";
+  /** The completed fallback run the later tests read back; set by the second test. */
+  let fallbackRunId = "";
+
+  function createRun(key: string, overrides: Record<string, unknown> = {}) {
+    return server.inject({
+      method: "POST",
+      url: "/v1/simulation-runs",
+      headers: mutationHeaders("operations-demo", key),
+      payload: { ...basePayload, ...overrides },
+    });
+  }
+
+  /**
+   * What a run's forecasts claim, as a sorted multiset. Prediction and request
+   * IDs are freshly generated per run by design, so they are excluded and the
+   * comparison is order-independent rather than resting on a UUID tiebreak.
+   */
+  async function forecastFingerprint(runId: string) {
+    const rows = await prisma.yieldPrediction.findMany({
+      where: { simulationRunId: runId },
+      select: { estimationMode: true, modelVersion: true, q10: true, q50: true, q90: true, readiness: true, confidence: true, generatedAt: true, warnings: true },
+    });
+    return rows.map((row) => JSON.stringify(row)).sort();
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("refuses a method the contract does not name", async () => {
+    const rejected = await createRun("estimation-invalid", { estimationMode: "BEST_GUESS" });
+
+    expect(rejected.statusCode).toBe(422);
+    expect(rejected.json().code).toBe("INVALID_ESTIMATION_MODE");
+    expect(await prisma.simulationRun.count({ where: { estimationMode: "LEARNED_MODEL" } })).toBe(0);
+  });
+
+  it("stores the fallback choice and labels every forecast the run produced", async () => {
+    const created = await createRun("estimation-fallback", { estimationMode: "DETERMINISTIC_FALLBACK" });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({ status: "COMPLETED", estimationMode: "DETERMINISTIC_FALLBACK" });
+    const runId = created.json().runId as string;
+    fallbackRunId = runId;
+
+    // The fallback keeps the whole crop, listing, and marketplace chain
+    // working; a run with no forecasts would make these assertions vacuous.
+    const predictions = await prisma.yieldPrediction.findMany({ where: { simulationRunId: runId } });
+    expect(predictions.length).toBeGreaterThan(0);
+    expect(predictions.every((row) => row.estimationMode === "DETERMINISTIC_FALLBACK")).toBe(true);
+    expect(predictions.every((row) => row.modelVersion.startsWith("fixture-"))).toBe(true);
+    expect(predictions.every((row) => (row.warnings as string[])[0] === FALLBACK_LABEL)).toBe(true);
+
+    // The saved trace names the method that ran, so a reader is not left
+    // inferring it from the model version alone.
+    const forecastSteps = await prisma.traceStep.findMany({ where: { simulationRunId: runId, kind: "TOOL_CALL", toolName: "deterministic-fallback-yield-model" } });
+    expect(forecastSteps).toHaveLength(predictions.length);
+    expect(await prisma.traceStep.count({ where: { simulationRunId: runId, toolName: "learned-yield-model" } })).toBe(0);
+    expect(forecastSteps.every((step) => step.summary.includes("deterministic fallback"))).toBe(true);
+
+    // What a participant sees. The prediction is read through the run's own
+    // participant session, because run-scoped records stay inside their run.
+    const farmerMapping = await prisma.simulationActorMapping.findFirstOrThrow({ where: { simulationRunId: runId, role: "FARMER", productActorId: { not: null } } });
+    const participantSession = await server.inject({
+      method: "POST",
+      url: `/v1/simulation-runs/${runId}/participant-sessions`,
+      headers: mutationHeaders("operations-demo", "estimation-participant"),
+      payload: { productActorId: farmerMapping.productActorId },
+    });
+    expect(participantSession.statusCode).toBe(201);
+    const participantAuth = { authorization: `Bearer ${participantSession.json().accessToken}` };
+    const batches = await server.inject({ method: "GET", url: "/v1/crop-batches", headers: participantAuth });
+    const forecastBatch = batches.json().items.find((item: { latestPredictionId: string | null }) => item.latestPredictionId);
+    expect(forecastBatch).toBeDefined();
+    const evidence = await server.inject({ method: "GET", url: `/v1/yield-predictions/${forecastBatch.latestPredictionId}`, headers: participantAuth });
+    expect(evidence.statusCode).toBe(200);
+    expect(evidence.json()).toMatchObject({ estimationMode: "DETERMINISTIC_FALLBACK", provenance: "MODEL_PREDICTED" });
+    expect(evidence.json().modelVersion).toMatch(/^fixture-/);
+    expect(evidence.json().warnings[0]).toBe(FALLBACK_LABEL);
+
+    // Agent-action provenance. Only the forecast-producing tool carries the
+    // method, so its absence elsewhere is information rather than an omission.
+    const timeline = await server.inject({ method: "GET", url: `/v1/simulation-runs/${runId}/timeline`, headers: auth("operations-demo") });
+    expect(timeline.json().estimationMode).toBe("DETERMINISTIC_FALLBACK");
+    const actions = timeline.json().frames.flatMap((frame: { agentActions?: Array<{ toolName: string; estimationMode?: string }> }) => frame.agentActions ?? []);
+    const forecastActions = actions.filter((action: { toolName: string }) => action.toolName === "submit_crop_observation");
+    expect(forecastActions.length).toBeGreaterThan(0);
+    expect(forecastActions.every((action: { estimationMode?: string }) => action.estimationMode === "DETERMINISTIC_FALLBACK")).toBe(true);
+    expect(actions.filter((action: { toolName: string }) => action.toolName !== "submit_crop_observation").every((action: { estimationMode?: string }) => action.estimationMode === undefined)).toBe(true);
+
+    const frame = await server.inject({ method: "GET", url: `/v1/simulation-runs/${runId}/world?frameIndex=0`, headers: auth("operations-demo") });
+    expect(frame.json().estimationMode).toBe("DETERMINISTIC_FALLBACK");
+  }, 180_000);
+
+  it("reproduces identical forecasts for the same seed and method", async () => {
+    expect(fallbackRunId).not.toBe("");
+    const first = await prisma.simulationRun.findUniqueOrThrow({ where: { id: fallbackRunId } });
+    const repeated = await createRun("estimation-fallback-repeat", { estimationMode: "DETERMINISTIC_FALLBACK" });
+    expect(repeated.statusCode).toBe(201);
+    const repeatedId = repeated.json().runId as string;
+    expect(repeatedId).not.toBe(first.id);
+
+    const stored = await prisma.simulationRun.findUniqueOrThrow({ where: { id: repeatedId } });
+    expect(stored.determinismDigest).toBe(first.determinismDigest);
+    expect(stored.metrics).toEqual(first.metrics);
+    expect(await forecastFingerprint(repeatedId)).toEqual(await forecastFingerprint(first.id));
+  }, 180_000);
+
+  it("fails a learned-model run that cannot reach the service, writing no forecast", async () => {
+    const fetchSpy = vi.fn(async () => {
+      throw new TypeError("fetch failed");
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const attempted = await createRun("estimation-learned-unreachable", { estimationMode: "LEARNED_MODEL" });
+
+    expect(attempted.statusCode).toBe(502);
+    expect(attempted.json().code).toBe("MODEL_UNAVAILABLE");
+    expect(fetchSpy).toHaveBeenCalled();
+    const failed = await prisma.simulationRun.findFirstOrThrow({ where: { estimationMode: "LEARNED_MODEL", policy: "HARVEST" }, orderBy: { createdAt: "desc" } });
+    expect(failed).toMatchObject({ status: "FAILED", errorCode: "MODEL_UNAVAILABLE" });
+    // The whole point of failing: not one fixture number was written under a
+    // run that says it used the learned model.
+    expect(await prisma.yieldPrediction.count({ where: { simulationRunId: failed.id } })).toBe(0);
+    expect(await prisma.domainEvent.count({ where: { simulationRunId: failed.id, eventType: "FORECAST_PRODUCED" } })).toBe(0);
+  }, 180_000);
+
+  it("fails the same way when the learned service answers but rejects the request", async () => {
+    const fetchSpy = vi.fn(async () => new Response("{}", { status: 422 }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const attempted = await createRun("estimation-learned-rejected", { estimationMode: "LEARNED_MODEL" });
+
+    expect(attempted.statusCode).toBe(502);
+    expect(attempted.json().code).toBe("MODEL_UNAVAILABLE");
+    expect(attempted.json().detail).toContain("no fallback estimate was substituted");
+    const failed = await prisma.simulationRun.findFirstOrThrow({ where: { estimationMode: "LEARNED_MODEL", policy: "HARVEST" }, orderBy: { createdAt: "desc" } });
+    expect(await prisma.yieldPrediction.count({ where: { simulationRunId: failed.id } })).toBe(0);
+  }, 180_000);
+
+  it("replays and scrubs a completed run without asking any model for a forecast", async () => {
+    expect(fallbackRunId).not.toBe("");
+    const run = await prisma.simulationRun.findUniqueOrThrow({ where: { id: fallbackRunId } });
+    const before = {
+      predictions: await prisma.yieldPrediction.count({ where: { simulationRunId: run.id } }),
+      forecasts: await prisma.domainEvent.count({ where: { simulationRunId: run.id, eventType: "FORECAST_PRODUCED" } }),
+    };
+    const fetchSpy = vi.fn(async () => {
+      throw new Error("Replay must never request a forecast.");
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    // Flipping the stored method is what makes this test mean anything: if a
+    // replay path re-derived a forecast it would now resolve to the learned
+    // service and hit the spy, instead of reading the saved prediction.
+    await prisma.simulationRun.update({ where: { id: run.id }, data: { estimationMode: "LEARNED_MODEL" } });
+    try {
+      const timeline = await server.inject({ method: "GET", url: `/v1/simulation-runs/${run.id}/timeline`, headers: auth("operations-demo") });
+      expect(timeline.statusCode).toBe(200);
+      for (const frameIndex of [0, Math.floor(run.frameCount / 2), run.frameCount - 1]) {
+        const frame = await server.inject({ method: "GET", url: `/v1/simulation-runs/${run.id}/world?frameIndex=${frameIndex}`, headers: auth("operations-demo") });
+        expect(frame.statusCode).toBe(200);
+      }
+      const mapping = await prisma.simulationActorMapping.findFirstOrThrow({ where: { simulationRunId: run.id, role: "FARMER", productActorId: { not: null } } });
+      const session = await server.inject({
+        method: "POST",
+        url: `/v1/simulation-runs/${run.id}/participant-sessions`,
+        headers: mutationHeaders("operations-demo", "estimation-replay-read"),
+        payload: { productActorId: mapping.productActorId },
+      });
+      const replayAuth = { authorization: `Bearer ${session.json().accessToken}` };
+      const batches = await server.inject({ method: "GET", url: "/v1/crop-batches", headers: replayAuth });
+      const batch = batches.json().items.find((item: { latestPredictionId: string | null }) => item.latestPredictionId);
+      const evidence = await server.inject({ method: "GET", url: `/v1/yield-predictions/${batch.latestPredictionId}`, headers: replayAuth });
+      expect(evidence.statusCode).toBe(200);
+      // The saved forecast keeps the method that produced it, not the method
+      // the run row now names.
+      expect(evidence.json().estimationMode).toBe("DETERMINISTIC_FALLBACK");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      await prisma.simulationRun.update({ where: { id: run.id }, data: { estimationMode: "DETERMINISTIC_FALLBACK" } });
+    }
+
+    expect(await prisma.yieldPrediction.count({ where: { simulationRunId: run.id } })).toBe(before.predictions);
+    expect(await prisma.domainEvent.count({ where: { simulationRunId: run.id, eventType: "FORECAST_PRODUCED" } })).toBe(before.forecasts);
+  }, 120_000);
+
+  it("records the choice on a Baseline run and never acts on it", async () => {
+    const fetchSpy = vi.fn(async () => {
+      throw new Error("Baseline runs must never request a forecast.");
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const baseline = await createRun("estimation-baseline", { policy: "BASELINE", estimationMode: "LEARNED_MODEL" });
+
+    expect(baseline.statusCode).toBe(201);
+    expect(baseline.json()).toMatchObject({ policy: "BASELINE", status: "COMPLETED", estimationMode: "LEARNED_MODEL" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await prisma.yieldPrediction.count({ where: { simulationRunId: baseline.json().runId } })).toBe(0);
+  }, 180_000);
 });
 
 /**

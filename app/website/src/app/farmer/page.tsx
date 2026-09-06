@@ -26,6 +26,7 @@ import { DecisionExplanation, decisionReasonLabel } from "@/components/decision-
 import { DeviceUpdateList, useOutbox } from "@/components/offline";
 import { OrderList } from "@/components/order-list";
 import { useSession } from "@/components/providers";
+import { FarmWeather } from "@/components/weather";
 import { Badge, Card, Disclosure, EmptyState, ErrorState, LoadingState, MoreDetail, PageHeader, SectionTitle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { compactId, formatDate, formatKg, plural, titleCase } from "@/lib/format";
@@ -140,6 +141,10 @@ export default function FarmerHome() {
         </div>
       </Card>
 
+      <div className="section-gap">
+        <FarmWeather />
+      </div>
+
       {needsAction.length > 0 && (
         <Card className="section-gap decision-card">
           <SectionTitle title="What was wrong, and what to do next" detail={`${plural(needsAction.length, "crop batch", "crop batches")} needing your attention`} />
@@ -206,7 +211,7 @@ export default function FarmerHome() {
               </MoreDetail>
             </>
           )}
-          <Link href="/farmer/farm" className="text-link section-gap"><Map size={16} aria-hidden="true" />See your farm map</Link>
+          <Link href="/map" className="text-link section-gap"><Map size={16} aria-hidden="true" />See your farm on the island map</Link>
         </Disclosure>
 
         <Disclosure

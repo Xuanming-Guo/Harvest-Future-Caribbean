@@ -108,7 +108,8 @@ export async function consumeDevelopmentPersona(): Promise<SessionActor | null> 
   const persona = developmentPersonaFromHash(window.location.hash);
   window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
   clearDevelopmentSession();
-  if (process.env.NODE_ENV === "production" || !persona) return null;
+  const demoPersonasEnabled = process.env.NEXT_PUBLIC_HARVEST_DEMO_PERSONAS === "true";
+  if ((process.env.NODE_ENV === "production" && !demoPersonasEnabled) || !persona) return null;
   return createDevelopmentSession(persona);
 }
 
@@ -166,6 +167,9 @@ function unwrap<T>(result: { data?: T; error?: unknown; response: Response }): T
 }
 
 export const api = {
+  async worldMap() {
+    return unwrap(await client.GET("/v1/world-map"));
+  },
   async cropBatches() {
     return unwrap(await client.GET("/v1/crop-batches"));
   },
@@ -232,6 +236,15 @@ export const api = {
       params: { path: { orderId }, header: { "Idempotency-Key": newIdempotencyKey("payment") } },
       body: reference ? { reference } : {},
     }));
+  },
+  /**
+   * Conditions and the shared forecast for one island.
+   *
+   * The same answer every role gets, human or simulated. Omitting `islandId`
+   * asks the API for the caller's own island rather than guessing one here.
+   */
+  async weather(islandId?: string, asOf?: string) {
+    return unwrap(await client.GET("/v1/weather", { params: { query: { islandId, asOf } } }));
   },
   async agentTrace(traceId: string) {
     return unwrap(await client.GET("/v1/agent-traces/{traceId}", { params: { path: { traceId } } }));

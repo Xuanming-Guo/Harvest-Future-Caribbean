@@ -40,6 +40,9 @@ export const PRODUCT_TOOL_NAMES = [
   "verify_observation",
   "report_exception",
   "confirm_payment",
+  "propose_inter_island_commitment",
+  "book_maritime_shipment",
+  "report_shipment_progress",
 ] as const;
 
 export type ProductToolName = (typeof PRODUCT_TOOL_NAMES)[number];
@@ -192,6 +195,25 @@ export const ACTION_PREVIEW_TARGETS: Record<ProductToolName, ActionPreviewTarget
       route: (id) => `/orders/${id}`,
       targets: tour("order-payment-confirm", "order-payment", "order-detail"),
     },
+  },
+  // The three inter-island tools (#40) are coordination the website reports but
+  // does not yet offer a control for. An order's detail page shows the
+  // consignment, its legs and its customs state once a sailing exists, but
+  // nobody can propose a cross-island fill, book a sailing or post its progress
+  // from a page, so there is no control for a preview to ring. Saying so is the
+  // honest answer; pointing the ring at the read-only consignment panel would
+  // claim a person could act there.
+  propose_inter_island_commitment: {
+    unmapped: true,
+    reason: "Cross-island fills are proposed from the coordinator's engine loop. The website reports the resulting consignment on the order, but has no control that raises one.",
+  },
+  book_maritime_shipment: {
+    unmapped: true,
+    reason: "A sailing is booked once every inter-island approval has landed. The order page shows the booked legs and capacity; no page books one.",
+  },
+  report_shipment_progress: {
+    unmapped: true,
+    reason: "Consignment status comes from the simulated voyage, not from a person. The order page displays departure, customs, arrival and any failure reason read-only.",
   },
 };
 

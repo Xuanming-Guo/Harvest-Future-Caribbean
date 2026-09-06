@@ -23,7 +23,19 @@
 
 import type { SimulationInstant } from './core/time.js';
 import type { ObservableActor, ObservableDisruptionView } from './world/observable.js';
-import type { CropStage, GeoPoint, ReferenceDataSource, ReferencePlace } from './world/types.js';
+import type { MaritimeAttribution, ScopedMaritimeNetwork } from './world/maritime.js';
+import type {
+  CropStage,
+  CustomsCheckpoint,
+  GeoPoint,
+  MaritimeLeg,
+  MaritimeShipmentCost,
+  MaritimeShipmentStatus,
+  ReferenceDataSource,
+  ReferencePlace,
+} from './world/types.js';
+import type { ForecastDay, TempBand, WeatherCondition, WeatherLegend } from './world/weather.js';
+import type { WeatherEvidenceType } from './world/weather-reference.js';
 import type { DecisionRecord } from './policy/types.js';
 
 /** Static furniture, sent once rather than repeated in every frame. */
@@ -54,8 +66,89 @@ export interface ControlRoomScene {
   referenceDataSources: ReferenceDataSource[];
   /** Run-scoped Product API identities. Baseline participants have no product actor. */
   participants: SimulationParticipant[];
+  /**
+   * Units, thresholds and provenance for the weather carried on every frame.
+   *
+   * Sent once with the scene rather than repeated per frame, because it is
+   * constant, and published at all so that a client drawing rain, cloud, storm
+   * and wind does not have to hard-code the thresholds the engine used. A
+   * viewer has to be able to tell ordinary weather from meaningful weather, and
+   * that is a question about thresholds.
+   *
+   * Optional so replays saved before this field existed still load.
+   */
+  weatherLegend?: WeatherLegend;
+  /**
+   * The maritime network this run may use, already restricted to its scope.
+   *
+   * Sent with the scene rather than per frame because it is public reference
+   * data that does not change during a run, and sent *at all* so the control
+   * room can draw the ports and sea links a shipment moves along without
+   * shipping the whole 34-port dataset to a browser that only selected two
+   * islands. A one-island run carries a network with no links, and the globe
+   * then draws no sea route, which is the correct picture.
+   *
+   * Optional so replays saved before issue #40 still load.
+   */
+  maritime?: ScopedMaritimeNetwork;
+  /**
+   * Source, publisher, licence and retrieval date for that network.
+   *
+   * Separate from `referenceDataSources`, which covers the OpenStreetMap places
+   * snapshot. Ferry operators and central banks are different publishers under
+   * different terms, and merging them would attribute one's data to the other.
+   */
+  maritimeAttributions?: MaritimeAttribution[];
+  /**
+   * The one-line split between what the maritime data proves and what it does
+   * not, carried with the scene so an interface cannot draw a ferry route
+   * without also having the sentence that says a route is not a produce
+   * service.
+   */
+  maritimeDisclaimer?: string;
   /** Repeated here so a consumer cannot render the scene without the label. */
   evidenceLabel: string;
+}
+
+/**
+ * One cross-island consignment at one replay instant.
+ *
+ * Deliberately field-by-field rather than a spread of the engine's shipment, so
+ * that the hidden per-sailing failure draw cannot ride along into a browser.
+ * The two provenance fields are both present on every record because a shipment
+ * mixes two kinds of claim: the ports, the link and the exchange rate are cited
+ * public references, and everything about the schedule, the price, the customs
+ * behaviour and the outcome is synthetic.
+ */
+export interface ControlRoomShipment {
+  shipmentId: string;
+  missionId: string;
+  commitmentId: string;
+  demandId: string;
+  originIslandId: string;
+  destinationIslandId: string;
+  originPortId: string;
+  destinationPortId: string;
+  linkId: string;
+  operator: string;
+  status: MaritimeShipmentStatus;
+  /** SYNTHETIC allowance per sailing, not an operator figure. */
+  capacityKg: number;
+  loadedKg: number;
+  legs: MaritimeLeg[];
+  customs: CustomsCheckpoint;
+  cost: MaritimeShipmentCost;
+  scheduledDepartureAt: number;
+  scheduledArrivalAt: number;
+  actualDepartureAt: number | null;
+  actualArrivalAt: number | null;
+  deliveredAt: number | null;
+  failureReason: string | null;
+  weatherDelayHours: number;
+  /** Ports, link and rates. */
+  networkProvenance: 'PUBLIC_REFERENCE';
+  /** Schedule, capacity, price, customs behaviour and outcome. */
+  operationsProvenance: 'SYNTHETIC';
 }
 
 export interface SimulationParticipant {
@@ -65,6 +158,12 @@ export interface SimulationParticipant {
   displayName: string;
   islandId: string;
 }
+
+/**
+ * Which harvest-estimation method produced a forecast during a run.
+ * `DETERMINISTIC_FALLBACK` is the rule-based fixture, never learned output.
+ */
+export type SimulationEstimationMode = 'LEARNED_MODEL' | 'DETERMINISTIC_FALLBACK';
 
 export interface SimulationAgentAction {
   actionId: string;
@@ -79,6 +178,11 @@ export interface SimulationAgentAction {
   entityId?: string;
   eventIds: string[];
   adapter: string;
+  /**
+   * Harvest-estimation method behind a forecast-producing tool call. Optional
+   * so saved frames from before the per-run toggle still replay.
+   */
+  estimationMode?: SimulationEstimationMode;
   /** Whether this tool crossed an approval boundary in the synthetic run. */
   approval: 'NONE' | 'SYNTHETIC_PARTICIPANT';
   correlationId?: string;
@@ -118,6 +222,50 @@ export interface SimulationOrderOutcomes {
   causes?: Record<string, number>;
 }
 
+/**
+ * Observable weather for one island at one replay instant.
+ *
+ * Everything a control-room overlay needs to draw the sky and nothing it does
+ * not: today's realised conditions, and the forecast issued today. Realised
+ * weather for a *later* frame is never here, which is what stops a saved replay
+ * from being a route to hidden future weather.
+ *
+ * `windFromDegrees` is the meteorological convention, the direction the wind
+ * blows *from*, clockwise from true north. `cloudCoverFraction` is carried
+ * alongside `condition` because a four-value enum cannot drive a gradient.
+ */
+export interface ControlRoomWeather {
+  islandId: string;
+  /** ISO-8601 calendar date of the realised reading. */
+  date: string;
+  condition: WeatherCondition;
+  rainMm: number;
+  windKph: number;
+  windFromDegrees: number;
+  cloudCoverFraction: number;
+  tempBand: TempBand;
+  /**
+   * The run is a synthetic simulation, so its record of a day is synthetic.
+   *
+   * Unchanged by issue #90 on purpose. Where the *physical inputs* to a day came
+   * from is a different question, and `evidenceType` below answers it: a
+   * recorded day makes the conditions real without making the delivery, the
+   * order or the farm real, exactly as the demo's licensed coordinates make its
+   * geography real without making its farms real.
+   */
+  provenance: 'SYNTHETIC';
+  /**
+   * Whether this day's conditions were generated or taken from a recorded,
+   * committed reference dataset. `PUBLIC_REFERENCE` days are real weather.
+   */
+  evidenceType: WeatherEvidenceType;
+  /** For a `PUBLIC_REFERENCE` day, the calendar date the value was recorded on. */
+  recordedDate?: string;
+  /** A forecast is a synthetic prediction, which is a different kind of claim. */
+  forecastProvenance: 'MODEL_PREDICTED';
+  forecast: ForecastDay[];
+}
+
 /** A delivery mission, with the timings needed to animate it. */
 export interface ControlRoomMission {
   missionId: string;
@@ -129,6 +277,13 @@ export interface ControlRoomMission {
   plannedArrivalAt: number;
   actualArrivalAt: number | null;
   loadedKg: number;
+  /**
+   * Road-only, or a farm-port-sea-port-buyer chain.
+   *
+   * Optional so replays saved before issue #40 still load; a missing value
+   * means the road-only behaviour those replays recorded.
+   */
+  mode?: 'ROAD' | 'MARITIME';
 }
 
 /** A crop batch as Harvest sees it. No true yield, no true readiness. */
@@ -183,6 +338,20 @@ export interface ControlRoomFrame {
   demands: ControlRoomDemand[];
   disruptions: ObservableDisruptionView[];
   degradedRoadSegmentIds: string[];
+  /**
+   * Observable weather per island at this instant.
+   *
+   * Optional so frames saved before issue #37 still replay; present on every
+   * frame a current engine records.
+   */
+  weather?: ControlRoomWeather[];
+  /**
+   * Cross-island consignments as of this instant.
+   *
+   * Optional, and always absent in practice for a one-island run: a run whose
+   * scoped network has no links cannot produce one.
+   */
+  shipments?: ControlRoomShipment[];
   /** Decisions recorded since the previous frame. */
   newDecisions: DecisionRecord[];
   /** Product API actions performed by simulated participants during this frame. */
@@ -299,4 +468,28 @@ export function frameAt(frames: ControlRoomFrame[], atMs: number): ControlRoomFr
     else high = middle - 1;
   }
   return frames[low] as ControlRoomFrame;
+}
+
+/**
+ * Where a vessel is on its sea leg at a given instant, or null.
+ *
+ * Null before the boat sails, after it berths, and for a sailing that failed —
+ * so the control room draws a moving marker only while there is genuinely
+ * something at sea. The road legs are covered by `missionPositionAt` on the
+ * accompanying mission, which is why this deliberately answers only for the
+ * middle leg rather than for the whole itinerary.
+ *
+ * Interpolation is linear between the two ports, which is a straight rhumb-ish
+ * line rather than a real track. Nothing downstream measures it, and pretending
+ * to a real vessel track would be inventing evidence the dataset does not hold.
+ */
+export function vesselPositionAt(shipment: ControlRoomShipment, atMs: number): GeoPoint | null {
+  if (shipment.status === 'FAILED') return null;
+  const seaLeg = shipment.legs.find((leg) => leg.kind === 'SEA');
+  if (!seaLeg) return null;
+  if (atMs < seaLeg.startsAt || atMs > seaLeg.endsAt) return null;
+
+  const span = seaLeg.endsAt - seaLeg.startsAt;
+  const progress = span <= 0 ? 1 : (atMs - seaLeg.startsAt) / span;
+  return interpolateAlongPath([seaLeg.from, seaLeg.to], progress);
 }

@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ControlRoomFrame, ControlRoomScene, ReferenceDataSource, ReferencePlace } from "@harvest/simulation";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -66,5 +66,77 @@ describe("reference-place presentation", () => {
     expect(screen.getByText("Reference restaurant")).toBeInTheDocument();
     expect(screen.getByText("Reference market")).toBeInTheDocument();
     expect(screen.getByText("Reference port")).toBeInTheDocument();
+  });
+
+  /*
+   * ODbL requires the credit wherever the data is drawn, so the collapsed state
+   * is the one worth testing hardest: the credit has to survive it, and the
+   * licence apparatus has to still be in the document and one click away.
+   */
+  it("shows the OpenStreetMap credit while collapsed, with the detail behind a closed toggle", () => {
+    render(<ReferenceAttribution sources={[source]} />);
+    const toggle = screen.getByRole("button", { name: /Sources/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    // The whole default state is this one line: the credit ODbL requires, and
+    // the way in. No URL, no retrieval date, no licence name.
+    const line = toggle.closest("p");
+    expect(line).toBeVisible();
+    expect(line?.textContent).toBe("© OpenStreetMap contributors · Sources");
+
+    // The detail is in the document, but not on the globe and not in the
+    // accessibility tree.
+    const licence = screen.getByText(source.licenceName);
+    expect(licence).toBeInTheDocument();
+    expect(licence).not.toBeVisible();
+    expect(screen.queryByRole("link", { name: source.licenceName })).toBeNull();
+  });
+
+  it("expands the full source, licence and retrieval detail on click and closes on Escape", () => {
+    render(
+      <ReferenceAttribution
+        sources={[source]}
+        maritime={[{
+          label: "Ferry and cargo links",
+          publisher: "L'Express des Îles",
+          sourceUrl: "https://www.express-des-iles.com/",
+          licence: "Operator published timetable, reference use",
+          retrievedAt: "2026-09-03",
+        }]}
+        maritimeNote="Ports, links and exchange rates are public references. Schedules, capacities, prices and outcomes are SYNTHETIC."
+        recordedWeather
+      />,
+    );
+
+    const toggle = screen.getByRole("button", { name: /Sources/ });
+    // The collapsed line names the datasets in the scene and nothing else.
+    expect(toggle.closest("p")?.textContent).toBe(
+      "© OpenStreetMap contributors · recorded weather · ferry & FX references · Sources",
+    );
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveAttribute("aria-controls", screen.getByText(source.licenceName).closest("div")?.id);
+
+    expect(screen.getByRole("link", { name: source.attribution })).toHaveAttribute("href", source.sourceUrl);
+    expect(screen.getByRole("link", { name: source.licenceName })).toHaveAttribute("href", source.licenceUrl);
+    expect(screen.getByText(/retrieved 2026-09-03/)).toBeVisible();
+    expect(screen.getByText(/Schedules, capacities, prices and outcomes are SYNTHETIC/)).toBeVisible();
+    expect(screen.getByText(/days labelled PUBLIC_REFERENCE/)).toBeVisible();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText(source.licenceName)).not.toBeVisible();
+    // The credit itself never goes away.
+    expect(toggle.closest("p")).toHaveTextContent("© OpenStreetMap contributors");
+  });
+
+  it("closes when the click lands outside the attribution", () => {
+    render(<ReferenceAttribution sources={[source]} />);
+    const toggle = screen.getByRole("button", { name: /Sources/ });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.mouseDown(document.body);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
   });
 });

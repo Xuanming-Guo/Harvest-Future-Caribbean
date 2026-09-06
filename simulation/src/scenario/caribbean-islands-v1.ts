@@ -3,6 +3,8 @@ import type { Scenario, ScenarioContext } from './types.js';
 import { CARIBBEAN_ISLANDS_V1, requireCaribbeanIsland } from './caribbean-islands-manifest-v1.js';
 import { referencePlacesByCategory, referencePlacesForIslands, referenceSourcesForPlaces } from './reference-places.js';
 import type { Buyer, Farm, HiddenCropTruth, ObservedCropBatch, RoadSegment, ScheduledDisruption, Transporter, World } from '../world/types.js';
+import { scopeMaritimeNetwork } from '../world/maritime.js';
+import { WeatherModel } from '../world/weather.js';
 
 const START_ISO = '2026-09-01T06:00:00Z';
 const DURATION_DAYS = 21;
@@ -22,7 +24,7 @@ function haversineKm(a: { latitude: number; longitude: number }, b: { latitude: 
 
 export const caribbeanIslandsV1: Scenario = {
   scenarioId: 'caribbean-islands-v1',
-  description: 'Manifest-generated independent Caribbean island food systems. Inter-island trade, shipping, ports, customs and currency conversion are intentionally excluded.',
+  description: 'Manifest-generated Caribbean island food systems. Since #40 a scoped run also models inter-island orders, sailings, ports and customs across the islands in scope, priced in XCD; currency conversion is still excluded.',
   availableIslandIds: CARIBBEAN_ISLANDS_V1.map((island) => island.islandId),
   startsAtIso: START_ISO,
   durationDays: DURATION_DAYS,
@@ -108,7 +110,20 @@ export const caribbeanIslandsV1: Scenario = {
       for (let day = 0; day <= DURATION_DAYS + SETTLEMENT_DAYS; day += 1) rainfallMmByDate.set(`${island.islandId}:${formatDate(context.startsAt + day * DAY_MS)}`, Number(Math.max(0, stream.normal(12, 8)).toFixed(2)));
       const roadId = [...roads.values()].find((road) => road.islandId === island.islandId)?.roadSegmentId; if (roadId) disruptions.push({ disruptionId: context.ids.next(), type: 'ROAD', startsAt: context.startsAt + stream.int(7, 14) * DAY_MS, endsAt: context.startsAt + stream.int(15, 18) * DAY_MS, affectedEntityIds: [roadId], severity: Number(stream.float(0.4, 0.85).toFixed(2)), publicDescription: `Heavy rain has disrupted a local ${island.name} farm road.` });
     }
-    return { farms, buyers, transporters, roads, referencePlaces, referenceDataSources, truth: { crops, disruptions, rainfallMmByDate }, observed: { batches, demands: new Map(), commitments: new Map(), missions: new Map(), disruptions: [], degradedRoadSegmentIds: new Set() } };
+    // Realised weather extends the rainfall above rather than replacing it: the
+    // rain values are read back out unchanged, and only wind, temperature and
+    // bearing come from a stream of their own. Adding those draws cannot move
+    // any existing seeded value, because the streams are independent by name.
+    const weather = new WeatherModel({
+      islandIds: islands.map((island) => island.islandId),
+      startsAt: context.startsAt,
+      days: DURATION_DAYS + SETTLEMENT_DAYS + 1,
+      rainfallMm: (islandId, date) => rainfallMmByDate.get(`${islandId}:${date}`) ?? 0,
+      realisedStream: context.random.stream('scenario:weather:realised'),
+      forecastStream: context.random.stream('weather:forecast'),
+    });
+
+    return { farms, buyers, transporters, roads, referencePlaces, referenceDataSources, maritime: scopeMaritimeNetwork(islands.map((island) => island.islandId)), truth: { crops, disruptions, rainfallMmByDate, weather }, observed: { batches, demands: new Map(), commitments: new Map(), missions: new Map(), shipments: new Map(), disruptions: [], degradedRoadSegmentIds: new Set() } };
   },
 };
 

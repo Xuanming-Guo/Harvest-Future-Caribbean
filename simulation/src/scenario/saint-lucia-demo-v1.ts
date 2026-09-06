@@ -5,13 +5,24 @@
  * around Castries and Rodney Bay, over a three-week window, with a rainy
  * stretch that degrades the interior roads partway through.
  *
- * EVIDENCE STATUS: every number below is SYNTHETIC. Licensed public place
- * references provide geographic context and the shape of the problem follows
- * the project's research notes, but no yield,
- * price, road speed or demand figure here is a measurement. Nothing produced by
- * this scenario may be presented as observed impact from a deployed system;
- * `docs/architecture.md` and the repository evidence policy both require that
- * distinction to be explicit, and the run report repeats it.
+ * EVIDENCE STATUS: every number below is SYNTHETIC with one stated exception.
+ * Licensed public place references provide geographic context and the shape of
+ * the problem follows the project's research notes, but no yield, price, road
+ * speed or demand figure here is a measurement.
+ *
+ * The exception is the weather. Since issue #90 this scenario replays RECORDED
+ * daily conditions for Saint Lucia from `data/saint-lucia-weather-reference.v1`
+ * (Open-Meteo Historical Weather API, CC BY 4.0), so rain, wind, cloud and
+ * temperature are real values from a real September and are labelled
+ * `PUBLIC_REFERENCE` day by day. Which recorded year a run replays is chosen
+ * deterministically from its seed. That makes the *conditions* real; it makes
+ * nothing else real. Every farm, buyer, order, commitment, delivery and outcome
+ * downstream of the weather remains invented, and a recorded storm is not
+ * evidence that a Harvest delivery failed.
+ *
+ * Nothing produced by this scenario may be presented as observed impact from a
+ * deployed system; `docs/architecture.md` and the repository evidence policy
+ * both require that distinction to be explicit, and the run report repeats it.
  *
  * The scenario id matches the one used throughout `contracts/`.
  */
@@ -21,6 +32,9 @@ import { DAY_MS, HOUR_MS, formatDate } from '../core/time.js';
 import type { Scenario, ScenarioContext } from './types.js';
 import { caribbeanIslandScenarios, caribbeanIslandsV1 } from './caribbean-islands-v1.js';
 import { referencePlacesByCategory, referencePlacesForIslands, referenceSourcesForPlaces } from './reference-places.js';
+import { scopeMaritimeNetwork } from '../world/maritime.js';
+import { WeatherModel } from '../world/weather.js';
+import { SAINT_LUCIA_WEATHER_REFERENCE, buildWeatherReferenceSeries } from '../world/weather-reference.js';
 import type {
   Buyer,
   Farm,
@@ -87,6 +101,25 @@ function haversineKm(a: { latitude: number; longitude: number }, b: { latitude: 
 /** Saint Lucian roads wind; a 1.4 multiplier on straight-line distance is a synthetic stand-in. */
 const ROAD_WINDING_FACTOR = 1.4;
 
+/**
+ * Day index of the heaviest rainfall in the run window.
+ *
+ * Ties resolve to the earliest day, so the answer depends only on the rainfall
+ * values and not on map iteration order.
+ */
+function wettestDayIndex(rainfallMmByDate: ReadonlyMap<string, number>, startsAt: number, durationDays: number): number {
+  let bestDay = 0;
+  let bestRain = -1;
+  for (let day = 0; day < durationDays; day += 1) {
+    const rain = rainfallMmByDate.get(formatDate(startsAt + day * DAY_MS)) ?? 0;
+    if (rain > bestRain) {
+      bestRain = rain;
+      bestDay = day;
+    }
+  }
+  return bestDay;
+}
+
 function buildRoads(
   ids: IdFactory,
   sites: readonly { name: string; latitude: number; longitude: number }[],
@@ -123,9 +156,14 @@ export const saintLuciaDemoV1: Scenario = {
   startsAtIso: START_ISO,
   durationDays: DURATION_DAYS,
   settlementDays: SETTLEMENT_DAYS,
+  weatherReference: SAINT_LUCIA_WEATHER_REFERENCE,
+
   provenanceNote:
-    'SYNTHETIC. Licensed public place references provide geographic context; every actor, yield, price, ' +
-    'demand, road speed and spoilage figure is invented. A nearby reference does not imply participation.',
+    'SYNTHETIC, with one recorded input. Licensed public place references provide geographic context and ' +
+    'realised weather replays recorded Saint Lucian daily conditions from data/saint-lucia-weather-reference.v1 ' +
+    '(Open-Meteo Historical Weather API, CC BY 4.0), labelled PUBLIC_REFERENCE per day. Every actor, yield, ' +
+    'price, demand, road speed and spoilage figure is invented, and forecasts remain MODEL_PREDICTED. A nearby ' +
+    'reference does not imply participation, and a recorded weather day is not evidence of any Harvest outcome.',
 
   build(context: ScenarioContext): World {
     const { ids, random, startsAt } = context;
@@ -136,6 +174,19 @@ export const saintLuciaDemoV1: Scenario = {
     const cropStream = random.stream('scenario:crops');
     const weatherStream = random.stream('scenario:weather');
     const disruptionStream = random.stream('scenario:disruptions');
+
+    // Which recorded September this run replays, drawn from a stream of its own
+    // so that adding or removing a year from the dataset cannot shift a single
+    // farm, crop or disruption draw. `saintLuciaDemoV1.weatherReference` is read
+    // rather than the constant inlined, so a scenario that drops the opt-in
+    // silently falls back to the generator instead of half-using the dataset.
+    const weatherReference = saintLuciaDemoV1.weatherReference
+      ? buildWeatherReferenceSeries({
+          datasetId: saintLuciaDemoV1.weatherReference,
+          islandIds: ['saint-lucia'],
+          stream: random.stream('scenario:weather:reference'),
+        })
+      : undefined;
 
     const referencePlaces = referencePlacesForIslands(['saint-lucia']);
     const referenceDataSources = referenceSourcesForPlaces(referencePlaces);
@@ -318,11 +369,33 @@ export const saintLuciaDemoV1: Scenario = {
       rainfallMmByDate.set(date, Number(rainfallMm.toFixed(2)));
     }
 
+    // Where a recorded day exists, it replaces the drawn one.
+    //
+    // The synthetic draw above still happens, so the seeded stream lands in the
+    // same place it always did and the wet-spell figures below stay comparable.
+    // The map is then overwritten rather than bypassed because
+    // `world.truth.rainfallMmByDate` and `world.truth.weather` must not be able
+    // to disagree about how much it rained on a given date; one of them would
+    // then be quietly wrong, and there is no way to tell which from the outside.
+    if (weatherReference) {
+      for (const date of rainfallMmByDate.keys()) {
+        const recorded = weatherReference.readingFor('saint-lucia', date);
+        if (recorded) rainfallMmByDate.set(date, recorded.rainMm);
+      }
+    }
+
     // The wet spell closes an interior road. It is scheduled now but hidden:
     // it only becomes observable when it starts.
     const disruptions: ScheduledDisruption[] = [];
     const floodedRoad = disruptionStream.pick(roadIds.filter((id) => (roads.get(id) as RoadSegment).rainSensitivity > 0.5));
-    const floodStartsAt = startsAt + wetSpellStartDay * DAY_MS + disruptionStream.int(6, 14) * HOUR_MS;
+    // On a recorded run the synthetic wet spell no longer exists, so anchoring
+    // the flood to it would put "heavy rain has made the road impassable" on a
+    // day the record says was dry. The anchor moves to the wettest recorded day
+    // in the window instead. This is a *lookup*, not a draw: the same two
+    // `disruptionStream` values are consumed either way, so the disruption's
+    // offset, duration and severity are untouched and only its day moves.
+    const floodAnchorDay = weatherReference ? wettestDayIndex(rainfallMmByDate, startsAt, DURATION_DAYS) : wetSpellStartDay;
+    const floodStartsAt = startsAt + floodAnchorDay * DAY_MS + disruptionStream.int(6, 14) * HOUR_MS;
 
     disruptions.push({
       disruptionId: ids.next(),
@@ -350,6 +423,21 @@ export const saintLuciaDemoV1: Scenario = {
 
     disruptions.sort((a, b) => a.startsAt - b.startsAt);
 
+    // Realised weather is built *on top of* the rainfall drawn above rather
+    // than instead of it. `rainfallMm` reads the values back unchanged, so
+    // every rainfall figure a previously recorded seed produced still holds;
+    // only wind, bearing and temperature are new, and they come from streams of
+    // their own so they cannot shift a single existing draw.
+    const weather = new WeatherModel({
+      islandIds: ['saint-lucia'],
+      startsAt,
+      days: DURATION_DAYS + SETTLEMENT_DAYS + 1,
+      rainfallMm: (_islandId, date) => rainfallMmByDate.get(date) ?? 0,
+      realisedStream: random.stream('scenario:weather:realised'),
+      forecastStream: random.stream('weather:forecast'),
+      ...(weatherReference ? { reference: weatherReference } : {}),
+    });
+
     return {
       farms,
       buyers,
@@ -357,12 +445,17 @@ export const saintLuciaDemoV1: Scenario = {
       roads,
       referencePlaces,
       referenceDataSources,
-      truth: { crops, disruptions, rainfallMmByDate },
+      // One island, so the scoped network keeps Castries but no link: a link
+      // needs two in-scope ports on two different islands. This scenario stays
+      // exactly as local as it was before issue #40.
+      maritime: scopeMaritimeNetwork(['saint-lucia']),
+      truth: { crops, disruptions, rainfallMmByDate, weather },
       observed: {
         batches,
         demands: new Map(),
         commitments: new Map(),
         missions: new Map(),
+        shipments: new Map(),
         disruptions: [],
         degradedRoadSegmentIds: new Set(),
       },

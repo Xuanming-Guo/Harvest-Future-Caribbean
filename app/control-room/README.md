@@ -30,9 +30,13 @@ and handles play, pause, speed, rewind, scrub and reset locally:
 - licensed public reference places appear as quieter category markers, with
   labels only at close range and full provenance in the Inspector;
 - source and licence attribution remains visible whenever reference places are
-  present;
+  present, collapsed by default to a single credit line under the globe — the
+  OpenStreetMap credit, the scene's other reference datasets named in words,
+  and a **Sources** button that opens the full publishers, licences, retrieval
+  dates and synthetic-outcomes caveat upward over it;
 - injecting a disruption creates a new derived run and preserves the source;
-- Harvest agent actions and adapter provenance appear in purple in the feed;
+- Harvest agent actions and adapter provenance appear in purple in the feed,
+  and a forecast-producing action also names the estimation method that ran;
 - selecting a purple action opens its role, tool, status, approval class and
   safe trace/event references in the Inspector, and offers **Preview in
   Harvest**;
@@ -70,6 +74,31 @@ The issue #29 backend can be tested independently using
 Harvest runs contain run-scoped participant actors, crops, marketplace work,
 orders, approvals, missions, events and safe traces. Baseline runs remain
 engine-only and deliberately do not create those Product API records.
+
+## Harvest estimation method
+
+The setup toolbar carries a **Harvest estimation** segmented control with two
+alternatives, saved with the run rather than set on the server:
+
+- **Harvest estimation model** calls the FastAPI quantile service. If that
+  service is unreachable or rejects the request, the run fails with
+  `MODEL_UNAVAILABLE` and writes no forecasts. It never quietly falls back,
+  because a run labelled as learned-model output has to be exactly that.
+- **Deterministic fallback** uses the rule-based fixture, so crop, safe-supply,
+  listing and marketplace workflows all keep working without the model service.
+  Every forecast it produces is labelled in the API payload, the saved trace,
+  the agent-action provenance and the participant crop page, so it cannot be
+  read as a learned prediction.
+
+Two alternatives that stay visible beat a collapsed menu here, because the
+choice changes what the run actually does. The control is disabled while
+**Baseline** is selected: baseline participants never call the Product API or
+a forecast model, so the run records the choice and ignores it. The masthead
+badge names the loaded run's method, and marks it `(unused)` on a Baseline run,
+so a screenshot cannot separate a fallback run from a learned one.
+
+Participants cannot change the method. The website's crop page shows an
+**Estimated by** line naming the method and model version, and nothing else.
 
 ## Preview in Harvest
 
@@ -236,6 +265,68 @@ island overview that is far below one pixel and even at region zoom it is a
 couple of pixels of noise. Grower activity shows as the check-in ring and as
 the crop changing state.
 
+## Weather overlay
+
+The globe draws the weather the saved run recorded, per island, for whatever
+frame the transport is showing. Three marks, and no more than three, because
+the point is to see where the sky is doing something that matters:
+
+- a **translucent disc** at cloud height, whose colour is the condition and
+  whose opacity comes from `cloudCoverFraction` and `rainMm` together. A clear
+  day is a barely-there haze; a storm is a deep indigo. That difference is the
+  whole reason the disc reads at a glance;
+- a **ring** around an island under a storm, and only a storm;
+- an **arrow** showing which way the wind is blowing, sized by `windKph` and
+  rotated from `windFromDegrees` (which is the direction the wind blows *from*,
+  so the arrow points the opposite way).
+
+Weather borrows none of the `--status-*` hues. Those map one operational state
+to one colour each, and a rain cloud is not a crop stage.
+
+**It uses saved replay data only.** Everything comes off `frame.weather`, which
+issue #37 records with the run: no request on load, none on scrub, and no live
+weather service anywhere. Play, pause, rewind, reset, speed and scrubbing all
+arrive as a different `frame`, so the overlay follows them for free and a
+rewind puts the sky back exactly as it was. Nothing here is ever a day the
+replay has not reached.
+
+The **Weather** switch in the map key turns the layer off. That hides its
+entities and does nothing else — the simulation, the replay and every other
+layer are untouched, and switching it back on restores the same picture.
+
+Overlay entities are named under a `weather::` prefix and the globe's click
+handler drills through them, so farms, buyers, vehicles, routes, reference
+places and disruption markers stay clickable underneath a disc that covers the
+whole island.
+
+### Motion, and when it stops
+
+The pulse and the cloud's downwind drift are functions of **simulation time**,
+not wall-clock time. Pausing freezes them, scrubbing backwards returns them to
+the state they had, and the same instant always renders the same frame — a
+`requestAnimationFrame` phase would give none of that, and a screenshot of a
+paused globe would not be reproducible.
+
+Motion stops entirely, leaving static discs, a static ring and the arrow, when:
+
+- the operating system asks for reduced motion (`prefers-reduced-motion`);
+- the machine reports four or fewer logical cores, which is the supported low
+  end of the demo hardware;
+- a WebGL context cannot be created for the effect.
+
+If Cesium itself is unavailable the overlay is simply absent, like the rest of
+the globe; and a replay saved before #37 carries no weather, in which case the
+layer draws nothing rather than inventing any.
+
+### Reading the numbers
+
+The map key carries the condition swatches and a **Weather now** readout for
+the frame on screen: island, date, condition, rainfall in mm, wind in kph with
+a compass point, temperature band, and the forecast with its own confidence.
+Realised weather is labelled `SYNTHETIC` and the forecast `MODEL_PREDICTED`,
+because a record and a prediction are different claims; those labels and the
+masthead's synthetic-simulation badge are not dismissible.
+
 ## Reading the interface
 
 - **Crop colour** follows reported stage, not truth: teal is growing, green is
@@ -243,6 +334,9 @@ the crop changing state.
 - **A red dashed road** is currently degraded or closed.
 - **The scrub bar** carries red ticks where disruptions became visible, so the
   timeline doubles as a summary of when things went wrong.
+- **Weather** is a translucent disc over each island, ringed when it is a
+  storm, with an arrow for the wind. It is drawn from the saved frame, and the
+  **Weather** switch in the map key hides it.
 
 ## If the globe looks black
 

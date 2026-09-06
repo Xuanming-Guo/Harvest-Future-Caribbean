@@ -32,6 +32,7 @@ Recorded paired-seed comparisons live in
 | `src/core/time.ts` | Simulation time; the only file allowed to touch `Date` |
 | `src/world/types.ts` | The hidden-truth / observed-world split |
 | `src/world/observable.ts` | Contract projection, leak guard, world digest |
+| `src/world/weather.ts` | Realised weather, imperfect forecasts, and what weather does |
 | `src/scenario/` | Scenario recipes; `saint-lucia-demo-v1` is the hero |
 | `src/policy/` | `baseline` and `harvest` coordination policies |
 | `src/engine.ts` | Clock, handlers, validation, metrics |
@@ -80,14 +81,62 @@ engine records only the safe disruption-to-mission causal link for the Product
 API bridge, never hidden severity. An event may correctly leave final totals
 unchanged when it does not intersect relevant activity.
 
-## Honest status of the baseline-versus-Harvest comparison
+## Current benchmark
 
-**On the current scenario the Harvest policy outperforms the fragmented
-baseline, after issue #53 fixed three coordination defects and one measurement
-defect.** Across the same ten paired seeds, mean fulfilment is 42.9% for Harvest
-against 8.7% for the baseline, on an order book of 114 orders. Harvest wins nine
-of the ten seeds and ties one; it loses none. Before any of the fixes it was
-11.0% against 8.7%, losing on five seeds and carried on the mean by one.
+The #91 report uses 21 demand days plus seven settlement days. Across the ten
+unchanged seeds Harvest has nine wins and one tie against baseline, with a
+median paired fulfilment gain of 25 percentage points. Seed 23 still has six
+unmet orders and more waste than baseline. All runs have zero horizon-truncated
+orders. See [the current report](benchmarks/README.md#current-forward-promise-and-settlement-results-91)
+for counts and deterministic repeat evidence. These are synthetic standalone
+outcomes; connected Product API outcomes are measured separately.
+
+## Historical comparison before the settlement window
+
+**On the pre-settlement scenario the Harvest policy outperformed the fragmented
+baseline, and it still loses one seed.** Across the same ten paired seeds, mean
+fulfilment is 39.2% for Harvest against 12.7% for the baseline: seven wins, two
+ties, and one loss. Under the synthetic weather generator that preceded recorded
+weather (#90) it was 32.7% against 11.6% on the same record of wins. Before
+realised weather existed at all (#37) it was 47.7% against 11.7%, with eight
+wins, two ties and no losses. Before the issue #53 fixes it was 11.0% against
+8.7%, losing on five seeds and carried on the mean by one.
+
+Two changes to the physics move these numbers, in opposite directions, and
+neither was tuned.
+
+Realised weather (#37) cost Harvest roughly a third of its lead and cost the
+baseline almost nothing, for a reason worth stating plainly: **Harvest's
+advantage is delivered through promises, and weather is a machine for
+invalidating promises.** A batch that ripens late, loses grade to rain and rots
+faster once ready is a batch Harvest has already committed against; the baseline
+was mostly failing those orders anyway.
+
+Recorded weather (#90) then gave part of that back, because **the real record is
+milder than the generator was**: 4.7 wet days per run against 10.0, and 0.4 storm
+days against 3.8. That is a fact about daily gridded reanalysis over a small
+island rather than a claim that Saint Lucian Septembers are calm, and
+[`data/README-weather.md`](data/README-weather.md) sets out the limits of the
+dataset at length. Two results in that column are awkward and are reported as
+measured: the baseline is **not** flat for the first time (seed 19 gains an
+order), and baseline physical waste *rises* in the gentler world, because crop
+that ripens on schedule spends more days standing ready in a field nobody
+collects from.
+
+The full mechanism, the losing seed, and what was *not* done about any of it are
+in [`benchmarks/README.md`](benchmarks/README.md). No weather constant was tuned
+to recover an earlier number, in either direction.
+
+Realised weather for `saint-lucia-demo-v1` is **recorded**, not generated:
+the scenario declares `weatherReference` and replays 1-22 September of a real
+year chosen deterministically from the run seed, from the committed offline
+snapshot in [`data/README-weather.md`](data/README-weather.md) (Open-Meteo
+Historical Weather API, CC BY 4.0). Those days carry
+`evidenceType: 'PUBLIC_REFERENCE'`; generated days carry `'SYNTHETIC'`, and the
+label is per day rather than per run. Scenarios that do not declare a reference
+keep the generator unchanged. Forecasts stay `MODEL_PREDICTED` either way, and
+no weather service is contacted at runtime.
+
 
 The per-seed table, the supporting waste and substitution figures, and the
 unmet-demand histogram are in [`benchmarks/README.md`](benchmarks/README.md).
@@ -180,32 +229,56 @@ approval gate re-checks more proposals against decayed evidence, and
 closes. `benchmarks/README.md` carries the per-seed numbers and states what each
 of those costs.
 
+### Realised weather is the second world change, and the costlier one
+
+Issue #37 gave every island-day a condition, a rainfall, a wind and a
+temperature band, and let those act on the crop: wet days slow ripening (capped
+at three days per batch), wet and hot-dry days raise spoilage, wet days take
+marketable grade off, storms degrade more roads, and a vehicle that departs into
+rain arrives later. All of it is physics, so both arms face it and every digest
+moved again. The order book did not move: the same 85 orders are raised, because
+weather does not touch demand generation.
+
+The forecast is the other half and is deliberately not physics. It is a noised,
+lossy model of the realised series whose error grows with the square root of
+lead time; it misses storms and predicts storms that never arrive, and
+`tests/weather.test.ts` asserts both. It reaches the Harvest policy through
+`PolicyContext.weather`, which refuses realised weather for a day that has not
+occurred. Harvest uses it to bring a pickup forward when a storm falls inside
+the ready-hold window, and uses *realised* rain to decide that a report written
+before a soaking is no longer evidence. The baseline is given neither, declared
+as `readsForecast: false` in `PolicyCapabilities` rather than hidden in a
+policy-name check, and the tests assert no baseline decision ever cites a
+forecast.
+
 What is still unresolved, from the cause histogram:
 
-- **`APPROVAL_REJECTED` at 19**, Harvest's largest bucket. The approval gate
-  re-checks a promise against evidence that decayed after the proposal, and now
-  has far more commitments to decline. Whether that gate is calibrated or merely
-  strict is open, and it is now the biggest single thing between Harvest and the
-  orders it is already matching.
-- **`INSUFFICIENT_SUPPLY` at 14.** Orders Harvest attempted and part-filled. The
-  expected shape of the trade rather than a defect, but not attacked.
-- **`NO_READY_SUPPLY` at 11**, down from 15: forward promising is what moved it.
-  What is left is orders nothing could be promised against at all, which a better
-  yield forecast rather than better coordination would move.
-- **`MISSION_LATE` at 8**, up from 1. More missions in flight means more of them
-  caught by the road closure and the breakdown. Worth checking whether the
-  recovery path is doing everything it could before treating it as the cost of
-  trading more.
+- **`INSUFFICIENT_SUPPLY` is Harvest's largest bucket**, at 23 against the
+  baseline's 5, up from 18 before weather. That is the expected shape of the
+  trade — orders Harvest previously never attempted now land as partial
+  deliveries — but it is the biggest remaining category and it has not been
+  attacked.
+- **`APPROVAL_REJECTED` at 12, up from 7.** The approval gate re-checks a
+  promise against evidence that decayed after the proposal, and weather is now a
+  second way for evidence to decay. Whether that gate is calibrated or merely
+  strict matters more than it did.
+- **`NO_READY_SUPPLY` at 17.** Orders nothing could be promised against at all.
+  This is the part a better *yield* forecast (#7), not better coordination and
+  not a weather forecast, would move. Knowing a storm is coming does not create
+  ready crop.
+
 
 Issue #4 owns the machinery that makes an honest comparison possible —
 identical worlds, isolated policy hooks, reproducible seeds. Issue #11 owns the
 comparison itself. Adjusting scenario constants until the favoured policy wins
 would fabricate the very result those issues exist to measure. No scenario
-constant has been touched: supply sizes, order sizes, readiness windows,
-spoilage rates, observation intervals and the three-to-seven-day deadline draw
-are all unchanged. The world changes are that the run watches its own orders to
-the end, and that weather is generated for the settlement days as well; both are
-stated above together with what they cost each arm.
+constant has been touched: supply sizes, order sizes, readiness windows, base
+spoilage rates and observation intervals are all unchanged, and the deadline
+draw is still three to seven days. The two world changes are which orders get
+raised at all, and what the weather does to the crop; both are stated here
+together with what they cost each arm. The weather coefficients were set once
+from plausibility and were not revisited after the benchmark was read.
+
 
 ## Control-room outcome boundary
 
@@ -252,6 +325,83 @@ There is no runtime geography lookup. Maintainers can run
 repository root to rebuild the snapshot, then review the generated diff. See
 [`docs/caribbean-scenario-data.md`](../docs/caribbean-scenario-data.md) for the
 source, licence, safe-field rules and limitations.
+
+## Scoped inter-island trade (#40)
+
+`src/world/maritime.ts` loads the reviewed offline network in
+`data/caribbean-maritime-network.v1.json` (34 ports, 13 published links, 13
+currencies, every record carrying its own source, licence and retrieval date;
+see [`data/README-maritime.md`](data/README-maritime.md)) and restricts it to
+the islands a run selected.
+
+**Scope is applied once, when the world is built.** A link survives only when
+*both* of its ports are on in-scope islands, so:
+
+- one island keeps its port and has **no links**, and therefore no shipment;
+- two islands can only use a connection between those two, and cannot see a
+  third island's port at all;
+- two published links that meet at a shared island are **not** chained into a
+  through-service, because no source publishes one;
+- where the dataset records no connection, none is invented. The run records
+  `NO_PUBLIC_ROUTE` against the order instead, which is a different failure from
+  `NO_READY_SUPPLY` (there was crop) and from `INSUFFICIENT_SUPPLY` (the promise
+  was not too small — there was no boat).
+
+Every maritime code path is gated on the scoped network having at least one
+link, which is why a one-island run reproduces its pre-#40 digests exactly.
+
+### What is public reference and what is synthetic
+
+| Public reference (cited, licensed) | Synthetic (invented here) |
+| --- | --- |
+| Port identity and coordinates | Capacity per sailing (`SAILING_CAPACITY_KG`) |
+| That a scheduled service exists between two ports | That *produce* moves on it at all |
+| A journey time the operator published | A journey time where none was published, labelled `SYNTHETIC_DEFAULT` |
+| Exchange rates and their `asOf` date | Freight price, clearance fee, every amount converted |
+| — | Customs documentation, inspection, delay and cost |
+| — | Sailing failure probability, weather delay, and every outcome |
+
+Both labels travel on every structure that leaves this package
+(`networkProvenance` and `operationsProvenance`), because one label for a
+shipment would let a reader take the synthetic half for cited evidence.
+
+### The shipment
+
+A cross-island commitment produces a `MARITIME` delivery mission with three
+legs: a local pickup run to the origin port, the published sea leg, and a local
+delivery run from the destination port to the buyer. Statuses are `SCHEDULED`,
+`DEPARTED`, `DELAYED`, `ARRIVED`, `DELIVERED` and `FAILED`.
+
+- **Capacity** binds at planning time; a consignment is never promised past the
+  synthetic per-sailing allowance.
+- **Weather** acts on the sea leg at sailing, reusing #37's storm effect, and
+  only then — at planning time that day has not happened.
+- **Customs** is a synthetic documentation check at the destination port with a
+  seeded inspection delay and a fixed cost line. **It is not a legal customs
+  model** and carries a disclaimer saying so on every instance.
+- **Failure** is a seeded per-sailing draw, held as hidden truth in the same
+  sense a scheduled disruption is. A failed consignment is scored
+  `SHIPMENT_FAILED`, not as spoilage: nothing rotted, a boat lost it.
+- **Currency**: every cross-island price is stated in the destination island's
+  currency and in XCD, with the fixed offline rate that connects them. No live
+  financial API is called, during a run or a replay.
+
+### Regional coordination
+
+Only the Harvest policy coordinates across islands
+(`PolicyCapabilities.coordinatesAcrossIslands`); the baseline declares it does
+not, which is what keeps the paired benchmark fair. When the buyer's own island
+comes up short, the policy ranks each reachable in-scope island on a documented
+deterministic score — coverage including capacity, evidence freshness, transit
+time against the time remaining, synthetic cost per kilogram, and risk — and
+proposes at most one source island and one sailing. No random stream is touched.
+
+The proposal then takes the **`INTER_ISLAND_COMMITMENT` approval gate**, which
+`AGENTS.md` requires. In the engine's own policy mode that is
+`approveCommitment`; in a connected run it is real Product API approvals from
+the buyer and every far-island grower whose crop it commits. Until the last
+approval lands there is no shipment object at all, so the gate cannot be
+bypassed by forgetting to read a flag.
 
 ## Responsibilities
 

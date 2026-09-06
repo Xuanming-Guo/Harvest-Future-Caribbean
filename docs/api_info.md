@@ -246,21 +246,26 @@ scope, not only the role name.
 - Request: `reason` = `NEW_OBSERVATION`, `MANUAL_REFRESH`, or
   `SCHEDULED_REFRESH`.
 - Response: forecast request ID, batch ID, queue status, request time.
-- Product state/event: store an idempotent job and invoke the internal model.
-  When its result validates, store a prediction snapshot, calculate ATP, and
-  emit `FORECAST_PRODUCED`.
+- Product state/event: store an idempotent job and invoke the harvest-
+  estimation method that applies to the batch. When its result validates,
+  store a prediction snapshot, calculate ATP, and emit `FORECAST_PRODUCED`.
 - Simulation effect: the request itself changes no world state; the produced
   forecast is retained for predicted-versus-actual evaluation.
 - Consumers: farmer forecast, crop map, Model Lab, operations feed.
 - Rules/failures: concurrent equivalent jobs return their existing receipt;
   reject missing evidence, inaccessible batches, and invalid job transitions.
+  A batch whose run selected `LEARNED_MODEL` returns `502 MODEL_UNAVAILABLE`
+  when that service is unreachable or rejects the request; the deterministic
+  fallback is never substituted silently.
 
 #### `GET /v1/yield-predictions/{predictionId}`
 
 - Callers: actors authorised for the related crop batch and operations roles.
 - Response: the Product API's validated prediction, allow-listed feature
-  snapshot, version, interval, confidence, warnings, provenance, and optional
-  accepted-outcome evaluation.
+  snapshot, `estimationMode`, `modelVersion`, interval, confidence, warnings,
+  provenance, and optional accepted-outcome evaluation. `provenance` is
+  `MODEL_PREDICTED` for both methods, so `estimationMode` is what separates a
+  labelled deterministic-fallback estimate from learned-model output.
 - Product state/event and simulation effect: none.
 - Consumers: technical evidence and crop evidence panels. The website never calls the
   internal model endpoint directly and never receive model artefacts or hidden
@@ -417,13 +422,16 @@ scope, not only the role name.
   record, deadline, lifecycle status, optional `cropStandardId`, `atRisk`,
   active exception IDs, timestamps, safe allocation, approval totals and the
   caller's approval,
-  trace ID, related delivery mission, immutable delivery acceptance when
+  trace ID, related enriched delivery mission, immutable delivery acceptance when
   recorded (including its `reasonCode`/`nextAction` and any per-line reasons, so
   the affected farmer reads the same explanation the buyer recorded), and
   `outcomeCause`/`outcomeNote` (the latest recorded reason the
   order is not fulfilled: `NO_READY_SUPPLY`, `NOT_READY_IN_TIME`,
   `INSUFFICIENT_SUPPLY`, `SUPPLY_CHANGED`, `APPROVAL_REJECTED`,
   `DELIVERY_REJECTED`, `CANCELLED`).
+  The mission view includes role-safe route labels and only the crop batches
+  allocated to this order.
+
   Private farm coordinates are not exposed here.
 - `payment` is present once an approved commitment prices the order and absent
   before then, because nothing is owed until supply is reserved. It carries
@@ -527,6 +535,9 @@ scope, not only the role name.
   the whole load is collectable, taken from the harvest windows of the listings
   it draws on, so a transporter can tell a job for today from a job for next
   week. The estimated arrival runs from it rather than from now.
+  Labels, order crop/risk and cargo remain role-safe; crop status is withheld
+  from an available job until that transporter accepts it.
+
 - Product state/event: none.
 - Simulation effect: none until a simulated transporter takes its scheduled
   browse/accept action.
@@ -539,7 +550,10 @@ scope, not only the role name.
   related order.
 - Request: mission UUID.
 - Response: mission/order IDs, status, assignment, vehicle, quantity, deadline,
-  `collectFrom`, and ordered stops.
+  `collectFrom`, ordered labelled stops, order crop/risk, buyer name, and allocated cargo.
+  Buyers see crop status only for batches committed to their own order;
+  transporters see it only after assignment.
+
 - Product state/event: none.
 - Simulation effect: none.
 - Consumers: transporter job detail and participant delivery tracking.
@@ -735,6 +749,160 @@ scope, not only the role name.
   Snapshot and SSE use the same run boundary and never combine real records or
   records from two runs.
 
+#### `GET /v1/weather`
+
+- Callers: every product role, human or simulated. Deliberately unfiltered by
+  role: the point of issue #37 is that a farmer, a coordinator, a transporter
+  and any simulated actor plan from the *same* conditions and the same
+  forecast, so a role-narrowed answer would defeat the feature. The payload
+  carries no operational state, so there is nothing to filter.
+- Request: optional `islandId` (defaults to `saint-lucia`), optional `asOf`
+  calendar date, optional `simulationRunId`.
+- Response: `current`, the realised reading for a day that has already
+  occurred, labelled `SYNTHETIC`; and `forecast`, up to five days ahead,
+  labelled `MODEL_PREDICTED`. Each forecast day carries `leadDays` and a
+  `confidence` that decays with lead time.
+- **Realised weather for a day that has not occurred is never written**, so no
+  query against this endpoint can return it. `asOf` past the last recorded day
+  returns that day rather than an error or an invented one, which keeps a
+  client asking for "today" working inside a completed replay without giving it
+  a way to probe the horizon. An `asOf` before the run returns the newest
+  recorded day at or before it, with the forecast that day issued.
+- The forecast is deliberately imperfect: a noised model of the realised series
+  whose error grows with the square root of lead time. It misses storms and
+  predicts storms that never arrive, and the simulation tests assert both.
+  Nothing in it changes crop biology; it changes only what a participant or a
+  policy decides to do.
+- Product state/event: none. This is a read.
+- Simulation effect: none. The connected simulation *writes* here as each day
+  occurs, from the same frame the replay saves, so the website and a simulated
+  participant read one series rather than two that agree until they do not.
+- Consumers: farmer workspace weather panel, coordinator island table, the
+  `read_weather` agent tool, and the control-room masthead.
+- Rules/failures: a run-scoped actor is forced to its own run and gets `403`
+  `RUN_SCOPE_FORBIDDEN` for another; only operations/admin may name a run. A
+  malformed `asOf` returns `422` `INVALID_WEATHER_DATE`. An island with no
+  recorded day returns an empty forecast and no `current` rather than inventing
+  weather. No live weather service is contacted, by demo and test requirement.
+
+#### Scoped inter-island trade (#40)
+
+Produce may move between islands the run selected, and only over connections a
+reviewed offline dataset records. Four endpoints, and the split between them is
+the point: a *commitment* is a promise that opens a human approval gate, and a
+*shipment* is the movement that may only exist once that gate is clear.
+
+The reference data is
+[`simulation/data/caribbean-maritime-network.v1.json`](../simulation/data/caribbean-maritime-network.v1.json),
+with sources, licences and retrieval dates in
+[`README-maritime.md`](../simulation/data/README-maritime.md). **A listed port
+or link is evidence that public infrastructure or a scheduled passenger service
+exists. It is never evidence that a produce-trading service, timetable,
+capacity, cost or price exists on that route.** Capacity, freight price, customs
+behaviour, failure and every operational outcome are SYNTHETIC.
+
+#### `GET /v1/maritime-network`
+
+- Callers: every product role.
+- Request: `islandIds`, a comma-separated list of manifest island ids.
+- Response: ports, published links and fixed offline exchange rates restricted
+  to those islands, each carrying `reference` with source, publisher, licence,
+  retrieval date and `evidenceType: PUBLIC_REFERENCE`, plus a `disclaimer`.
+- A link survives only when *both* of its ports are on islands in the request,
+  so one island returns no links at all and two islands can never see a third
+  island's port. Nothing is chained: two links that meet at a shared island are
+  not offered as one through-service, because no source publishes one.
+- Product state/event: none. This is a read of offline reference data.
+- Rules/failures: an island the manifest does not carry returns `422`
+  `UNKNOWN_ISLAND`. No live vessel or exchange-rate service is called, during a
+  run or a replay.
+
+#### `POST /v1/inter-island-commitments`
+
+- Callers: coordinator, operations, admin. A buyer or farmer *approves* one of
+  these; neither proposes one on the other's behalf.
+- Request: `orderId`, `originIslandId`, `destinationIslandId`, `linkId` and
+  per-batch `lines`. `destinationIslandId` is stated rather than derived,
+  because an order carries a delivery point and not a manifest island id.
+- Response: `InterIslandCommitment` in `PROPOSED` with `boundAt: null`, its
+  route citation, its quantity, its synthetic cost in the destination island's
+  currency and in XCD, and an `approvalSummary`.
+- Product state/event: creates the commitment and one `INTER_ISLAND_COMMITMENT`
+  approval per counterparty (the buyer, and every grower whose crop it
+  commits), and emits `INTER_ISLAND_COMMITMENT_PROPOSED`. Nothing is reserved
+  and nobody is bound.
+- Rules/failures: a link that is not a published connection between those two
+  islands returns `422` `UNKNOWN_MARITIME_ROUTE`; a pair with no published
+  connection at all returns `422` `NO_PUBLIC_ROUTE` rather than an invented
+  route; a consignment above the synthetic per-sailing allowance returns `422`
+  `SAILING_CAPACITY_EXCEEDED`.
+
+#### `POST /v1/approvals/{approvalId}/decisions` on an inter-island subject
+
+- The ordinary approval endpoint. `subjectType` is `INTER_ISLAND_COMMITMENT`,
+  which `AGENTS.md` already lists among the decisions requiring human approval.
+- The commitment becomes `APPROVED` and gains a `boundAt` only when the **last**
+  pending approval is granted, and emits `INTER_ISLAND_COMMITMENT_APPROVED`
+  then. One participant agreeing does not commit the others.
+- A rejection marks the commitment `REJECTED`, cancels every other pending
+  approval on it, and no sailing can ever be booked against it.
+
+#### `POST /v1/inter-island-commitments/{commitmentId}/shipments`
+
+- Callers: coordinator, operations, admin.
+- Request: the three legs (local pickup, sea, local delivery), the synthetic
+  customs checkpoint, the scheduled departure and arrival, and optionally the
+  capacity, load and the simulation shipment id the record stands for.
+- Response: `MaritimeShipment` in `SCHEDULED`, carrying both provenance labels:
+  `networkProvenance: PUBLIC_REFERENCE` for the ports, link and rate, and
+  `operationsProvenance: SYNTHETIC` for the schedule, capacity, price, customs
+  behaviour and outcome.
+- Product state/event: creates the shipment, moves the commitment to `SHIPPED`,
+  and emits `MARITIME_SHIPMENT_SCHEDULED`.
+- Rules/failures: **`409` `INTER_ISLAND_APPROVAL_REQUIRED` while any approval on
+  the commitment is still pending or has been rejected.** This is the
+  enforcement point for "an inter-island commitment cannot bypass required human
+  approval": before the gate clears there is no row to bind anybody. A customs
+  block without its `disclaimer` returns `422`
+  `CUSTOMS_DISCLAIMER_REQUIRED` — a checkpoint record that travels without the
+  sentence saying it is not a legal customs model can be mistaken for one.
+
+#### `POST /v1/maritime-shipments/{shipmentId}/updates`
+
+- Callers: transporter, coordinator, operations, admin.
+- Records sailing, weather delay, clearance, arrival, delivery or failure, all
+  taken from the physical simulation. There is no vessel tracker behind it.
+- Rules/failures: a status may only move forward (`409`
+  `SHIPMENT_STATUS_REGRESSION`) and `FAILED` is terminal (`409`
+  `SHIPMENT_TERMINAL`), so a late or duplicated update cannot resurrect a lost
+  sailing or rewind a delivered one.
+
+#### `GET /v1/inter-island-commitments`, `GET /v1/maritime-shipments`
+
+- Role-filtered reads. A cross-island order has no local allocation line, so
+  order visibility for a farmer or coordinator also follows the commitment's own
+  lines: the grower whose crop it commits and the coordinator who proposed it
+  can see it, and nobody else gains access they did not already have.
+- `GET /v1/orders/{orderId}` carries `interIslandCommitment` and
+  `maritimeShipment` when they exist. Both fields are additive; an order that
+  never left its island is exactly the shape it was before.
+
+#### The synthetic customs checkpoint
+
+`CustomsCheckpoint` is a documentation check with a seeded inspection delay and
+a fixed cost line. **It is not a legal customs model.** It encodes no tariff
+schedule, no phytosanitary rule, no CARICOM instrument and no territory's actual
+procedure, and every instance carries a `disclaimer` saying so, so the caveat
+travels with the data rather than living only in a README.
+
+#### Currency
+
+Every cross-island price is stated twice: in the destination island's own
+currency and in XCD, with `unitsPerComparisonCurrency` and `rateAsOf` naming the
+fixed offline rate that connects them. The rate is `PUBLIC_REFERENCE`; the
+amount it converts is `SYNTHETIC`. No live financial API is called during a run
+or a replay.
+
 #### `GET /v1/events/stream`
 
 - Callers: authenticated website clients; run-scoped simulation and 3D
@@ -785,8 +953,10 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
 
 - Callers: operations/admin/control-room operator.
 - Request for a new run: `scenarioId`, policy, integer seed, `decisionMode`,
-  island scope and optional deterministic disruptions. A derived request sends
-  only a completed `derivedFromRunId` and one or more additional disruptions.
+  optional `estimationMode`, island scope and optional deterministic
+  disruptions. A derived request sends only a completed `derivedFromRunId` and
+  one or more additional disruptions; it inherits the estimation method with
+  the rest of its immutable inputs.
 - Response: completed saved-run metadata, metrics, frame/decision counts and
   explicit synthetic evidence labels.
 - Product state/event: store `CREATING`, execute the whole run synchronously,
@@ -795,7 +965,14 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
 - Simulation effect: initialise and execute from scenario/seed. A derived run
   inherits immutable inputs and never edits its source.
 - Consumers: 3D control room and benchmark setup.
-- Rules/failures: seed/scenario/policy/scope are immutable. `LLM_ASSISTED`
+- Rules/failures: seed/scenario/policy/scope/estimation mode are immutable.
+  `estimationMode` is `LEARNED_MODEL` or `DETERMINISTIC_FALLBACK`; anything
+  else returns `422 INVALID_ESTIMATION_MODE` and an omitted field selects
+  `DETERMINISTIC_FALLBACK`. A `HARVEST` run that selected `LEARNED_MODEL`
+  fails as `FAILED` with `MODEL_UNAVAILABLE` and returns `502` the moment the
+  learned service is unreachable or rejects a request, so no run mixes learned
+  and fallback forecasts. `BASELINE` records the choice and never uses it.
+  `LLM_ASSISTED`
   uses a labelled predetermined fixture when all four LLM settings are blank.
   A complete `openai-compatible` configuration calls that provider; partial,
   failed or invalid output fails safely before unchecked tools execute. An
@@ -878,6 +1055,17 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
   run status and `readOnly` flag.
 - Consumers: website session bootstrap and replay banner/routing.
 
+#### `GET /v1/world-map`
+
+- Callers: every authenticated Product API role.
+- Response: role-filtered farm and hotel locations with safe crop summaries or
+  actionable open demand where the caller is allowed to see it.
+- Product state/simulation effect: none; this is a read-only projection.
+- Consumers: the website island world and its farm/hotel zoom views.
+- Rules/failures: exact private coordinates, unrelated crop progress and private
+  orders are omitted. Website marker placement is deterministic but explicitly
+  illustrative; new accessible farms and hotels appear without UI changes.
+
 #### `POST /v1/paired-runs`
 
 - Callers: operations/admin/benchmark operator.
@@ -952,6 +1140,9 @@ missing event or apply an event whose schema it cannot validate.
 | Order fulfilled / `ORDER_FULFILLED` | Finalises order and releases unused reservations | Satisfies buyer demand, ends remaining tasks, records local procurement/fulfilment | Fulfilled order and dashboard totals update |
 | Partial/rejected / `ORDER_PARTIALLY_FULFILLED`, `ORDER_REJECTED` | Stores actual accepted quantity and releases remainder | Schedules unmet-demand/import/substitution fallback | Partial/rejected state and exception path appear |
 | Cancelled / `ORDER_CANCELLED` | Releases reservations and cancels operational work | Cancels future pickups and returns actors/vehicles to availability | Supply, routes, and order state update |
+| Inter-island proposed / `INTER_ISLAND_COMMITMENT_PROPOSED` | Stores a non-binding cross-island promise and one approval per counterparty; nothing reserved | Records the proposal only; no commitment, mission or shipment exists yet | Order page shows the route, the cost in both currencies, and that nothing ships until every approval lands |
+| Inter-island approved / `INTER_ISLAND_COMMITMENT_APPROVED` | Sets `boundAt` once the last approval is granted; the commitment may now be booked | Creates the physical commitment and books the sailing; this is the only route by which a connected run puts produce on a boat | Order page shows the commitment as binding |
+| Sailing scheduled / `MARITIME_SHIPMENT_SCHEDULED` | Stores the consignment, its three legs and its synthetic customs checkpoint | Schedules departure, the sea leg, the checkpoint and delivery | Control room draws the sea route and a vessel; order page lists the legs |
 | Payment confirmed / `PAYMENT_CONFIRMED` | Stores `paidAt` and the buyer's reference; no other state changes | None; the payload is settlement evidence only | Farmer money-owed total drops and the order shows paid |
 
 The full event list and payload purpose is in
@@ -1050,7 +1241,17 @@ truth and undisclosed disruption severity are immutable.
 
 ## Yield model interface and ATP
 
-The Product API alone calls
+Harvest estimates come from one of two methods, chosen per simulation run and
+never by a global runtime switch. `LEARNED_MODEL` calls the FastAPI quantile
+service; `DETERMINISTIC_FALLBACK` uses the rule-based fixture, which stamps a
+`fixture-` model version and a leading `Deterministic fallback estimate, not a
+learned-model prediction` warning on every forecast it writes. A crop batch
+that belongs to a run inherits that run's stored `estimationMode`, so two runs
+executing at once can use different methods; a real participant's batch has no
+run and keeps the server's `MODEL_ADAPTER` configuration. Replay reads saved
+predictions and provenance and never requests a new one.
+
+When the learned method applies, the Product API alone calls
 `POST /internal/v1/yield-predictions` from the
 [model OpenAPI](../contracts/model/openapi.yaml). It sends batch/farm/crop IDs,
 request time/run context, provenance, and allow-listed observation/weather/

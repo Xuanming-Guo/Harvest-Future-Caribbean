@@ -7,6 +7,12 @@ participant can be inspected in the normal website read-only.
 Read [`simulation_vision.md`](simulation_vision.md) for the intended experience
 and [`api_info.md`](api_info.md) for endpoint/effect rules.
 
+> The numeric seed examples below were captured before #91 added the seven-day
+> settlement window. They are historical evidence, not current golden values.
+> Current runs end on September 29 after demand stops on September 22. Verify
+> current connected totals against the final Product snapshot and replay; the
+> standalone benchmark report must not be substituted for connected outcomes.
+
 ## What runs where
 
 | Address | Purpose |
@@ -108,6 +114,7 @@ $runRequest = @{
   policy = "HARVEST"
   seed = 42
   decisionMode = "DETERMINISTIC"
+  estimationMode = "DETERMINISTIC_FALLBACK"
   scope = @{
     mode = "SELECTED"
     islandIds = @("saint-lucia")
@@ -125,51 +132,91 @@ $run | Select-Object runId, status, policy, decisionMode,
   decisionAdapter, frameCount, decisionCount, metrics
 ```
 
-Expected engine values for seed `42`, re-recorded from a real run after forward
-promises and the settlement window. These move whenever the engine or the
-Product API changes, so the connected-run test checks determinism, outcome
-arithmetic, and the cause vocabulary rather than pinning these counts; this
-document is where the counts themselves are kept:
+Expected engine values for seed `42`, re-recorded from a real run after
+recorded weather (#90) replaced the synthetic realised series (#37). These move
+whenever the engine or the Product API changes, so the connected-run test checks
+determinism, outcome arithmetic, and the cause vocabulary rather than pinning
+these counts; this document is where the counts themselves are kept:
+
 
 ```text
 status            COMPLETED
 policy            HARVEST
 decisionMode      DETERMINISTIC
 decisionAdapter   deterministic
-frameCount        170
-eventsProcessed   108
-totalDemandedKg   2956
-totalAcceptedKg   982.21
-endedAt           2026-09-29T06:00:00Z
+estimationMode    DETERMINISTIC_FALLBACK
+frameCount        110
+eventsProcessed    72
+totalDemandedKg   2183
+totalAcceptedKg   852.55
+
 ```
+
+`metrics.weather` records what the sky did to this run, as a counterfactual
+against the same run in mild weather:
+
+```text
+wetDays                     4
+stormDays                   0
+readinessDelayDays       2.76
+qualityLost              0.28
+weatherSpoilageKg      186.24
+weatherDelayedMissions      0
+```
+
+Recorded Saint Lucian days are milder than the synthetic generator's draw for
+this seed, which is the point of the change rather than a side effect of it: the
+generator was tuned for plausibility and drew four storms into a twenty-two-day
+September window, where the recorded September the seed selects has none. The
+run is easier as a result, and the numbers below are the easier run's.
 
 `metrics.productActions` must also exist with positive attempted, succeeded and
 domain-event counts. For the deterministic seed-`42` run, expect:
 
 ```text
-attempted             214
-succeeded             214
+attempted             113
+succeeded             113
 rejected                0
-domainEventsCreated   334
-activeListings          6
-openDemands             11
-totalOrders             11
+domainEventsCreated   184
+activeListings          5
+openDemands              8
+totalOrders              8
+
 activeMissions           0
 openExceptions           0
 ```
+
+`attempted` counts tool calls that tried to *change* operational state. The
+`read_weather` reads are not in it, because a read changes nothing; they appear
+on the replay frames instead. For seed `42` there are **36** of them, across all
+three roles that plan around the weather:
+
+```text
+read_weather actions      36
+roles                     FARMER, COORDINATOR, TRANSPORTER
+island-days stored        22
+frames carrying weather   110 of 110
+realised conditions       CLEAR 11, CLOUD 7, RAIN 4, STORM 0
+evidence type             PUBLIC_REFERENCE on all 22 island-days
+```
+
+Every stored island-day is a day that had already occurred when it was written,
+which is why `GET /v1/weather` cannot return a future day for this run however
+`asOf` is set.
 
 The final Product API outcome summary is separate from the physical engine
 metrics above. For deterministic seed `42`, expect:
 
 ```text
-total orders              11
-fulfilled                  4
-partially fulfilled        2
+total orders               8
+fulfilled                  2
+partially fulfilled        1
 unfulfilled                5
 pending                    0
-approved commitments      11
-completed missions        11
-overdue payments           5
+approved commitments       3
+completed missions         3
+overdue payments           0
+
 ```
 
 `paymentOverdueCount` is `5` in that closing snapshot, and it is not constant
@@ -178,24 +225,29 @@ simulated day, so every settled order is paid three days late and shows as
 overdue in between. Across the saved timeline:
 
 ```text
-frames with an overdue payment    98 of 170
-highest overdue count in a frame    6
-delivered orders                   11
-paid inside the run window          4
+frames with an overdue payment    16 of 110
+highest overdue count in a frame   1
+delivered orders                   3
+paid inside the run window         1
 ```
 
-The four paid orders were accepted 23.8, 19.6, 19.6 and 13.8 days before the
-run ended, far enough ahead for their tenth day to arrive. The other seven were
-accepted 13.6 days or less before the end; two of those are still inside their
-term at the close and five are overdue and unpaid. Scrub the control room back
-into the middle of the run to see the count rise and fall. Harvest tracks these
-payments; it moves no money.
+The one paid order was accepted 12.7 days before the run ended, far enough ahead
+for its tenth day to arrive. The other two were accepted 5.5 and 3.5 days before
+the end, so they are still inside their term when the window closes; that, and
+not prompt payment, is why the final count is `0`.
+Scrub the control room back into the middle of the run to see the overdue
+count rise and fall. Harvest tracks these payments; it moves no money.
+
 
 `orderOutcomes.causes` explains every unfulfilled or partially fulfilled
 order. For seed `42`:
 
 ```text
-DELIVERY_REJECTED          7
+INSUFFICIENT_SUPPLY        3
+DELIVERY_REJECTED          1
+NO_READY_SUPPLY            1
+SUPPLY_CHANGED             1
+
 ```
 
 All seven shortfalls read as `DELIVERY_REJECTED` from the Product API, which
@@ -218,23 +270,27 @@ as an operational failure.
 Every figure above is read from a real run, never edited by hand. The five
 columns show what each change to the fulfilment path moved:
 
-| Value | Before the #53 fixes | After readiness/expiry/re-match | After safe partial commitment | After the horizon clamp | After payment tracking | After forward promises |
-|---|---|---|---|---|---|---|
-| `frameCount` | 130 | 119 | 127 | 117 | 119 | 170 |
-| `eventsProcessed` | 82 | 76 | 80 | 76 | 76 | 108 |
-| `productActions.attempted` | 154 | 140 | 151 | 123 | 125 | 214 |
-| `productActions.domainEventsCreated` | 242 | 222 | 238 | 199 | 201 | 334 |
-| `activeListings` | 7 | 3 | 3 | 5 | 5 | 6 |
-| total orders | 11 | 11 | 11 | 8 | 8 | 11 |
-| fulfilled | 2 | 3 | 4 | 3 | 3 | 4 |
-| partially fulfilled | 0 | 2 | 2 | 1 | 1 | 2 |
-| unfulfilled | 8 | 5 | 5 | 4 | 4 | 5 |
-| pending | 1 | 1 | 0 | 0 | 0 | 0 |
-| approved commitments | 8 | 5 | 7 | 5 | 5 | 11 |
-| completed missions | 8 | 5 | 7 | 5 | 5 | 11 |
-| `deliveryAcceptedKg` | 359 | 1387.75 | 1545.13 | 1000.63 | 1000.63 | 982.21 |
-| overdue payments at run end | n/a | n/a | n/a | n/a | 0 | 5 |
-| frames showing an overdue payment | n/a | n/a | n/a | n/a | 19 | 98 |
+| Value | Before the #53 fixes | After readiness/expiry/re-match | After safe partial commitment | After the horizon clamp | After payment tracking | After synthetic realised weather | After recorded weather |
+|---|---|---|---|---|---|---|---|
+| `frameCount` | 130 | 119 | 127 | 117 | 119 | 110 | 110 |
+| `eventsProcessed` | 82 | 76 | 80 | 76 | 76 | 72 | 72 |
+| `productActions.attempted` | 154 | 140 | 151 | 123 | 125 | 113 | 113 |
+| `productActions.domainEventsCreated` | 242 | 222 | 238 | 199 | 201 | 184 | 184 |
+| `activeListings` | 7 | 3 | 3 | 5 | 5 | 5 | 5 |
+| total orders | 11 | 11 | 11 | 8 | 8 | 8 | 8 |
+| fulfilled | 2 | 3 | 4 | 3 | 3 | 2 | 2 |
+| partially fulfilled | 0 | 2 | 2 | 1 | 1 | 1 | 1 |
+| unfulfilled | 8 | 5 | 5 | 4 | 4 | 5 | 5 |
+| pending | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
+| approved commitments | 8 | 5 | 7 | 5 | 5 | 3 | 3 |
+| completed missions | 8 | 5 | 7 | 5 | 5 | 3 | 3 |
+| `deliveryAcceptedKg` | 359 | 1387.75 | 1545.13 | 1000.63 | 1000.63 | 838.94 | 852.55 |
+| overdue payments at run end | n/a | n/a | n/a | n/a | 0 | 0 | 0 |
+| frames showing an overdue payment | n/a | n/a | n/a | n/a | 19 | 16 | 16 |
+| `read_weather` actions | n/a | n/a | n/a | n/a | n/a | 36 | 36 |
+| storm days | n/a | n/a | n/a | n/a | n/a | 4 | 0 |
+| `weatherSpoilageKg` | n/a | n/a | n/a | n/a | n/a | 311.03 | 186.24 |
+
 
 The first column is the pre-#53 baseline this document recorded before the
 readiness fixes, when unready crop was still listable, so eight commitments
@@ -260,24 +316,33 @@ No physical outcome moves, because recording a payment mutates no world state,
 and giving the synthetic buyers 7-day terms changes none of these totals
 either: it changes only which payment status those same orders report.
 
-The last column is forward promises and the settlement window together, and it
-moves the world twice over. The three orders the clamp withheld are raised
-again, so the order book is back to 11; the run is 28 days rather than 21, so
-there is more of it to record; and growing crops can now be promised, so every
-order that finds supply reaches a commitment — 11 approved commitments and 11
-completed missions against 5 and 5. `deliveryAcceptedKg` falls slightly, from
-1000.63 to 982.21, on three more orders and twice the missions: the promises
-now being made are against crops that are not in the ground yet, and six of
-them come up short because the field is not ready when the vehicle arrives.
-Read the column as a market that trades far more and keeps slightly less of
-what it promises, which is the trade the benchmark records rather than hides.
-Overdue payments rise from 0 to 5 for the same reason plus one more: deliveries
-land earlier in a longer run, so more 7-day terms expire before the run ends.
+The sixth column is synthetic realised weather, and it is the second column
+after the horizon clamp that changes the world rather than how the world is
+handled. The same eight orders are raised, but the crop underneath them is
+harder to deliver: ten of the run's twenty-two days are wet, four of them storms,
+ripening slips 9.7 batch-days in total and the weather adds 311 kg of spoilage.
+Two commitments that previously reached delivery no longer do, so
+`deliveryAcceptedKg` falls from 1,000.63 kg to 838.94 kg and one fulfilled order
+becomes unfulfilled. Read that column as a harder world rather than as a
+regression in the workflow: every simulated action still succeeds.
 
-`deliveryAcceptedKg` is the sum of the eleven immutable delivery acceptances,
+The last column swaps that synthetic series for **recorded** Saint Lucian days
+(#90) and changes nothing else. Every count above it is identical, which is the
+useful result: the weather source is a world input, not a change to the
+fulfilment path, so only the physical consequences move. The September this seed
+selects had no storm and four wet days against the generator's ten, so spoilage
+the weather is responsible for falls from 311 kg to 186 kg and
+`deliveryAcceptedKg` recovers from 838.94 kg to 852.55 kg — still well below the
+1,000.63 kg of the mild-weather column. The order that became unfulfilled under
+synthetic weather stays unfulfilled. The ten paired benchmark seeds in
+[`simulation/benchmarks/README.md`](../simulation/benchmarks/README.md) show the
+same effect across seeds and what it costs the policy comparison.
+
+`deliveryAcceptedKg` is the sum of the three immutable delivery acceptances,
 not the engine's `totalAcceptedKg`. The control room uses this Product API
 quantity for its Harvest **Delivered** card. For seed `42`, both values are
-`982.21 kg` because the engine applies the Product API delivery acceptances back
+`852.55 kg` because the engine applies the Product API delivery acceptances back
+
 to physical state as each mission arrives.
 
 The `runId` is a fresh UUID. All evidence is explicitly labelled synthetic and
@@ -385,6 +450,30 @@ JSON uses a UUID `eventId` and contains:
 - a simulated `simulationTime`;
 - synthetic/model provenance as appropriate;
 - actor, entity, trace and correlation IDs.
+
+### Read the shared weather
+
+The same endpoint answers a human on the website and a simulated participant
+inside a run. Without `simulationRunId` it returns the seeded development
+island; with one it returns that run's own series.
+
+```powershell
+Invoke-RestMethod `
+  -Uri "$base/v1/weather?islandId=saint-lucia&simulationRunId=$runId" `
+  -Headers @{ Authorization = "Bearer $($session.accessToken)" } |
+  ConvertTo-Json -Depth 5
+```
+
+Expect `current.provenance` to be `SYNTHETIC` and every `forecast[].provenance`
+to be `MODEL_PREDICTED`, with `confidence` decaying as `leadDays` grows. Ask for
+a date past the end of the run and the answer does not move: only days that have
+occurred are stored, so `asOf` cannot reach past the newest recorded one.
+
+```powershell
+(Invoke-RestMethod `
+  -Uri "$base/v1/weather?simulationRunId=$runId&asOf=2099-01-01" `
+  -Headers @{ Authorization = "Bearer $($session.accessToken)" }).asOf
+```
 
 ## 7. Open a participant read-only
 
@@ -518,11 +607,58 @@ repository-root `.env`, restart the API, and run again. Expect
 errors and invalid structured output fail the run safely. Never commit `.env`
 or a real key.
 
-## 11. Test the control room
+## 11. Verify the per-run harvest-estimation method
+
+The estimation method is part of the run, not a server setting, so two runs
+started minutes apart can use different methods without restarting the API.
+
+Repeat the section 4 request with `estimationMode = "DETERMINISTIC_FALLBACK"`
+and a new key. Expect `COMPLETED` and, on the saved run,
+`estimationMode = DETERMINISTIC_FALLBACK`. Every forecast it wrote is labelled:
+
+```powershell
+$timeline = Invoke-RestMethod `
+  -Method Get `
+  -Uri "$base/v1/simulation-runs/$($run.runId)/timeline" `
+  -Headers @{ Authorization = "Bearer $($session.accessToken)" }
+
+$timeline.frames.agentActions |
+  Where-Object { $_.toolName -eq "submit_crop_observation" } |
+  Select-Object -First 1 -Property toolName, estimationMode
+```
+
+Expect `estimationMode = DETERMINISTIC_FALLBACK`. Opening a participant
+website (section 7) on one of that run's crop batches shows an **Estimated by**
+line reading `deterministic fallback (fixture-yield-v0.1.0)`, and the forecast
+warnings start with `Deterministic fallback estimate, not a learned-model
+prediction`. The participant cannot change the method; it is read-only there.
+
+Now create a run with `estimationMode = "LEARNED_MODEL"` while the FastAPI
+model service is **not** running. Expect HTTP `502` with code
+`MODEL_UNAVAILABLE`, a saved run whose `status` is `FAILED` and whose
+`errorCode` is `MODEL_UNAVAILABLE`, and zero `yield_predictions` rows for that
+run. A silent fixture substitution would be a defect, not a graceful
+degradation: the run would claim learned-model forecasts it never made.
+
+With the model service running (see [`../model/README.md`](../model/README.md))
+the same request completes, `estimationMode` reads `LEARNED_MODEL`, and the
+crop page names the learned model and its version instead.
+
+Baseline runs record the choice and never use it, because baseline
+participants never call the Product API or a forecast model.
+
+Replay never repeats the request. Loading the timeline or any world frame of a
+completed run reads saved predictions and provenance only, so a `LEARNED_MODEL`
+run replays with the model service stopped.
+
+## 12. Test the control room
 
 At <http://localhost:3002>:
 
-1. Choose Harvest, seed `42`, and Deterministic.
+1. Choose Harvest, seed `42`, Deterministic, and **Deterministic fallback**
+   under **Harvest estimation**. The estimation control is a segmented pair of
+   buttons, never a native select, and it is disabled while Baseline is
+   selected.
 2. Choose the Saint Lucia scenario in **Scenario**.
 3. Select **Run simulation**. A loading overlay is shown until the synchronous
    API run completes.
@@ -535,6 +671,8 @@ At <http://localhost:3002>:
    role, tool, status, adapter, time, synthetic approval classification and
    safe trace/entity/event references.
 7. Choose an existing run from **Saved run** and confirm it loads immediately.
+   The masthead badge names that run's estimation method, and says `(unused)`
+   for a Baseline run.
 8. Rewind to a point with at least one simulated hour remaining, then inject a
    road/weather/crop/vehicle event. The panel shows its concrete target and
    time. A new derived run should be saved; the source run remains unchanged.
@@ -587,9 +725,11 @@ than silently running a local substitute.
 
 ## Boundaries
 
-- The regional scenario contains independent synthetic local systems for all
-  current UN M49 Caribbean areas. It does not model inter-island orders,
-  shipping, ports, customs, or currency conversion.
+- The regional scenario contains synthetic local systems for all current UN M49
+  Caribbean areas. Since #40 they are no longer independent: a scoped run models
+  inter-island orders, sailings, ports and customs between the islands in scope,
+  on the synthetic maritime network in `simulation/src/world/maritime.ts`. Costs
+  are quoted in XCD and no currency conversion is performed.
 - No mobile app.
 - No benchmark, Model Lab, Data Room or Judge page is added here.
 - Simulated approvals are synthetic decisions; real commitments still require

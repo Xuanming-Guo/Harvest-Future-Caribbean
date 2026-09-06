@@ -29,8 +29,9 @@ import { RandomSource } from './core/random.js';
 import { DAY_MS, HOUR_MS, MINUTE_MS, formatDate, formatInstant, parseInstant, type SimulationInstant } from './core/time.js';
 import { baselinePolicy } from './policy/baseline.js';
 import { harvestPolicy } from './policy/harvest.js';
-import type { CoordinationPolicy, DecisionRecord, PolicyContext } from './policy/types.js';
+import type { CoordinationPolicy, DecisionRecord, InterIslandFill, PolicyContext } from './policy/types.js';
 import { requireScenario, haversineKm, ROAD_WINDING_FACTOR } from './scenario/saint-lucia-demo-v1.js';
+import { CARIBBEAN_ISLANDS_V1 } from './scenario/caribbean-islands-manifest-v1.js';
 import type { Scenario } from './scenario/types.js';
 import { assertNoTruthLeak, toObservableWorld, worldDigest, type ObservableWorldView } from './world/observable.js';
 import type {
@@ -39,20 +40,60 @@ import type {
   ControlRoomFrame,
   ControlRoomMission,
   ControlRoomScene,
+  ControlRoomShipment,
+  ControlRoomWeather,
   ReplayTimeline,
   SimulationAgentAction,
   SimulationOperationsSnapshot,
 } from './replay.js';
+import {
+  COMPARISON_CURRENCY,
+  CUSTOMS_BASE_DELAY_HOURS,
+  CUSTOMS_DISCLAIMER,
+  CUSTOMS_INSPECTION_EXTRA_HOURS,
+  CUSTOMS_INSPECTION_PROBABILITY,
+  CUSTOMS_FIXED_FEE_XCD,
+  MARITIME_SYNTHETIC_DISCLAIMER,
+  PORT_HANDLING_HOURS,
+  SAILING_CAPACITY_KG,
+  SAILING_FAILURE_PROBABILITY,
+  findPort,
+  maritimeAttributions,
+  portPosition,
+  routesBetween,
+  shipmentCostXcd,
+  toDualCurrency,
+} from './world/maritime.js';
+import type { MaritimeRoute } from './world/maritime.js';
 import type {
   BuyerDemand,
   Commitment,
+  CustomsCheckpoint,
   DeliveryMission,
   GeoPoint,
   HiddenCropTruth,
+  InterIslandCommitmentDetail,
+  MaritimeLeg,
+  MaritimeShipment,
+  ObservableWeatherAccess,
   ObservedCropBatch,
   ScheduledDisruption,
   World,
 } from './world/types.js';
+import {
+  FORECAST_PROVENANCE,
+  MAX_WEATHER_READINESS_DELAY_MS,
+  MINIMUM_QUALITY_FRACTION,
+  REALISED_WEATHER_PROVENANCE,
+  WEATHER_LEGEND,
+  isWetDay,
+  qualityLoss,
+  readinessDelayMs,
+  spoilageMultiplier,
+  travelSpeedFactor,
+  weatherDegradesRoad,
+} from './world/weather.js';
+import type { RealisedWeather } from './world/weather.js';
 
 export type PolicyName = 'BASELINE' | 'HARVEST';
 export type RunStatus = 'READY' | 'RUNNING' | 'PAUSED' | 'COMPLETED' | 'FAILED';
@@ -102,12 +143,50 @@ export type ProductSimulationEffect =
   | (ProductEffectEnvelope & {
       type: 'ALLOCATION_INVALIDATED' | 'ORDER_CANCELLED';
       demandId: string;
+    })
+  /**
+   * Every human approval on one inter-island commitment has been granted.
+   *
+   * This is the only route by which a connected run can put produce on a boat.
+   * The engine proposes; the Product API collects the approvals; and until this
+   * effect arrives there is no commitment and no shipment, so an inter-island
+   * promise cannot bind anyone by any other path.
+   */
+  | (ProductEffectEnvelope & {
+      type: 'INTER_ISLAND_COMMITMENT_APPROVED';
+      proposalId: string;
     });
 
 export interface ProductEffectResult {
   applied: boolean;
   reason: 'APPLIED' | 'DUPLICATE' | 'PHYSICAL_ECHO' | 'IGNORED' | 'REJECTED';
   simulationMissionId?: string;
+  simulationShipmentId?: string;
+}
+
+/**
+ * A cross-island fill the engine wants, before anybody has approved it.
+ *
+ * Deliberately not world state. It carries no commitment id and no shipment,
+ * because nothing exists yet: it is a request for a decision, and the decision
+ * is a human one taken through the Product API.
+ */
+export interface InterIslandProposalView {
+  proposalId: string;
+  demandId: string;
+  buyerId: string;
+  originIslandId: string;
+  destinationIslandId: string;
+  linkId: string;
+  originPortId: string;
+  destinationPortId: string;
+  operator: string;
+  seaLegHours: number;
+  journeyHoursSource: 'PUBLIC_TIMETABLE' | 'SYNTHETIC_DEFAULT';
+  lines: Array<{ batchId: string; farmId: string; quantityKg: number }>;
+  quantityKg: number;
+  rationale: string;
+  proposedAt: SimulationInstant;
 }
 
 /** Observable causal link used by the connected Product API bridge. */
@@ -195,8 +274,28 @@ export const UNMET_CAUSES = [
   'HORIZON_TRUNCATED',
   /** Nothing was promised: no batch had evidence recent enough to commit against. */
   'NO_READY_SUPPLY',
+  /**
+   * Supply existed on another in-scope island, and the reviewed dataset records
+   * no published sailing that could bring it over.
+   *
+   * The point of recording this separately is that it is not a coordination
+   * failure. Harvest looked, found crop, and had nowhere to put it on a boat.
+   * Collapsing it into `NO_READY_SUPPLY` would say no supply existed, and
+   * collapsing it into `INSUFFICIENT_SUPPLY` would say the promise was too
+   * small; both would hide the fact that the missing thing was a route, and
+   * issue #40 is explicit that a missing route must never be invented.
+   */
+  'NO_PUBLIC_ROUTE',
   /** A human approval gate declined the promise. */
   'APPROVAL_REJECTED',
+  /**
+   * A cross-island consignment was approved, sailed, and did not arrive.
+   *
+   * Distinct from `SPOILED_BEFORE_PICKUP` because nothing rotted: the crop was
+   * picked, put on a boat and lost. Scoring it as spoilage would blame the
+   * field for a transport failure.
+   */
+  'SHIPMENT_FAILED',
   /** Nothing reached the buyer in time: the delivery arrived late or never ran. */
   'MISSION_LATE',
   /**
@@ -255,6 +354,56 @@ export interface RunMetrics {
    */
   causeCounts: Record<UnmetCause, number>;
   eventsProcessed: number;
+  /**
+   * What the realised weather did to this run.
+   *
+   * Recorded because "different weather changes the outcome" is an acceptance
+   * criterion, and a criterion nobody can measure is a claim rather than a
+   * result. Every figure here is a *counterfactual against the same run with
+   * mild weather*, not a share of the total, so a run whose weather did nothing
+   * reports zeros.
+   */
+  weather: WeatherEffectMetrics;
+  /**
+   * What the maritime layer did. All zeros for a one-island run, which is the
+   * point: a run with no scoped links cannot produce a shipment.
+   */
+  maritime: MaritimeEffectMetrics;
+}
+
+export interface MaritimeEffectMetrics {
+  /** Published links available to this run after scoping. Zero for one island. */
+  scopedLinks: number;
+  /** Ports on in-scope islands. */
+  scopedPorts: number;
+  shipmentsProposed: number;
+  shipmentsApproved: number;
+  shipmentsDelivered: number;
+  shipmentsFailed: number;
+  shippedKg: number;
+  /** Sailings the realised weather lengthened. */
+  weatherDelayedSailings: number;
+  /** Sailings the synthetic checkpoint inspected rather than waving through. */
+  customsInspections: number;
+  /** Total synthetic freight and clearance cost, in XCD. */
+  totalCostXcd: number;
+  /** Demands that needed a route the scoped dataset does not record. */
+  demandsWithoutPublicRoute: number;
+}
+
+export interface WeatherEffectMetrics {
+  /** Island-days realised as RAIN or STORM. */
+  wetDays: number;
+  /** Island-days realised as STORM, a subset of `wetDays`. */
+  stormDays: number;
+  /** Total ripening pushed back across every batch, in days. */
+  readinessDelayDays: number;
+  /** Marketable fraction taken off batches by wet weather, summed across batches. */
+  qualityLost: number;
+  /** Kilograms of the run's waste that the weather multiplier added. */
+  weatherSpoilageKg: number;
+  /** Missions that left into rain or a storm and were slowed by it. */
+  weatherDelayedMissions: number;
 }
 
 export interface RunResult {
@@ -283,6 +432,27 @@ const EVIDENCE_LABEL =
 /** Above this daily rainfall a rain-sensitive road is treated as degraded. */
 const HEAVY_RAIN_MM = 45;
 
+// --------------------------------------------------------------------------
+// Weather levers that belong to coordination rather than to physics.
+//
+// The physical rules — how rain slows ripening, how a storm rots a ready crop,
+// how wet tarmac slows a van — live in `world/weather.ts` beside the weather
+// they act on. What stays here is the one lever that reads a *forecast*, which
+// is a scheduling decision and not a fact about the world.
+// --------------------------------------------------------------------------
+
+/**
+ * How far ahead a forecast storm pulls a pickup forward, and how little of the
+ * ready-hold window survives when one is coming.
+ *
+ * This reads the forecast, which may be wrong, and it only ever brings a
+ * collection forward inside the bounds the deadline already sets, so acting on
+ * a forecast that misses costs a slightly early pickup rather than a broken
+ * promise.
+ */
+const STORM_FORECAST_WINDOW_DAYS = 2;
+const STORM_FORECAST_HOLD_MS = 2 * HOUR_MS;
+
 /**
  * How long a buyer waits past the deadline before sourcing elsewhere.
  *
@@ -300,6 +470,26 @@ const MAX_STORM_TRAVEL_DELAY_MS = 4 * HOUR_MS;
 
 /** Maximum share of an unharvested crop that one crop incident can destroy. */
 const MAX_CROP_DAMAGE_FRACTION = 0.3;
+
+/**
+ * How often a connected run looks for supply on another island.
+ *
+ * Once a day rather than on every order, because a sailing is a slow, lumpy
+ * decision and re-asking hourly would fill the trace with the same answer.
+ */
+const INTER_ISLAND_REVIEW_INTERVAL_MS = DAY_MS;
+
+/**
+ * Provenance labels carried by everything the maritime layer emits.
+ *
+ * Two labels rather than one, because a shipment record mixes two kinds of
+ * claim: the port, the link and the exchange rate are cited public references,
+ * while the schedule, the capacity, the price, the customs behaviour and the
+ * outcome are invented. A consumer that receives one label for the whole record
+ * cannot tell them apart, so both travel together.
+ */
+const MARITIME_NETWORK_PROVENANCE = 'PUBLIC_REFERENCE' as const;
+const MARITIME_OPERATIONS_PROVENANCE = 'SYNTHETIC' as const;
 
 interface DisruptionRuntime {
   disruption: ScheduledDisruption;
@@ -327,6 +517,52 @@ export class SimulationEngine {
   private readonly rematchAttempts = new Map<string, number>();
   /** Why a demand ended short, recorded as it settles. */
   private readonly demandCauses = new Map<string, UnmetCause>();
+  /** Readiness already lost to weather per batch, so the cap is a total and not a per-day one. */
+  private readonly weatherReadinessDelayMs = new Map<string, number>();
+  /** Marketable fraction the weather has taken off batches, summed across the run. */
+  private weatherQualityLost = 0;
+  /** Kilograms of spoilage the weather multiplier added over mild-weather decay. */
+  private weatherSpoilageKg = 0;
+  /** Missions whose journey the departure-day weather lengthened. */
+  private weatherDelayedMissions = 0;
+  /**
+   * Demands for which supply existed on another in-scope island and the
+   * reviewed dataset recorded no published sailing to bring it over.
+   *
+   * Recorded at planning time rather than derived at settlement, because by the
+   * time a demand settles the batches that were ready on the other island may
+   * have been picked and the evidence for the missing route would be gone.
+   */
+  private readonly noPublicRouteDemands = new Set<string>();
+  private shipmentsProposed = 0;
+  private shipmentsApproved = 0;
+  private shipmentsDelivered = 0;
+  private shipmentsFailed = 0;
+  private weatherDelayedSailings = 0;
+  private customsInspections = 0;
+  /** Which of a commitment's allocations travel by sea, decided once at proposal time. */
+  private readonly seaBatchIdsByCommitment = new Map<string, string[]>();
+  /**
+   * Cross-island fills waiting on a human decision, in connected mode.
+   *
+   * Held here rather than in the observed world because they are not yet part
+   * of the world: no commitment, no mission, no shipment. A proposal that is
+   * never approved leaves no trace beyond the decision record that says it was
+   * asked for and refused.
+   */
+  private readonly interIslandProposals = new Map<string, { view: InterIslandProposalView; fill: InterIslandFill }>();
+  /** Demands an inter-island fill has already been proposed for, so review does not loop. */
+  private readonly interIslandProposedDemandIds = new Set<string>();
+  /**
+   * Whether each booked sailing is going to fail, drawn once when it is booked.
+   *
+   * Kept beside the shipment rather than on it, because it is hidden truth in
+   * exactly the sense a scheduled disruption is: the run knows, and nothing
+   * facing a participant may.
+   */
+  private readonly sailingFailures = new Map<string, boolean>();
+  /** Batch to island, memoised: every weather effect needs it and the mapping is static. */
+  private readonly islandByBatchId = new Map<string, string>();
   private observationRequestCount = 0;
   private readonly captureFrames: boolean;
   private readonly coordinationMode: CoordinationMode;
@@ -432,6 +668,19 @@ export class SimulationEngine {
     return this.buildScene();
   }
 
+  /**
+   * Cross-island consignments as a replay frame would carry them.
+   *
+   * The connected bridge needs the legs and the customs checkpoint to store a
+   * Product API record, and it must be the *same* projection a replay frame
+   * uses or the two would be able to disagree. Sharing the builder is what
+   * makes "the Product record and the replay frame agree" a property rather
+   * than a coincidence.
+   */
+  get observableShipments(): ControlRoomShipment[] {
+    return this.createShipmentFrame();
+  }
+
   /** Scenario horizon for deterministic day stepping. */
   get horizon(): { startsAt: SimulationInstant; demandEndsAt: SimulationInstant; endsAt: SimulationInstant } {
     return { startsAt: this.startsAt, demandEndsAt: this.demandEndsAt, endsAt: this.endsAt };
@@ -483,6 +732,14 @@ export class SimulationEngine {
     for (const buyer of [...this.world.buyers.values()].sort((a, b) => a.buyerId.localeCompare(b.buyerId))) {
       const firstOffset = demandStream.int(0, 3) * DAY_MS + demandStream.int(6, 10) * HOUR_MS;
       this.schedule(this.startsAt + firstOffset, 'BUYER_DEMAND', Priority.Actor, { buyerId: buyer.buyerId });
+    }
+
+    // In connected mode the Product API owns local matching, so the regional
+    // decision needs an occasion of its own. Scheduled only when the scoped
+    // network actually has a sailing to offer, which is why a one-island run
+    // gains no event, processes no extra work, and is bit-for-bit unchanged.
+    if (this.coordinationMode === 'EXTERNAL_PRODUCT_API' && this.world.maritime.links.length > 0) {
+      this.schedule(this.startsAt + INTER_ISLAND_REVIEW_INTERVAL_MS, 'INTER_ISLAND_REVIEW', Priority.Actor, {});
     }
 
     // Disruptions become observable when they start, not before.
@@ -584,6 +841,12 @@ export class SimulationEngine {
         return this.onMissionDepart((event.payload as { missionId: string }).missionId);
       case 'MISSION_ARRIVE':
         return this.onMissionArrive((event.payload as { missionId: string }).missionId);
+      case 'SHIPMENT_SAIL':
+        return this.onShipmentSail((event.payload as { missionId: string }).missionId);
+      case 'SHIPMENT_CLEAR':
+        return this.onShipmentClear((event.payload as { missionId: string }).missionId);
+      case 'INTER_ISLAND_REVIEW':
+        return this.onInterIslandReview();
       case 'DISRUPTION_START':
         return this.onDisruptionStart((event.payload as { disruptionId: string }).disruptionId);
       case 'DISRUPTION_END':
@@ -601,7 +864,6 @@ export class SimulationEngine {
 
   private onWorldTick(): void {
     const today = formatDate(this.clock);
-    const rainfallMm = this.world.truth.rainfallMmByDate.get(today) ?? 0;
     const stormSeverity = Math.max(
       0,
       ...[...this.disruptionRuntimes.values()]
@@ -609,11 +871,12 @@ export class SimulationEngine {
         .map((runtime) => runtime.disruption.severity),
     );
 
-    // Rain degrades sensitive roads. This is observable: a driver can see a
-    // flooded road, so it is allowed to reach the observed world.
+    // Rain degrades sensitive roads, and a storm takes out roads that ordinary
+    // rain would not. This is observable: a driver can see a flooded road, so
+    // it is allowed to reach the observed world.
     for (const road of this.world.roads.values()) {
-      const degraded = rainfallMm >= HEAVY_RAIN_MM && road.rainSensitivity > 0.5;
-      if (degraded) {
+      const weather = this.realisedWeatherToday(road.islandId, today);
+      if (weatherDegradesRoad(weather, road.rainSensitivity, HEAVY_RAIN_MM)) {
         this.world.observed.degradedRoadSegmentIds.add(road.roadSegmentId);
       } else if (!this.isRoadDisrupted(road.roadSegmentId)) {
         this.world.observed.degradedRoadSegmentIds.delete(road.roadSegmentId);
@@ -623,6 +886,29 @@ export class SimulationEngine {
     // Advance crop truth. Stage changes are physical; nobody has to see them.
     for (const crop of this.world.truth.crops.values()) {
       if (crop.stage === 'HARVESTED' || crop.stage === 'SPOILED') continue;
+
+      const weather = this.realisedWeatherToday(this.islandForBatch(crop.batchId), today);
+
+      // Ripening slows in the wet. Applied before the stage branch below, so a
+      // batch that would have tipped into READY today stays MATURING for the
+      // whole tick rather than being ready and delayed in the same breath.
+      if (this.clock < crop.readyAt && isWetDay(weather)) {
+        const alreadySlipped = this.weatherReadinessDelayMs.get(crop.batchId) ?? 0;
+        const slipMs = Math.min(readinessDelayMs(weather), MAX_WEATHER_READINESS_DELAY_MS - alreadySlipped);
+        if (slipMs > 0) {
+          crop.readyAt += slipMs;
+          this.weatherReadinessDelayMs.set(crop.batchId, alreadySlipped + slipMs);
+        }
+      }
+
+      // Wet weather costs marketable grade whether the batch is standing ready
+      // or still growing: split and blemished fruit is refused at the gate.
+      const gradeLost = qualityLoss(weather);
+      if (gradeLost > 0) {
+        const before = crop.qualityFraction;
+        crop.qualityFraction = Math.max(MINIMUM_QUALITY_FRACTION, Number((crop.qualityFraction - gradeLost).toFixed(6)));
+        this.weatherQualityLost += before - crop.qualityFraction;
+      }
 
       if (this.clock >= crop.readyAt) {
         if (crop.stage !== 'READY') crop.stage = 'READY';
@@ -636,8 +922,13 @@ export class SimulationEngine {
           // A visible storm accelerates deterioration, but multiple overlapping
           // fronts do not compound into an implausible exponential penalty.
           // The strongest active seeded severity sets the multiplier.
-          const lostToday = Math.min(remaining, remaining * crop.dailySpoilageRate * (1 + stormSeverity));
+          const withoutWeather = Math.min(remaining, remaining * crop.dailySpoilageRate * (1 + stormSeverity));
+          const lostToday = Math.min(
+            remaining,
+            remaining * crop.dailySpoilageRate * (1 + stormSeverity) * spoilageMultiplier(weather),
+          );
           crop.lostKg += lostToday;
+          this.weatherSpoilageKg += lostToday - withoutWeather;
 
           if (crop.potentialYieldKg - crop.harvestedKg - crop.lostKg <= 0.5) {
             crop.stage = 'SPOILED';
@@ -653,6 +944,95 @@ export class SimulationEngine {
     }
 
     this.schedule(this.clock + DAY_MS, 'WORLD_TICK', Priority.World, {});
+  }
+
+  // ------------------------------------------------------------------
+  // Weather
+  // ------------------------------------------------------------------
+
+  /**
+   * Realised weather for an island on a date, for the engine's own use.
+   *
+   * Physics may read the day it is simulating; nothing facing a participant
+   * may. `observableWeather` below is the boundary that enforces the second
+   * half of that sentence, and it is the only weather a policy, a replay frame
+   * or the Product API ever receives.
+   */
+  private realisedWeatherToday(islandId: string | null, date: string): RealisedWeather | null {
+    if (!islandId) return null;
+    return this.world.truth.weather.truthOn(islandId, date);
+  }
+
+  private islandForBatch(batchId: string): string | null {
+    const cached = this.islandByBatchId.get(batchId);
+    if (cached !== undefined) return cached;
+    const farmId = this.world.observed.batches.get(batchId)?.farmId;
+    const islandId = farmId ? this.world.farms.get(farmId)?.islandId : undefined;
+    if (islandId === undefined) return null;
+    this.islandByBatchId.set(batchId, islandId);
+    return islandId;
+  }
+
+  /** The island a mission is working on, taken from where it is picking up. */
+  private islandForMission(mission: DeliveryMission): string | null {
+    const commitment = this.world.observed.commitments.get(mission.commitmentId);
+    const farmId = commitment?.allocations[0]?.farmId;
+    return farmId ? this.world.farms.get(farmId)?.islandId ?? null : null;
+  }
+
+  /**
+   * The weather any observer may have: realised days that have occurred, and
+   * forecasts for the ones that have not.
+   *
+   * Public because the connected Product API writes exactly this into run-scoped
+   * storage each frame, so a human on the website and a simulated participant
+   * read the same numbers from the same place rather than from two models that
+   * agree until they do not.
+   */
+  get observableWeather(): ObservableWeatherAccess {
+    const model = this.world.truth.weather;
+    const asOf = () => formatDate(this.clock);
+    return {
+      current: (islandId) => model.realisedUpTo(islandId, asOf(), asOf()),
+      realisedOn: (islandId, date) => model.realisedUpTo(islandId, date, asOf()),
+      forecast: (islandId) => model.forecastIssuedOn(islandId, asOf()),
+    };
+  }
+
+  /**
+   * The realised weather's effect on this run, counted rather than asserted.
+   *
+   * `wetDays` walks the whole realised series up to the clock rather than only
+   * the days something happened on, because a run in which every batch was
+   * already harvested before a wet week still had a wet week.
+   */
+  private weatherEffectMetrics(): WeatherEffectMetrics {
+    let wetDays = 0;
+    let stormDays = 0;
+    const today = formatDate(this.clock);
+    for (const islandId of this.weatherIslandIds) {
+      for (const date of this.world.truth.weather.dates) {
+        if (date > today) break;
+        const reading = this.world.truth.weather.truthOn(islandId, date);
+        if (!reading) continue;
+        if (reading.condition === 'STORM') stormDays += 1;
+        if (isWetDay(reading)) wetDays += 1;
+      }
+    }
+    const delayMs = [...this.weatherReadinessDelayMs.values()].reduce((total, value) => total + value, 0);
+    return {
+      wetDays,
+      stormDays,
+      readinessDelayDays: Number((delayMs / DAY_MS).toFixed(3)),
+      qualityLost: Number(this.weatherQualityLost.toFixed(6)),
+      weatherSpoilageKg: Number(this.weatherSpoilageKg.toFixed(2)),
+      weatherDelayedMissions: this.weatherDelayedMissions,
+    };
+  }
+
+  /** Islands this run actually covers, sorted, so weather publication is bounded. */
+  get weatherIslandIds(): readonly string[] {
+    return [...new Set([...this.world.farms.values()].map((farm) => farm.islandId))].sort();
   }
 
   private isRoadDisrupted(roadSegmentId: string): boolean {
@@ -701,6 +1081,11 @@ export class SimulationEngine {
     if (mission.status === 'COMPLETED' || mission.status === 'CANCELLED' || mission.plannedArrivalAt <= this.clock) {
       return false;
     }
+    // A flooded farm track does not reschedule a scheduled ferry, and the sea
+    // leg already carries its own weather effect. Postponing a sailing here
+    // would also leave its customs event on the old instant, which is a wrong
+    // itinerary rather than a delayed one.
+    if (mission.mode === 'MARITIME') return false;
 
     if (mission.plannedDepartureAt >= this.clock) {
       if (mission.plannedDepartureAt >= availableAt) return false;
@@ -874,10 +1259,10 @@ export class SimulationEngine {
     if (runtime.disruption.type === 'ROAD') {
       for (const roadSegmentId of runtime.disruption.affectedEntityIds) {
         const today = formatDate(this.clock);
-        const rainfallMm = this.world.truth.rainfallMmByDate.get(today) ?? 0;
         const road = this.world.roads.get(roadSegmentId);
-        // Only clear it if rain is not independently keeping it degraded.
-        if (!road || rainfallMm < HEAVY_RAIN_MM || road.rainSensitivity <= 0.5) {
+        const weather = road ? this.realisedWeatherToday(road.islandId, today) : null;
+        // Only clear it if the weather is not independently keeping it degraded.
+        if (!road || !weatherDegradesRoad(weather, road.rainSensitivity, HEAVY_RAIN_MM)) {
           this.world.observed.degradedRoadSegmentIds.delete(roadSegmentId);
         }
       }
@@ -1080,6 +1465,10 @@ export class SimulationEngine {
       roads: this.world.roads,
       ids: this.ids,
       random: this.random.stream('policy'),
+      weather: this.observableWeather,
+      // Already restricted to the run scope when the scenario built the world,
+      // so a policy cannot reach a port or a link outside it.
+      maritime: this.world.maritime,
       record: (decision) => {
         this.decisions.push({ ...decision, at: this.clock });
       },
@@ -1170,17 +1559,42 @@ export class SimulationEngine {
       }
     }
 
-    if (!proposal || proposal.allocations.length === 0) return;
+    if (!proposal || proposal.allocations.length === 0) {
+      this.recordNoPublicRouteIfNeeded(demand, 0);
+      return;
+    }
 
     // VALIDATION GATE. The policy's numbers are a request, not an instruction.
     // Each allocation is checked against what the batch can actually still
     // supply, using the *observed* remaining figure rather than hidden truth —
     // the engine is checking internal consistency, not granting foresight.
+    // A cross-island proposal is re-checked against the scoped network here,
+    // not trusted. The policy chose a route; the engine confirms that the route
+    // it chose is one the reviewed dataset actually records between two islands
+    // this run selected, in the direction claimed. `AGENTS.md` requires routing
+    // and state transitions to be deterministic and validated, and a route is
+    // routing.
+    const seaBatchIds = new Set(proposal.interIsland?.batchIds ?? []);
+    const validatedRoute = proposal.interIsland
+      ? this.validateInterIslandRoute(demand, proposal.interIsland.originIslandId, proposal.interIsland.route)
+      : null;
+    if (proposal.interIsland && !validatedRoute) seaBatchIds.clear();
+
     const validated: Commitment['allocations'] = [];
     for (const allocation of proposal.allocations) {
       const batch = this.world.observed.batches.get(allocation.batchId);
       if (!batch) continue;
       if (!Number.isFinite(allocation.quantityKg) || allocation.quantityKg <= 0) continue;
+
+      // An allocation off the buyer's island is only ever admissible as part of
+      // a validated sailing. Without one it is dropped rather than quietly
+      // delivered by road across open water.
+      const sourceIslandId = this.world.farms.get(allocation.farmId)?.islandId;
+      const buyerIslandId = this.world.buyers.get(demand.buyerId)?.islandId;
+      if (sourceIslandId !== undefined && buyerIslandId !== undefined && sourceIslandId !== buyerIslandId) {
+        if (!validatedRoute || !seaBatchIds.has(allocation.batchId)) continue;
+        if (sourceIslandId !== validatedRoute.originIslandId) continue;
+      }
 
       const alreadyCommitted = this.committedKgForBatch(allocation.batchId);
       const latest = batch.observations.at(-1);
@@ -1189,13 +1603,31 @@ export class SimulationEngine {
       const observedCeiling = latest ? latest.estimatedYieldKg : batch.areaHectares * 1_500;
       const headroom = Math.max(0, observedCeiling - alreadyCommitted - batch.confirmedHarvestedKg);
 
-      const granted = Math.min(allocation.quantityKg, headroom);
+      const granted = Number(Math.min(allocation.quantityKg, headroom).toFixed(2));
       if (granted <= 0) continue;
 
       validated.push({ batchId: allocation.batchId, farmId: allocation.farmId, quantityKg: Number(granted.toFixed(2)) });
     }
 
-    if (validated.length === 0) return;
+    if (validated.length === 0) {
+      this.recordNoPublicRouteIfNeeded(demand, 0);
+      return;
+    }
+
+    const promisedKg = validated.reduce((total, allocation) => total + allocation.quantityKg, 0);
+    this.recordNoPublicRouteIfNeeded(demand, promisedKg);
+
+    const crossesWater =
+      validatedRoute !== null && validated.some((allocation) => seaBatchIds.has(allocation.batchId));
+    const interIsland: InterIslandCommitmentDetail | null =
+      crossesWater && validatedRoute
+        ? {
+            originIslandId: validatedRoute.originIslandId,
+            destinationIslandId: validatedRoute.destinationIslandId,
+            route: validatedRoute,
+            approvalSubjectType: 'INTER_ISLAND_COMMITMENT',
+          }
+        : null;
 
     const commitment: Commitment = {
       commitmentId: this.ids.next(),
@@ -1204,12 +1636,25 @@ export class SimulationEngine {
       committedAt: this.clock,
       approvedAt: null,
       status: 'PROPOSED',
+      ...(interIsland ? { interIsland } : {}),
     };
     this.world.observed.commitments.set(commitment.commitmentId, commitment);
     this.commitmentsProposed += 1;
-    this.totalPromisedKg += validated.reduce((total, allocation) => total + allocation.quantityKg, 0);
+    this.totalPromisedKg += promisedKg;
 
-    if (proposal.requiresApproval) {
+    if (interIsland) {
+      this.shipmentsProposed += 1;
+      this.seaBatchIdsByCommitment.set(
+        commitment.commitmentId,
+        validated.filter((allocation) => seaBatchIds.has(allocation.batchId)).map((allocation) => allocation.batchId),
+      );
+    }
+
+    // An inter-island commitment always takes the approval gate, whatever the
+    // policy asked for. `AGENTS.md` lists inter-island commitments among the
+    // decisions that require human approval, so the engine will not let a
+    // proposal opt out of one.
+    if (proposal.requiresApproval || interIsland) {
       // A human approval gate takes real time, and that latency is part of what
       // the benchmark should capture.
       this.schedule(this.clock + 2 * HOUR_MS, 'APPROVAL_GATE', Priority.Actor, { commitmentId: commitment.commitmentId });
@@ -1249,7 +1694,21 @@ export class SimulationEngine {
     const demand = this.world.observed.demands.get(commitment.demandId);
     if (demand) demand.status = 'COMMITTED';
 
-    this.planMission(commitment);
+    const seaBatchIds = new Set(this.seaBatchIdsByCommitment.get(commitment.commitmentId) ?? []);
+    if (seaBatchIds.size === 0 || !commitment.interIsland) {
+      this.planMission(commitment, commitment.allocations);
+      return;
+    }
+
+    // The approval has cleared, so the sailing may now be booked. Before this
+    // point no shipment object exists at all — "an inter-island commitment
+    // cannot bind without approval" is enforced by there being nothing to bind,
+    // rather than by a flag something could forget to read.
+    this.shipmentsApproved += 1;
+    const road = commitment.allocations.filter((allocation) => !seaBatchIds.has(allocation.batchId));
+    const sea = commitment.allocations.filter((allocation) => seaBatchIds.has(allocation.batchId));
+    if (road.length > 0) this.planMission(commitment, road);
+    if (sea.length > 0) this.planMaritimeShipment(commitment, commitment.interIsland, sea);
   }
 
   /**
@@ -1264,12 +1723,13 @@ export class SimulationEngine {
    * `HiddenCropTruth.readyAt` here would schedule against a readiness nobody has
    * seen, which is the foresight the benchmark exists to rule out.
    */
-  private reportedReadyAt(commitment: Commitment): SimulationInstant | null {
-    for (const allocation of commitment.allocations) {
+  private reportedReadyAt(allocations: Commitment['allocations']): SimulationInstant | null {
+    for (const allocation of allocations) {
+
       const batch = this.world.observed.batches.get(allocation.batchId);
       if (!batch || batch.lastReportedStage !== 'READY') return null;
     }
-    return this.firstReportedReadyAt(commitment);
+    return this.firstReportedReadyAt(allocations);
   }
 
   /**
@@ -1281,9 +1741,9 @@ export class SimulationEngine {
    * afterwards, and asking whether it had been ready at pickup time is exactly
    * the question `classifyDemand` has to answer.
    */
-  private firstReportedReadyAt(commitment: Commitment): SimulationInstant | null {
+  private firstReportedReadyAt(allocations: Commitment['allocations']): SimulationInstant | null {
     let latest: SimulationInstant | null = null;
-    for (const allocation of commitment.allocations) {
+    for (const allocation of allocations) {
       const batch = this.world.observed.batches.get(allocation.batchId);
       const firstReady = batch?.observations.find((observation) => observation.reportedStage === 'READY');
       if (!firstReady) return null;
@@ -1322,11 +1782,11 @@ export class SimulationEngine {
 
     for (const mission of [...this.world.observed.missions.values()].sort((left, right) =>
       left.missionId.localeCompare(right.missionId))) {
-      if (mission.status !== 'PLANNED' || mission.plannedDepartureAt <= this.clock) continue;
+      if (mission.mode === 'MARITIME' || mission.status !== 'PLANNED' || mission.plannedDepartureAt <= this.clock) continue;
       const commitment = this.world.observed.commitments.get(mission.commitmentId);
       if (!commitment || commitment.status !== 'APPROVED') continue;
 
-      const reportedReadyAt = this.reportedReadyAt(commitment);
+      const reportedReadyAt = this.reportedReadyAt(commitment.allocations.filter((line) => !mission.batchIds || mission.batchIds.includes(line.batchId)));
       if (reportedReadyAt === null) continue;
       if (mission.plannedDepartureAt - reportedReadyAt <= maxHoldMs) continue;
 
@@ -1343,13 +1803,14 @@ export class SimulationEngine {
     }
   }
 
-  private planMission(commitment: Commitment): void {
+  private planMission(commitment: Commitment, allocations: Commitment['allocations']): void {
+
     const demand = this.world.observed.demands.get(commitment.demandId);
     if (!demand) return;
     const buyer = this.world.buyers.get(demand.buyerId);
     if (!buyer) return;
 
-    const loadKg = commitment.allocations.reduce((total, allocation) => total + allocation.quantityKg, 0);
+    const loadKg = allocations.reduce((total, allocation) => total + allocation.quantityKg, 0);
 
     // Pick the smallest vehicle that can carry the load; fall back to the
     // largest if nothing fits. Deterministic, and a stable tiebreak on id.
@@ -1360,7 +1821,7 @@ export class SimulationEngine {
     if (!vehicle) return;
 
     // Route: each pickup farm in a stable order, then the buyer.
-    const pickupFarmIds = [...new Set(commitment.allocations.map((allocation) => allocation.farmId))].sort();
+    const pickupFarmIds = [...new Set(allocations.map((allocation) => allocation.farmId))].sort();
     const path = [
       ...pickupFarmIds.map((farmId) => this.world.farms.get(farmId)?.position).filter((position) => position !== undefined),
       buyer.position,
@@ -1390,11 +1851,40 @@ export class SimulationEngine {
     // Readiness only ever brings a departure forward: the deadline stays the
     // upper bound, and the readiness figure is the grower's report rather than
     // the hidden `readyAt`, so this buys no foresight.
-    const { collectOnReadiness, maxHoldMs } = this.policy.capabilities;
-    const reportedReadyAt = collectOnReadiness ? this.reportedReadyAt(commitment) : null;
+    const { collectOnReadiness, maxHoldMs, readsForecast } = this.policy.capabilities;
+    const reportedReadyAt = collectOnReadiness ? this.reportedReadyAt(allocations) : null;
+
+    // A forecast storm shortens how long a reported-ready batch may sit. This
+    // is the one place a forecast touches behaviour, and it is coordination
+    // rather than biology: it moves a vehicle, never a crop. It can also be
+    // wrong, because the forecast can be wrong, and the cost of being wrong is
+    // an early pickup rather than a broken promise.
+    const islandId = this.world.farms.get(allocations[0]?.farmId ?? '')?.islandId ?? null;
+    const stormForecast =
+      readsForecast && islandId
+        ? this.observableWeather
+            .forecast(islandId)
+            .find((day) => day.condition === 'STORM' && day.leadDays <= STORM_FORECAST_WINDOW_DAYS)
+        : undefined;
+    const effectiveHoldMs = stormForecast ? Math.min(maxHoldMs, STORM_FORECAST_HOLD_MS) : maxHoldMs;
+    if (stormForecast) {
+      this.decisions.push({
+        at: this.clock,
+        kind: 'HARVEST_PULL_PICKUP_FORWARD',
+        summary: `Storm forecast for ${stormForecast.date}; collection brought forward rather than held to the deadline.`,
+        evidence: {
+          commitmentId: commitment.commitmentId,
+          islandId: islandId ?? 'unknown',
+          forecastDate: stormForecast.date,
+          leadDays: stormForecast.leadDays,
+          confidence: stormForecast.confidence,
+          source: 'FORECAST',
+        },
+      });
+    }
 
     let departAt = deadlineDeparture;
-    if (reportedReadyAt !== null && deadlineDeparture - reportedReadyAt > maxHoldMs) {
+    if (reportedReadyAt !== null && deadlineDeparture - reportedReadyAt > effectiveHoldMs) {
       const promptDeparture = Math.max(this.clock + HOUR_MS, reportedReadyAt + handlingMs);
       departAt = Math.min(deadlineDeparture, promptDeparture);
     }
@@ -1406,11 +1896,13 @@ export class SimulationEngine {
       commitmentId: commitment.commitmentId,
       transporterId: vehicle.transporterId,
       status: 'PLANNED',
+      mode: 'ROAD',
       path,
       plannedDepartureAt: departAt,
       plannedArrivalAt: arriveAt,
       actualArrivalAt: null,
       loadedKg: 0,
+      batchIds: allocations.map((allocation) => allocation.batchId),
     };
     this.world.observed.missions.set(mission.missionId, mission);
 
@@ -1428,8 +1920,14 @@ export class SimulationEngine {
 
     // Harvest what is actually there. This is where promises meet biology: the
     // engine reads hidden truth, and whatever the policy believed is irrelevant.
+    //
+    // Only this vehicle's own allocations are picked. For a road-only
+    // commitment that is all of them; for one that splits across a sailing the
+    // road van must not also empty the fields on the other island.
+    const carried = new Set(mission.batchIds);
     let loaded = 0;
     for (const allocation of commitment.allocations) {
+      if (!carried.has(allocation.batchId)) continue;
       const truth = this.world.truth.crops.get(allocation.batchId);
       const batch = this.world.observed.batches.get(allocation.batchId);
       if (!truth || !batch) continue;
@@ -1456,8 +1954,38 @@ export class SimulationEngine {
     }
 
     const vehicle = this.world.transporters.get(mission.transporterId);
-    mission.loadedKg = Math.min(loaded, vehicle?.capacityKg ?? loaded);
+    const shipment = mission.shipmentId ? this.world.observed.shipments.get(mission.shipmentId) : undefined;
+    // A sailing has its own synthetic allowance on top of the truck's, and the
+    // smaller of the two is what actually leaves the island.
+    mission.loadedKg = Math.min(loaded, vehicle?.capacityKg ?? loaded, shipment?.capacityKg ?? Number.POSITIVE_INFINITY);
     mission.status = 'ACTIVE';
+    if (shipment) shipment.loadedKg = mission.loadedKg;
+
+    // Weather on the day the vehicle actually sets out slows the journey. Read
+    // here rather than at planning time because at planning time it has not
+    // happened yet, and letting the planner use it would be the engine handing
+    // itself the foresight the whole design denies the policy.
+    //
+    // The mission stays ACTIVE rather than becoming DELAYED. It is leaving on
+    // time and simply travelling slower, which is a later arrival and not a
+    // stalled mission — and `DELAYED` is the status the connected Product API
+    // flow reads as "this vehicle did not set out", which would strand the
+    // pickup updates that follow.
+    //
+    // A maritime mission is exempt here and is slowed on its sea leg instead,
+    // in `onShipmentSail`. Applying both would charge one consignment twice for
+    // the same weather, and the sea leg is where a storm actually bites.
+    const weather = this.realisedWeatherToday(this.islandForMission(mission), formatDate(this.clock));
+    const speedFactor = mission.mode === 'MARITIME' ? 1 : travelSpeedFactor(weather);
+    if (speedFactor < 1) {
+      const remainingMs = Math.max(0, mission.plannedArrivalAt - this.clock);
+      const extraMs = Math.round(remainingMs * (1 / speedFactor - 1));
+      if (extraMs > 0) {
+        mission.plannedArrivalAt += extraMs;
+        this.weatherDelayedMissions += 1;
+        this.replaceMissionSchedule(mission, false);
+      }
+    }
   }
 
   private onMissionArrive(missionId: string): void {
@@ -1473,14 +2001,44 @@ export class SimulationEngine {
     mission.actualArrivalAt = this.clock;
     this.missionsCompleted += 1;
 
+    // A sailing is delivered at the buyer's gate, not at the quay, so the
+    // shipment settles here rather than at the customs checkpoint.
+    const shipment = mission.shipmentId ? this.world.observed.shipments.get(mission.shipmentId) : undefined;
+    if (shipment && shipment.status !== 'FAILED') {
+      shipment.status = 'DELIVERED';
+      shipment.deliveredAt = this.clock;
+      this.shipmentsDelivered += 1;
+    }
+
     // Arrival is a physical fact. In connected mode the transporter posts the
     // actual picked-up amount and the buyer accepts it through the Product API;
     // only that resulting event may settle the commitment and buyer demand.
     if (this.coordinationMode === 'EXTERNAL_PRODUCT_API') return;
 
+    // A commitment that splits across a road van and a sailing has two vehicles
+    // out, and it is not delivered until both have finished. With one vehicle
+    // this is the same statement it always was.
+    if (this.commitmentOutstanding(commitment.commitmentId)) {
+      this.settleArrival(mission, demand);
+      return;
+    }
     commitment.status = 'DELIVERED';
     this.commitmentsDelivered += 1;
 
+    this.settleArrival(mission, demand);
+  }
+
+  /** Whether any vehicle carrying part of a commitment is still out. */
+  private commitmentOutstanding(commitmentId: string): boolean {
+    for (const mission of this.world.observed.missions.values()) {
+      if (mission.commitmentId !== commitmentId) continue;
+      if (mission.status !== 'COMPLETED' && mission.status !== 'CANCELLED') return true;
+    }
+    return false;
+  }
+
+  /** Books one arrived load against the buyer's order. */
+  private settleArrival(mission: DeliveryMission, demand: BuyerDemand): void {
     // Late arrivals are only partly accepted: a hotel kitchen that needed it
     // for service has already moved on.
     const late = this.clock > demand.neededBy;
@@ -1490,11 +2048,11 @@ export class SimulationEngine {
 
     const rejected = mission.loadedKg - acceptedKg;
     if (rejected > 0) {
-      // Rejected produce is waste. Attribute it to the first allocated batch so
-      // the figure lands somewhere accountable rather than vanishing.
-      const first = commitment.allocations[0];
+      // Rejected produce is waste. Attribute it to the first batch this vehicle
+      // carried so the figure lands somewhere accountable rather than vanishing.
+      const first = mission.batchIds[0];
       if (first) {
-        const truth = this.world.truth.crops.get(first.batchId);
+        const truth = this.world.truth.crops.get(first);
         if (truth) truth.lostKg += rejected;
       }
     }
@@ -1544,6 +2102,8 @@ export class SimulationEngine {
         return this.applyMissionDelayed(effect);
       case 'DELIVERY_ACCEPTED':
         return this.applyDeliveryAccepted(effect);
+      case 'INTER_ISLAND_COMMITMENT_APPROVED':
+        return this.applyInterIslandApproved(effect);
       case 'ALLOCATION_INVALIDATED':
       case 'ORDER_CANCELLED':
         return this.cancelDemandWork(effect.demandId);
@@ -1619,7 +2179,7 @@ export class SimulationEngine {
       ? Math.max(earliestDeparture, demand.neededBy - HOUR_MS - journeyMs)
       : earliestDeparture;
 
-    const reportedReadyAt = this.policy.capabilities.collectOnReadiness ? this.reportedReadyAt(commitment) : null;
+    const reportedReadyAt = this.policy.capabilities.collectOnReadiness ? this.reportedReadyAt(commitment.allocations) : null;
     const promptDeparture = reportedReadyAt === null
       ? deadlineDeparture
       : Math.max(this.clock + HOUR_MS, reportedReadyAt + this.handlingMsForPath(effect.path.length));
@@ -1631,11 +2191,13 @@ export class SimulationEngine {
       commitmentId: commitment.commitmentId,
       transporterId: transporter.transporterId,
       status: 'PLANNED',
+      mode: 'ROAD',
       path: effect.path.map((point) => ({ latitude: point.latitude, longitude: point.longitude })),
       plannedDepartureAt: departure,
       plannedArrivalAt: arrival,
       actualArrivalAt: null,
       loadedKg: 0,
+      batchIds: commitment.allocations.map((allocation) => allocation.batchId),
     };
     this.world.observed.missions.set(mission.missionId, mission);
     this.missionByProductId.set(effect.productMissionId, mission.missionId);
@@ -1792,30 +2354,691 @@ export class SimulationEngine {
       (candidate) => candidate.demandId === demand.demandId,
     );
     const commitment = commitments.find((candidate) => candidate.status !== 'CANCELLED') ?? commitments.at(-1);
-    if (!commitment) return 'NO_READY_SUPPLY';
+    // Nothing was promised at all. If Harvest had found crop on another
+    // in-scope island and no published sailing to bring it over, that is a
+    // missing route rather than missing supply, and it is recorded as one.
+    if (!commitment) {
+      return this.noPublicRouteDemands.has(demand.demandId) ? 'NO_PUBLIC_ROUTE' : 'NO_READY_SUPPLY';
+    }
     if (commitment.status === 'CANCELLED' && commitment.approvedAt === null) return 'APPROVAL_REJECTED';
 
-    const delivered = [...this.world.observed.missions.values()].find(
-      (mission) => mission.commitmentId === commitment.commitmentId && mission.status === 'COMPLETED',
+    // A sailing that was approved, loaded and lost. Checked before the delivery
+    // rungs so a lost consignment is not scored as spoilage or lateness.
+    if (this.commitmentShipmentFailed(commitment.commitmentId)) return 'SHIPMENT_FAILED';
+
+    // Every vehicle this commitment put on the road or on a boat. One for an
+    // ordinary commitment; two when part of it crossed by sea.
+    const missions = [...this.world.observed.missions.values()].filter(
+      (mission) => mission.commitmentId === commitment.commitmentId,
     );
+    const completed = missions.filter((mission) => mission.status === 'COMPLETED');
     // Nothing reached the buyer in time: the run ended with the vehicle still
     // out, the mission was cancelled, or it arrived after the window closed.
-    if (!delivered) return 'MISSION_LATE';
-    if (delivered.actualArrivalAt !== null && delivered.actualArrivalAt > demand.neededBy) return 'MISSION_LATE';
+    if (completed.length === 0) return 'MISSION_LATE';
+    const latestArrival = completed.reduce<SimulationInstant | null>(
+      (latest, mission) =>
+        mission.actualArrivalAt === null ? latest : latest === null ? mission.actualArrivalAt : Math.max(latest, mission.actualArrivalAt),
+      null,
+    );
+    if (latestArrival !== null && latestArrival > demand.neededBy) return 'MISSION_LATE';
 
     const committedKg = commitment.allocations.reduce((total, allocation) => total + allocation.quantityKg, 0);
-    if (delivered.loadedKg + CAUSE_TOLERANCE_KG < committedKg) {
-      // A short load has two quite different explanations, and calling both of
-      // them spoilage would hide the one a forward promise can produce: the
-      // vehicle reached a field the growers had never reported ready.
-      const readyAt = this.firstReportedReadyAt(commitment);
-      return readyAt === null || readyAt > delivered.plannedDepartureAt ? 'NOT_READY_IN_TIME' : 'SPOILED_BEFORE_PICKUP';
+    const loadedKg = completed.reduce((total, mission) => total + mission.loadedKg, 0);
+    if (loadedKg + CAUSE_TOLERANCE_KG < committedKg) {
+      const unreadyPickup = completed.some((mission) => {
+        const allocations = commitment.allocations.filter((line) => !mission.batchIds || mission.batchIds.includes(line.batchId));
+        const readyAt = this.firstReportedReadyAt(allocations);
+        return readyAt === null || readyAt > mission.plannedDepartureAt;
+      });
+      return unreadyPickup ? 'NOT_READY_IN_TIME' : 'SPOILED_BEFORE_PICKUP';
     }
-    if (demand.acceptedKg + CAUSE_TOLERANCE_KG < delivered.loadedKg) return 'DELIVERY_REJECTED';
+    if (demand.acceptedKg + CAUSE_TOLERANCE_KG < loadedKg) return 'DELIVERY_REJECTED';
+
 
     // Promised, collected, delivered and accepted in full: the promise itself
-    // was smaller than the order.
-    return 'INSUFFICIENT_SUPPLY';
+    // was smaller than the order. Unless the reason it was smaller was that
+    // supply sat on an island with no sailing to here.
+    return this.noPublicRouteDemands.has(demand.demandId) ? 'NO_PUBLIC_ROUTE' : 'INSUFFICIENT_SUPPLY';
+  }
+
+  /** Whether a commitment put a consignment on a boat that never arrived. */
+  private commitmentShipmentFailed(commitmentId: string): boolean {
+    for (const shipment of this.world.observed.shipments.values()) {
+      if (shipment.commitmentId === commitmentId && shipment.status === 'FAILED') return true;
+    }
+    return false;
+  }
+
+  // ------------------------------------------------------------------
+  // Inter-island trade: scoping, sailings, customs and currency
+  //
+  // Everything below is inert for a run whose scoped network has no links,
+  // which includes every one-island run. That is deliberate rather than
+  // incidental: it is what lets issue #40 land without moving a single figure
+  // in the Saint Lucia benchmark.
+  // ------------------------------------------------------------------
+
+  /**
+   * Re-checks a policy's chosen sailing against the scoped network.
+   *
+   * The policy proposes a route; this decides whether that route exists. It is
+   * the same discipline the quantity validation above applies to kilograms, and
+   * for the same reason: a route is routing, and `AGENTS.md` requires routing to
+   * be deterministic and validated rather than taken on trust from a proposal.
+   *
+   * Returns the route as the *dataset* records it, not as the proposal stated
+   * it, so a proposal cannot smuggle in a shorter journey time or a port that
+   * belongs to an island this run did not select.
+   */
+  private validateInterIslandRoute(
+    demand: BuyerDemand,
+    originIslandId: string,
+    proposed: MaritimeRoute,
+  ): MaritimeRoute | null {
+    const buyer = this.world.buyers.get(demand.buyerId);
+    if (!buyer) return null;
+    if (originIslandId === buyer.islandId) return null;
+    const options = routesBetween(this.world.maritime, originIslandId, buyer.islandId);
+    return (
+      options.find(
+        (option) =>
+          option.linkId === proposed.linkId &&
+          option.originPortId === proposed.originPortId &&
+          option.destinationPortId === proposed.destinationPortId,
+      ) ?? null
+    );
+  }
+
+  /**
+   * Records that an order went short because no published sailing existed.
+   *
+   * Only ever true when there really was crop to fetch: it checks that some
+   * other in-scope island is carrying observably ready supply of the right crop
+   * and that the scoped dataset records no link from any of them to the buyer.
+   * A run that is simply short of produce is not relabelled as a routing
+   * problem, and a policy that does not coordinate across islands never reaches
+   * this at all.
+   */
+  private recordNoPublicRouteIfNeeded(demand: BuyerDemand, promisedKg: number): void {
+    if (!this.policy.capabilities.coordinatesAcrossIslands) return;
+    if (promisedKg + CAUSE_TOLERANCE_KG >= demand.quantity.value) return;
+    const buyer = this.world.buyers.get(demand.buyerId);
+    if (!buyer) return;
+
+    const islandsWithSupply = new Set<string>();
+    for (const batch of this.world.observed.batches.values()) {
+      if (batch.crop !== demand.crop) continue;
+      if (batch.lastReportedStage !== 'READY') continue;
+      const islandId = this.world.farms.get(batch.farmId)?.islandId;
+      if (islandId === undefined || islandId === buyer.islandId) continue;
+      islandsWithSupply.add(islandId);
+    }
+    if (islandsWithSupply.size === 0) return;
+
+    for (const islandId of islandsWithSupply) {
+      if (routesBetween(this.world.maritime, islandId, buyer.islandId).length > 0) return;
+    }
+    this.noPublicRouteDemands.add(demand.demandId);
+  }
+
+  /**
+   * Books one approved cross-island consignment onto a published sailing.
+   *
+   * Three legs: a local pickup run to the origin port, the sea leg the dataset
+   * records, and a local delivery run from the destination port to the buyer.
+   * The whole itinerary is laid out here, at planning time, from seeded draws
+   * taken once, so a replay can be scrubbed to any instant and the answer is
+   * the same. Only the weather effect on the sea leg is applied later, at
+   * sailing, because at planning time that day has not happened.
+   */
+  private planMaritimeShipment(
+    commitment: Commitment,
+    detail: InterIslandCommitmentDetail,
+    allocations: Commitment['allocations'],
+  ): void {
+    const demand = this.world.observed.demands.get(commitment.demandId);
+    if (!demand) return;
+    const buyer = this.world.buyers.get(demand.buyerId);
+    if (!buyer) return;
+
+    // The scope is applied to the network once, when the world is built, so a
+    // port that is missing here is a port this run may not use. No substitute
+    // is looked for and no line is drawn.
+    const originPort = findPort(this.world.maritime, detail.route.originPortId);
+    const destinationPort = findPort(this.world.maritime, detail.route.destinationPortId);
+    if (!originPort || !destinationPort) return;
+
+    const loadKg = allocations.reduce((total, allocation) => total + allocation.quantityKg, 0);
+    const pickupFarmIds = [...new Set(allocations.map((allocation) => allocation.farmId))].sort();
+    const pickupPoints = pickupFarmIds
+      .map((farmId) => this.world.farms.get(farmId)?.position)
+      .filter((position): position is GeoPoint => position !== undefined);
+    if (pickupPoints.length === 0) return;
+
+    // The road legs are driven by a carrier on the island the produce is
+    // leaving; the sea leg is the operator's. Same smallest-that-fits rule the
+    // local planner uses, with a stable tiebreak on id.
+    const originFleet = [...this.world.transporters.values()]
+      .filter((transporter) => transporter.islandId === detail.originIslandId)
+      .sort((a, b) => a.capacityKg - b.capacityKg || a.transporterId.localeCompare(b.transporterId));
+    const vehicle = originFleet.find((candidate) => candidate.capacityKg >= loadKg) ?? originFleet.at(-1);
+    if (!vehicle) return;
+
+    const originPortPosition = portPosition(originPort);
+    const destinationPortPosition = portPosition(destinationPort);
+
+    let pickupKm = 0;
+    const pickupChain = [...pickupPoints, originPortPosition];
+    for (let index = 1; index < pickupChain.length; index += 1) {
+      pickupKm += haversineKm(pickupChain[index - 1] as GeoPoint, pickupChain[index] as GeoPoint);
+    }
+    pickupKm *= ROAD_WINDING_FACTOR;
+    const deliveryKm = haversineKm(destinationPortPosition, buyer.position) * ROAD_WINDING_FACTOR;
+
+    const pickupMs = (pickupKm / vehicle.cruiseSpeedKmh) * HOUR_MS + pickupFarmIds.length * 25 * MINUTE_MS;
+    const deliveryMs = (deliveryKm / vehicle.cruiseSpeedKmh) * HOUR_MS + 25 * MINUTE_MS;
+    const portHandlingMs = PORT_HANDLING_HOURS * HOUR_MS;
+    const seaMs = detail.route.seaLegHours * HOUR_MS;
+
+    // Two draws from one dedicated stream, taken in a fixed order. A stream of
+    // its own means adding shipments cannot shift a yield, a rainfall or an
+    // identifier drawn anywhere else in the run.
+    const stream = this.random.stream('maritime:shipments');
+    const sailingFails = stream.next() < SAILING_FAILURE_PROBABILITY;
+    const inspected = stream.next() < CUSTOMS_INSPECTION_PROBABILITY;
+    const customsDelayHours = CUSTOMS_BASE_DELAY_HOURS + (inspected ? CUSTOMS_INSPECTION_EXTRA_HOURS : 0);
+    const customsMs = customsDelayHours * HOUR_MS;
+
+    const totalMs = pickupMs + portHandlingMs + seaMs + portHandlingMs + customsMs + deliveryMs;
+    const desiredArrival = demand.neededBy - HOUR_MS;
+    const deadlineDeparture = Math.max(this.clock + HOUR_MS, desiredArrival - totalMs);
+
+    // Same readiness rule as a local run: once every allocated batch has been
+    // reported ready, do not leave it standing in a field on the far island
+    // waiting for a deadline.
+    const { collectOnReadiness, maxHoldMs } = this.policy.capabilities;
+    const reportedReadyAt = collectOnReadiness ? this.reportedReadyAt(allocations) : null;
+    let departAt = deadlineDeparture;
+    if (reportedReadyAt !== null && deadlineDeparture - reportedReadyAt > maxHoldMs) {
+      departAt = Math.min(deadlineDeparture, Math.max(this.clock + HOUR_MS, reportedReadyAt + pickupMs));
+    }
+
+    const sailAt = departAt + pickupMs + portHandlingMs;
+    const portArrivalAt = sailAt + seaMs;
+    const clearedAt = portArrivalAt + portHandlingMs + customsMs;
+    const arriveAt = clearedAt + deliveryMs;
+
+    const legs: MaritimeLeg[] = [
+      {
+        kind: 'PICKUP',
+        fromLabel: this.world.farms.get(pickupFarmIds[0] as string)?.name ?? 'origin farm',
+        toLabel: originPort.name,
+        from: pickupPoints[0] as GeoPoint,
+        to: originPortPosition,
+        startsAt: departAt,
+        endsAt: sailAt,
+      },
+      {
+        kind: 'SEA',
+        fromLabel: originPort.name,
+        toLabel: destinationPort.name,
+        from: originPortPosition,
+        to: destinationPortPosition,
+        startsAt: sailAt,
+        endsAt: portArrivalAt,
+        journeyHoursSource: detail.route.journeyHoursSource,
+      },
+      {
+        kind: 'DELIVERY',
+        fromLabel: destinationPort.name,
+        toLabel: buyer.name,
+        from: destinationPortPosition,
+        to: buyer.position,
+        startsAt: clearedAt,
+        endsAt: arriveAt,
+      },
+    ];
+
+    const cost = shipmentCostXcd(loadKg);
+    const localCurrency = islandCurrency(detail.destinationIslandId);
+    const dual = (amountXcd: number) =>
+      toDualCurrency(this.world.maritime, amountXcd, localCurrency) ??
+      // XCD is always in scope, so this only fires for an island whose own
+      // currency the dataset has no rate for; the comparison value is then the
+      // only honest thing to show and both halves say XCD.
+      (toDualCurrency(this.world.maritime, amountXcd, COMPARISON_CURRENCY) as NonNullable<
+        ReturnType<typeof toDualCurrency>
+      >);
+
+    const shipmentId = this.ids.next();
+    const missionId = this.ids.next();
+
+    const customs: CustomsCheckpoint = {
+      portId: destinationPort.id,
+      status: 'PENDING',
+      documentationReference: `SYN-CUSTOMS-${shipmentId.slice(0, 8).toUpperCase()}`,
+      inspected,
+      delayHours: customsDelayHours,
+      clearedAt: null,
+      feeXcd: CUSTOMS_FIXED_FEE_XCD,
+      disclaimer: CUSTOMS_DISCLAIMER,
+      provenance: MARITIME_OPERATIONS_PROVENANCE,
+    };
+
+    const shipment: MaritimeShipment = {
+      shipmentId,
+      missionId,
+      commitmentId: commitment.commitmentId,
+      demandId: demand.demandId,
+      originIslandId: detail.originIslandId,
+      destinationIslandId: detail.destinationIslandId,
+      route: detail.route,
+      status: 'SCHEDULED',
+      capacityKg: SAILING_CAPACITY_KG,
+      loadedKg: 0,
+      legs,
+      customs,
+      cost: {
+        freight: dual(cost.freightXcd),
+        customsFee: dual(cost.customsFeeXcd),
+        total: dual(cost.totalXcd),
+      },
+      scheduledDepartureAt: sailAt,
+      scheduledArrivalAt: portArrivalAt,
+      actualDepartureAt: null,
+      actualArrivalAt: null,
+      deliveredAt: null,
+      failureReason: null,
+      weatherDelayHours: 0,
+    };
+
+    const mission: DeliveryMission = {
+      missionId,
+      commitmentId: commitment.commitmentId,
+      transporterId: vehicle.transporterId,
+      status: 'PLANNED',
+      mode: 'MARITIME',
+      path: [...pickupPoints, originPortPosition, destinationPortPosition, buyer.position],
+      plannedDepartureAt: departAt,
+      plannedArrivalAt: arriveAt,
+      actualArrivalAt: null,
+      loadedKg: 0,
+      batchIds: allocations.map((allocation) => allocation.batchId),
+      shipmentId,
+    };
+
+    this.world.observed.shipments.set(shipmentId, shipment);
+    this.world.observed.missions.set(missionId, mission);
+    this.sailingFailures.set(shipmentId, sailingFails);
+
+    this.decisions.push({
+      at: this.clock,
+      kind: 'HARVEST_BOOK_SAILING',
+      summary:
+        `Booked ${loadKg.toFixed(0)} kg from ${detail.originIslandId} to ${detail.destinationIslandId} on ` +
+        `${detail.route.operator}, ${originPort.name} to ${destinationPort.name}, after inter-island approval.`,
+      evidence: {
+        commitmentId: commitment.commitmentId,
+        shipmentId,
+        linkId: detail.route.linkId,
+        seaLegHours: detail.route.seaLegHours,
+        journeyHoursSource: detail.route.journeyHoursSource,
+        capacityKg: SAILING_CAPACITY_KG,
+        customsDelayHours,
+        totalCostXcd: cost.totalXcd,
+        networkProvenance: MARITIME_NETWORK_PROVENANCE,
+        operationsProvenance: MARITIME_OPERATIONS_PROVENANCE,
+      },
+    });
+
+    this.schedule(departAt, 'MISSION_DEPART', Priority.Actor, { missionId });
+    this.schedule(sailAt, 'SHIPMENT_SAIL', Priority.World, { missionId });
+    this.schedule(clearedAt, 'SHIPMENT_CLEAR', Priority.World, { missionId });
+    this.schedule(arriveAt, 'MISSION_ARRIVE', Priority.World, { missionId });
+  }
+
+  /**
+   * The consignment leaves the origin port.
+   *
+   * This is where the realised weather of the sailing day acts, for the same
+   * reason it acts on a departing van rather than on a planned one: at planning
+   * time the day had not happened, and letting the planner read it would hand
+   * the engine the foresight the design denies every policy.
+   */
+  private onShipmentSail(missionId: string): void {
+    const mission = this.world.observed.missions.get(missionId);
+    if (!mission || mission.status === 'CANCELLED' || mission.status === 'COMPLETED') return;
+    const shipment = mission.shipmentId ? this.world.observed.shipments.get(mission.shipmentId) : undefined;
+    if (!shipment || shipment.status === 'FAILED') return;
+
+    shipment.status = 'DEPARTED';
+    shipment.actualDepartureAt = this.clock;
+
+    const weather = this.realisedWeatherToday(shipment.originIslandId, formatDate(this.clock));
+    const speedFactor = travelSpeedFactor(weather);
+    if (speedFactor >= 1) return;
+
+    const seaLeg = shipment.legs.find((leg) => leg.kind === 'SEA');
+    if (!seaLeg) return;
+    const remainingMs = Math.max(0, seaLeg.endsAt - this.clock);
+    const extraMs = Math.round(remainingMs * (1 / speedFactor - 1));
+    if (extraMs <= 0) return;
+
+    seaLeg.endsAt += extraMs;
+    shipment.scheduledArrivalAt += extraMs;
+    shipment.weatherDelayHours = Number((extraMs / HOUR_MS).toFixed(2));
+    shipment.status = 'DELAYED';
+    for (const leg of shipment.legs) {
+      if (leg.kind !== 'DELIVERY') continue;
+      leg.startsAt += extraMs;
+      leg.endsAt += extraMs;
+    }
+    mission.plannedArrivalAt += extraMs;
+    this.weatherDelayedSailings += 1;
+    this.rescheduleShipment(mission, shipment);
+  }
+
+  /**
+   * The consignment reaches the destination port and meets the checkpoint.
+   *
+   * The checkpoint is SYNTHETIC and is not a legal customs model; its delay was
+   * drawn at planning time and is already built into this event's instant, so
+   * all that happens here is that the paperwork is marked cleared, or the
+   * sailing is written off.
+   */
+  private onShipmentClear(missionId: string): void {
+    const mission = this.world.observed.missions.get(missionId);
+    if (!mission || mission.status === 'CANCELLED' || mission.status === 'COMPLETED') return;
+    const shipment = mission.shipmentId ? this.world.observed.shipments.get(mission.shipmentId) : undefined;
+    if (!shipment) return;
+
+    shipment.actualArrivalAt = this.clock;
+
+    if (this.sailingFailures.get(shipment.shipmentId) === true) {
+      shipment.status = 'FAILED';
+      shipment.customs.status = 'HELD';
+      shipment.failureReason =
+        'The consignment did not come off the vessel in a saleable state. SYNTHETIC outcome, not a recorded incident.';
+      this.shipmentsFailed += 1;
+
+      // Cargo that was picked and lost is waste, and it is attributed to the
+      // batch it came off so the figure lands somewhere accountable.
+      const lostKg = mission.loadedKg;
+      if (lostKg > 0) {
+        const first = mission.batchIds[0];
+        const truth = first ? this.world.truth.crops.get(first) : undefined;
+        if (truth) truth.lostKg += lostKg;
+      }
+
+      mission.status = 'CANCELLED';
+      this.missionsCancelled += 1;
+      this.queue.removeWhere((event) => {
+        const queuedMissionId = (event.payload as { missionId?: string }).missionId;
+        return queuedMissionId === mission.missionId && event.type === 'MISSION_ARRIVE';
+      });
+      return;
+    }
+
+    shipment.status = 'ARRIVED';
+    shipment.customs.status = 'CLEARED';
+    shipment.customs.clearedAt = this.clock;
+    if (shipment.customs.inspected) this.customsInspections += 1;
+  }
+
+  /** Re-queues the two remaining events of a sailing after its schedule moved. */
+  private rescheduleShipment(mission: DeliveryMission, shipment: MaritimeShipment): void {
+    const deliveryLeg = shipment.legs.find((leg) => leg.kind === 'DELIVERY');
+    this.queue.removeWhere((event) => {
+      const queuedMissionId = (event.payload as { missionId?: string }).missionId;
+      return queuedMissionId === mission.missionId && (event.type === 'SHIPMENT_CLEAR' || event.type === 'MISSION_ARRIVE');
+    });
+    if (deliveryLeg) this.schedule(deliveryLeg.startsAt, 'SHIPMENT_CLEAR', Priority.World, { missionId: mission.missionId });
+    this.schedule(mission.plannedArrivalAt, 'MISSION_ARRIVE', Priority.World, { missionId: mission.missionId });
+  }
+
+  private maritimeEffectMetrics(): MaritimeEffectMetrics {
+    let shippedKg = 0;
+    let totalCostXcd = 0;
+    for (const shipment of this.world.observed.shipments.values()) {
+      shippedKg += shipment.loadedKg;
+      totalCostXcd += shipment.cost.total.comparisonAmount;
+    }
+    return {
+      scopedLinks: this.world.maritime.links.length,
+      scopedPorts: this.world.maritime.ports.length,
+      shipmentsProposed: this.shipmentsProposed,
+      shipmentsApproved: this.shipmentsApproved,
+      shipmentsDelivered: this.shipmentsDelivered,
+      shipmentsFailed: this.shipmentsFailed,
+      shippedKg: Number(shippedKg.toFixed(2)),
+      weatherDelayedSailings: this.weatherDelayedSailings,
+      customsInspections: this.customsInspections,
+      totalCostXcd: Number(totalCostXcd.toFixed(2)),
+      demandsWithoutPublicRoute: this.noPublicRouteDemands.size,
+    };
+  }
+
+  /** Observable shipment view for one replay frame. */
+  private createShipmentFrame(): ControlRoomShipment[] {
+    return [...this.world.observed.shipments.values()]
+      .sort((a, b) => a.shipmentId.localeCompare(b.shipmentId))
+      .map((shipment) => ({
+        shipmentId: shipment.shipmentId,
+        missionId: shipment.missionId,
+        commitmentId: shipment.commitmentId,
+        demandId: shipment.demandId,
+        originIslandId: shipment.originIslandId,
+        destinationIslandId: shipment.destinationIslandId,
+        originPortId: shipment.route.originPortId,
+        destinationPortId: shipment.route.destinationPortId,
+        linkId: shipment.route.linkId,
+        operator: shipment.route.operator,
+        status: shipment.status,
+        capacityKg: shipment.capacityKg,
+        loadedKg: Number(shipment.loadedKg.toFixed(2)),
+        legs: shipment.legs.map((leg) => ({
+          ...leg,
+          from: { ...leg.from },
+          to: { ...leg.to },
+        })),
+        customs: { ...shipment.customs },
+        cost: {
+          freight: { ...shipment.cost.freight },
+          customsFee: { ...shipment.cost.customsFee },
+          total: { ...shipment.cost.total },
+        },
+        scheduledDepartureAt: shipment.scheduledDepartureAt,
+        scheduledArrivalAt: shipment.scheduledArrivalAt,
+        actualDepartureAt: shipment.actualDepartureAt,
+        actualArrivalAt: shipment.actualArrivalAt,
+        deliveredAt: shipment.deliveredAt,
+        failureReason: shipment.failureReason,
+        weatherDelayHours: shipment.weatherDelayHours,
+        networkProvenance: MARITIME_NETWORK_PROVENANCE,
+        operationsProvenance: MARITIME_OPERATIONS_PROVENANCE,
+      }));
+  }
+
+  /**
+   * Cross-island fills waiting on a human decision.
+   *
+   * The connected Product API bridge reads this, raises a real
+   * `INTER_ISLAND_COMMITMENT` approval for each one, and hands back an
+   * `INTER_ISLAND_COMMITMENT_APPROVED` effect only if every approver agrees.
+   * Nothing here is world state, so a proposal nobody approves simply expires.
+   */
+  get pendingInterIslandProposals(): readonly InterIslandProposalView[] {
+    return [...this.interIslandProposals.values()]
+      .map((entry) => ({ ...entry.view, lines: entry.view.lines.map((line) => ({ ...line })) }))
+      .sort((a, b) => a.proposedAt - b.proposedAt || a.proposalId.localeCompare(b.proposalId));
+  }
+
+  /**
+   * Looks for supply on another in-scope island for orders the local island has
+   * not covered.
+   *
+   * Connected mode only. In internal-policy mode the same decision is taken
+   * inside `planAllocation`, where local and regional supply are weighed
+   * together; here local matching belongs to the Product API, so the regional
+   * question is asked separately and its answer is a proposal rather than a
+   * commitment.
+   */
+  private onInterIslandReview(): void {
+    // Keep the daily cadence going regardless of what this pass finds.
+    this.schedule(this.clock + INTER_ISLAND_REVIEW_INTERVAL_MS, 'INTER_ISLAND_REVIEW', Priority.Actor, {});
+
+    const planner = this.policy.planInterIslandFill;
+    if (!planner || !this.policy.capabilities.coordinatesAcrossIslands) return;
+    if (this.world.maritime.links.length === 0) return;
+
+    const demands = [...this.world.observed.demands.values()]
+      .filter((demand) => demand.status === 'PENDING' || demand.status === 'COMMITTED')
+      .filter((demand) => demand.neededBy > this.clock)
+      .filter((demand) => !this.interIslandProposedDemandIds.has(demand.demandId))
+      .sort((a, b) => a.demandId.localeCompare(b.demandId));
+
+    for (const demand of demands) {
+      const buyer = this.world.buyers.get(demand.buyerId);
+      if (!buyer) continue;
+
+      // Whatever the Product API has already committed locally counts against
+      // the order, so a sailing is only ever proposed for the genuine gap.
+      let committedKg = 0;
+      for (const commitment of this.world.observed.commitments.values()) {
+        if (commitment.demandId !== demand.demandId || commitment.status === 'CANCELLED') continue;
+        committedKg += commitment.allocations.reduce((total, allocation) => total + allocation.quantityKg, 0);
+      }
+      const shortfallKg = demand.quantity.value - committedKg;
+      if (shortfallKg <= 0) continue;
+
+      const fill = planner(this.policyContext(), demand, buyer.islandId, shortfallKg);
+      if (!fill) {
+        this.recordNoPublicRouteIfNeeded(demand, committedKg);
+        continue;
+      }
+
+      const route = this.validateInterIslandRoute(demand, fill.proposal.originIslandId, fill.proposal.route);
+      if (!route) continue;
+
+      const quantityKg = Number(fill.allocations.reduce((total, line) => total + line.quantityKg, 0).toFixed(2));
+      if (quantityKg <= 0) continue;
+
+      const proposalId = this.ids.next();
+      this.interIslandProposals.set(proposalId, {
+        fill,
+        view: {
+          proposalId,
+          demandId: demand.demandId,
+          buyerId: demand.buyerId,
+          originIslandId: route.originIslandId,
+          destinationIslandId: route.destinationIslandId,
+          linkId: route.linkId,
+          originPortId: route.originPortId,
+          destinationPortId: route.destinationPortId,
+          operator: route.operator,
+          seaLegHours: route.seaLegHours,
+          journeyHoursSource: route.journeyHoursSource,
+          lines: fill.allocations.map((allocation) => ({ ...allocation })),
+          quantityKg,
+          rationale: fill.proposal.rationale,
+          proposedAt: this.clock,
+        },
+      });
+      this.interIslandProposedDemandIds.add(demand.demandId);
+      this.shipmentsProposed += 1;
+
+      this.decisions.push({
+        at: this.clock,
+        kind: 'HARVEST_PROPOSE_INTER_ISLAND',
+        summary:
+          `Local supply left ${shortfallKg.toFixed(0)} kg short, so ${quantityKg.toFixed(0)} kg was proposed from ` +
+          `${route.originIslandId} on ${route.operator}, pending inter-island approval.`,
+        evidence: {
+          demandId: demand.demandId,
+          proposalId,
+          originIslandId: route.originIslandId,
+          destinationIslandId: route.destinationIslandId,
+          linkId: route.linkId,
+          originPortId: route.originPortId,
+          destinationPortId: route.destinationPortId,
+          seaLegHours: route.seaLegHours,
+          journeyHoursSource: route.journeyHoursSource,
+          quantityKg,
+          rationale: fill.proposal.rationale,
+          approvalSubjectType: 'INTER_ISLAND_COMMITMENT',
+        },
+      });
+    }
+  }
+
+  /**
+   * Turns an approved proposal into a real commitment and a real sailing.
+   *
+   * The commitment is created already approved, because the approval it needed
+   * has just happened outside the engine, through the Product API, from named
+   * human participants. Anything short of that never reaches here.
+   */
+  private applyInterIslandApproved(
+    effect: Extract<ProductSimulationEffect, { type: 'INTER_ISLAND_COMMITMENT_APPROVED' }>,
+  ): ProductEffectResult {
+    const entry = this.interIslandProposals.get(effect.proposalId);
+    if (!entry) return { applied: false, reason: 'REJECTED' };
+    const demand = this.world.observed.demands.get(entry.view.demandId);
+    if (!demand || demand.status === 'FULFILLED' || demand.status === 'UNMET') {
+      return { applied: false, reason: 'REJECTED' };
+    }
+    const route = this.validateInterIslandRoute(demand, entry.view.originIslandId, entry.fill.proposal.route);
+    if (!route) return { applied: false, reason: 'REJECTED' };
+
+    // Revalidate the quantities exactly as the internal path does. An approval
+    // decided two hours ago is not a licence to promise crop that has since
+    // been picked.
+    const validated: Commitment['allocations'] = [];
+    for (const allocation of entry.fill.allocations) {
+      const batch = this.world.observed.batches.get(allocation.batchId);
+      if (!batch) continue;
+      const alreadyCommitted = this.committedKgForBatch(allocation.batchId);
+      const latest = batch.observations.at(-1);
+      const observedCeiling = latest ? latest.estimatedYieldKg : batch.areaHectares * 1_500;
+      const headroom = Math.max(0, observedCeiling - alreadyCommitted - batch.confirmedHarvestedKg);
+      const granted = Number(Math.min(allocation.quantityKg, headroom).toFixed(2));
+      if (granted <= 0) continue;
+      validated.push({ batchId: allocation.batchId, farmId: allocation.farmId, quantityKg: Number(granted.toFixed(2)) });
+    }
+    if (validated.length === 0) return { applied: false, reason: 'REJECTED' };
+
+    this.interIslandProposals.delete(effect.proposalId);
+
+    const interIsland: InterIslandCommitmentDetail = {
+      originIslandId: route.originIslandId,
+      destinationIslandId: route.destinationIslandId,
+      route,
+      approvalSubjectType: 'INTER_ISLAND_COMMITMENT',
+    };
+    const commitment: Commitment = {
+      commitmentId: this.ids.next(),
+      demandId: demand.demandId,
+      allocations: validated,
+      committedAt: this.clock,
+      approvedAt: this.clock,
+      status: 'APPROVED',
+      interIsland,
+    };
+    this.world.observed.commitments.set(commitment.commitmentId, commitment);
+    this.commitmentsProposed += 1;
+    this.commitmentsApproved += 1;
+    this.shipmentsApproved += 1;
+    this.totalPromisedKg += validated.reduce((total, allocation) => total + allocation.quantityKg, 0);
+    this.seaBatchIdsByCommitment.set(commitment.commitmentId, validated.map((allocation) => allocation.batchId));
+    if (demand.status === 'PENDING') demand.status = 'COMMITTED';
+
+    this.planMaritimeShipment(commitment, interIsland, validated);
+
+    const shipment = [...this.world.observed.shipments.values()].find(
+      (candidate) => candidate.commitmentId === commitment.commitmentId,
+    );
+    if (!shipment) return { applied: false, reason: 'REJECTED' };
+    return { applied: true, reason: 'APPLIED', simulationMissionId: shipment.missionId, simulationShipmentId: shipment.shipmentId };
   }
 
   // ------------------------------------------------------------------
@@ -1840,6 +3063,7 @@ export class SimulationEngine {
       plannedArrivalAt: mission.plannedArrivalAt,
       actualArrivalAt: mission.actualArrivalAt,
       loadedKg: Number(mission.loadedKg.toFixed(2)),
+      mode: mission.mode,
     }));
 
     const batches: ControlRoomBatch[] = [...this.world.observed.batches.values()].map((batch) => {
@@ -1885,6 +3109,10 @@ export class SimulationEngine {
       demands,
       disruptions: projection.disruptions,
       degradedRoadSegmentIds: [...this.world.observed.degradedRoadSegmentIds].sort(),
+      weather: this.createWeatherFrame(),
+      // Omitted rather than sent empty, so a one-island replay is byte-for-byte
+      // the shape it was before issue #40.
+      ...(this.world.observed.shipments.size > 0 ? { shipments: this.createShipmentFrame() } : {}),
       newDecisions,
       totals: {
         acceptedKg: Number(acceptedKg.toFixed(2)),
@@ -1896,6 +3124,43 @@ export class SimulationEngine {
         observationRequests: this.observationRequestCount,
       },
     };
+  }
+
+  /**
+   * Observable weather for every island in the run, as of this frame.
+   *
+   * Today's realised conditions plus today's forecast, and nothing else. A
+   * replay is handed to a browser, so a realised value for a day the frame has
+   * not reached would publish hidden truth to anybody with developer tools
+   * open. Both halves carry their own provenance because they are different
+   * kinds of claim: one is a synthetic record, the other a synthetic prediction.
+   * The record additionally carries `evidenceType`, which says whether the
+   * conditions it records were generated or taken from a recorded reference —
+   * a third distinction, and the one issue #90 adds.
+   */
+  private createWeatherFrame(): ControlRoomWeather[] {
+    const observable = this.observableWeather;
+    const frames: ControlRoomWeather[] = [];
+    for (const islandId of this.weatherIslandIds) {
+      const current = observable.current(islandId);
+      if (!current) continue;
+      frames.push({
+        islandId,
+        date: current.date,
+        condition: current.condition,
+        rainMm: current.rainMm,
+        windKph: current.windKph,
+        windFromDegrees: current.windFromDegrees,
+        cloudCoverFraction: current.cloudCoverFraction,
+        tempBand: current.tempBand,
+        provenance: REALISED_WEATHER_PROVENANCE,
+        evidenceType: current.evidenceType,
+        ...(current.recordedDate ? { recordedDate: current.recordedDate } : {}),
+        forecastProvenance: FORECAST_PROVENANCE,
+        forecast: observable.forecast(islandId).map((day) => ({ ...day })),
+      });
+    }
+    return frames;
   }
 
   private recordFrame(eventType: string): void {
@@ -1974,6 +3239,16 @@ export class SimulationEngine {
           islandId: transporter.islandId,
         })),
       ],
+      weatherLegend: WEATHER_LEGEND,
+      maritime: {
+        ...this.world.maritime,
+        islandIds: [...this.world.maritime.islandIds],
+        ports: this.world.maritime.ports.map((port) => ({ ...port })),
+        links: this.world.maritime.links.map((link) => ({ ...link })),
+        rates: this.world.maritime.rates.map((rate) => ({ ...rate, islandIds: [...rate.islandIds] })),
+      },
+      maritimeAttributions: maritimeAttributions(this.world.maritime),
+      maritimeDisclaimer: MARITIME_SYNTHETIC_DISCLAIMER,
       evidenceLabel: EVIDENCE_LABEL,
     };
   }
@@ -2022,6 +3297,8 @@ export class SimulationEngine {
       observationRequests: this.observationRequestCount,
       causeCounts,
       eventsProcessed: this.eventsProcessed,
+      weather: this.weatherEffectMetrics(),
+      maritime: this.maritimeEffectMetrics(),
     };
 
     return {
@@ -2040,6 +3317,17 @@ export class SimulationEngine {
       timeline: this.captureFrames ? { scene: this.buildScene(), frames: this.frames } : undefined,
     };
   }
+}
+
+/**
+ * The currency one manifest island uses, falling back to the comparison one.
+ *
+ * A scenario may name an island the manifest does not carry, and quoting a
+ * price in a currency this package cannot convert would be worse than quoting
+ * it in XCD and saying so.
+ */
+function islandCurrency(islandId: string): string {
+  return CARIBBEAN_ISLANDS_V1.find((island) => island.islandId === islandId)?.currency ?? COMPARISON_CURRENCY;
 }
 
 /** Clamps into [0, 1]; rates that drift outside it are a bug worth surfacing as a bound. */

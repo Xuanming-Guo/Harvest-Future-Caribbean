@@ -30,6 +30,13 @@ npm run dev:api
 The local database URL is a non-production default. Set `DATABASE_URL` to use a
 different PostgreSQL or Supabase database. Never commit real credentials.
 
+For hosted startup, `npm run start --workspace @harvest/api` applies committed
+migrations and runs `src/index.ts` with the `tsx` loader. Both shared workspaces
+export TypeScript source, so plain Node cannot load their `.js` import
+specifiers. The deployment build generates clients and validates compilation;
+startup does not require `dist`. See [`../../docs/hosting.md`](../../docs/hosting.md)
+for the install and environment settings.
+
 Use [`../../docs/simulation_api_local_testing.md`](../../docs/simulation_api_local_testing.md)
 for copy-ready authentication, saved-run, replay, determinism, derived-run,
 paired-run, snapshot and SSE checks with expected values. The root `npm run

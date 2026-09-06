@@ -1,7 +1,7 @@
 /** Saved-run Product API client for the separate simulation control room. */
 
 import { createHarvestClient, newIdempotencyKey, type ApiSchema } from "@harvest/shared";
-import type { ControlRoomFrame, InjectedDisruption, ReplayTimeline } from "@harvest/simulation";
+import type { ControlRoomFrame, ControlRoomWeather, InjectedDisruption, ReplayTimeline } from "@harvest/simulation";
 
 /** The broad synthetic regional scenario opens first; Saint Lucia remains selectable as the detailed benchmark. */
 export const DEFAULT_SCENARIO = "caribbean-islands-v1";
@@ -11,6 +11,9 @@ export const PARTICIPANT_WEBSITE_URL = process.env.NEXT_PUBLIC_WEBSITE_URL ?? "h
 
 export type PolicyName = "BASELINE" | "HARVEST";
 export type DecisionMode = "DETERMINISTIC" | "LLM_ASSISTED";
+/** Per-run harvest-estimation method; never a global control-room setting. */
+export type EstimationMode = "LEARNED_MODEL" | "DETERMINISTIC_FALLBACK";
+export const DEFAULT_ESTIMATION_MODE: EstimationMode = "DETERMINISTIC_FALLBACK";
 export type SavedRun = ApiSchema<"SimulationRun">;
 export type SimulationScenario = ApiSchema<"SimulationScenario">;
 
@@ -35,6 +38,9 @@ function unwrap<T>(result: { data?: T; error?: unknown; response: Response }): T
 
 export async function ensureOperationsSession() {
   if (accessToken) return;
+  if (process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_HARVEST_DEMO_PERSONAS !== "true") {
+    throw new Error("Demo persona sign-in is disabled in this deployment.");
+  }
   const response = await fetch(`${PRODUCT_API_URL}/dev/session`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -66,6 +72,7 @@ export async function createSavedRun(input: {
   policy: PolicyName;
   seed: number;
   decisionMode: DecisionMode;
+  estimationMode: EstimationMode;
   disruptions?: InjectedDisruption[];
   scope?: { mode: "ALL" } | { mode: "SELECTED"; islandIds: string[] };
 }) {
@@ -77,6 +84,7 @@ export async function createSavedRun(input: {
       policy: input.policy,
       seed: input.seed,
       decisionMode: input.decisionMode,
+      estimationMode: input.estimationMode,
       scope: input.scope ?? { mode: "SELECTED", islandIds: ["saint-lucia"] },
       disruptions: input.disruptions,
     },
@@ -167,6 +175,38 @@ export async function createParticipantSession(runId: string, productActorId: st
     },
     body: { productActorId },
   }));
+}
+
+/**
+ * One line of weather for the masthead, read from the saved frame alone.
+ *
+ * Everything needed is on the frame the replay already loaded: no request, no
+ * live weather service, and nothing about a day the replay has not reached.
+ * Issue #39 owns drawing this on the globe; this is the text the room can carry
+ * meanwhile, and it is also the check that a saved replay really does contain
+ * enough weather evidence to render from.
+ *
+ * Returns null for a replay saved before weather existed, so an older run still
+ * opens.
+ */
+export function weatherHeadline(frame: ControlRoomFrame): string | null {
+  const islands = frame.weather ?? [];
+  if (!islands.length) return null;
+  const stormy = islands.filter((island) => island.condition === "STORM");
+  if (stormy.length) return `storm over ${stormy.map((island) => island.islandId).join(", ")}`;
+  const wet = islands.filter((island) => island.condition === "RAIN");
+  if (wet.length) return `rain over ${wet.length} of ${islands.length} island${islands.length === 1 ? "" : "s"}`;
+  const forecastStorm = islands.find((island) => island.forecast.some((day) => day.condition === "STORM"));
+  if (forecastStorm) {
+    const day = forecastStorm.forecast.find((entry) => entry.condition === "STORM");
+    return `storm forecast for ${forecastStorm.islandId} on ${day?.date}`;
+  }
+  return `settled over ${islands.length} island${islands.length === 1 ? "" : "s"}`;
+}
+
+/** The weather carried for one island on this frame, or null if the run has none. */
+export function islandWeatherAt(frame: ControlRoomFrame, islandId: string): ControlRoomWeather | null {
+  return (frame.weather ?? []).find((island) => island.islandId === islandId) ?? null;
 }
 
 /** Human wording for an engine or connected-agent event, used by the feed. */

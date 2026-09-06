@@ -1,0 +1,41 @@
+
+Scenario: caribbean-islands-v1
+Islands: saint-lucia, martinique
+SYNTHETIC. Manifest identity and licensed public places are offline reference inputs; every actor, quantity, yield, weather, speed, disruption and outcome is synthetic. A nearby reference place does not imply that the real organisation participates in Harvest.
+
+BASELINE  seed=42         fulfilled=  0.0%  localSupply=  8.4%  waste=    993kg  substituted=   1504kg  demands= 0/11  events=   97  digest=9390b59694da9514  causes=NO_READY_SUPPLY:7,MISSION_LATE:1,SPOILED_BEFORE_PICKUP:3  sailings=0/0 delivered=0 failed=0 shipped=0kg
+HARVEST   seed=42         fulfilled=  9.1%  localSupply=  8.4%  waste=    977kg  substituted=   1524kg  demands= 1/11  events=  127  digest=1fb9071fdcafef3b  causes=NO_READY_SUPPLY:7,APPROVAL_REJECTED:1,MISSION_LATE:1,SPOILED_BEFORE_PICKUP:1  sailings=0/0 delivered=0 failed=0 shipped=0kg
+BASELINE  seed=8675309    fulfilled=  8.3%  localSupply= 17.9%  waste=   1030kg  substituted=   1791kg  demands= 1/12  events=   99  digest=2960d1bc62a69480  causes=NO_READY_SUPPLY:6,MISSION_LATE:1,SPOILED_BEFORE_PICKUP:4  sailings=0/0 delivered=0 failed=0 shipped=0kg
+HARVEST   seed=8675309    fulfilled=  8.3%  localSupply= 13.1%  waste=   1053kg  substituted=   1844kg  demands= 1/12  events=  137  digest=e5a227edf7e07bd6  causes=NO_READY_SUPPLY:5,APPROVAL_REJECTED:3,SHIPMENT_FAILED:1,INSUFFICIENT_SUPPLY:2  sailings=1/1 delivered=0 failed=1 shipped=71kg
+BASELINE  seed=7          fulfilled=  0.0%  localSupply=  3.3%  waste=    874kg  substituted=   2779kg  demands= 0/12  events=   92  digest=74550c0fef73dfc2  causes=NO_READY_SUPPLY:10,SPOILED_BEFORE_PICKUP:2  sailings=0/0 delivered=0 failed=0 shipped=0kg
+HARVEST   seed=7          fulfilled=  0.0%  localSupply=  1.3%  waste=    908kg  substituted=   2837kg  demands= 0/12  events=  108  digest=9034aa0e0bfc5e91  causes=NO_READY_SUPPLY:6,APPROVAL_REJECTED:5,INSUFFICIENT_SUPPLY:1  sailings=0/0 delivered=0 failed=0 shipped=0kg
+BASELINE  seed=19         fulfilled=  8.3%  localSupply=  6.9%  waste=   1252kg  substituted=   1815kg  demands= 1/12  events=   97  digest=095deb4538ceccef  causes=NO_READY_SUPPLY:8,MISSION_LATE:2,INSUFFICIENT_SUPPLY:1  sailings=0/0 delivered=0 failed=0 shipped=0kg
+HARVEST   seed=19         fulfilled=  0.0%  localSupply=  1.4%  waste=   1284kg  substituted=   1933kg  demands= 0/12  events=  110  digest=76a38c55833fab8b  causes=NO_READY_SUPPLY:6,APPROVAL_REJECTED:4,INSUFFICIENT_SUPPLY:2  sailings=0/1 delivered=0 failed=0 shipped=0kg
+BASELINE  seed=23         fulfilled=  7.7%  localSupply= 12.0%  waste=   1276kg  substituted=   1961kg  demands= 1/13  events=   95  digest=dec4b880a8c0de6c  causes=NO_READY_SUPPLY:11,SPOILED_BEFORE_PICKUP:1  sailings=0/0 delivered=0 failed=0 shipped=0kg
+HARVEST   seed=23         fulfilled=  0.0%  localSupply=  6.1%  waste=   1354kg  substituted=   2093kg  demands= 0/13  events=  111  digest=7e937aa4850ddc67  causes=NO_READY_SUPPLY:11,MISSION_LATE:1,INSUFFICIENT_SUPPLY:1  sailings=0/0 delivered=0 failed=0 shipped=0kg
+BASELINE  seed=31         fulfilled=  0.0%  localSupply=  1.7%  waste=   1076kg  substituted=   2106kg  demands= 0/13  events=   96  digest=10825afb7242b159  causes=NO_READY_SUPPLY:9,SPOILED_BEFORE_PICKUP:3,INSUFFICIENT_SUPPLY:1  sailings=0/0 delivered=0 failed=0 shipped=0kg
+HARVEST   seed=31         fulfilled=  7.7%  localSupply=  5.7%  waste=   1029kg  substituted=   2019kg  demands= 1/13  events=  119  digest=d40fbae448b796fa  causes=NO_READY_SUPPLY:9,APPROVAL_REJECTED:2,INSUFFICIENT_SUPPLY:1  sailings=0/0 delivered=0 failed=0 shipped=0kg
+BASELINE  seed=101        fulfilled=  0.0%  localSupply= 12.9%  waste=    909kg  substituted=   1829kg  demands= 0/13  events=   98  digest=70d6c732f711d01d  causes=NO_READY_SUPPLY:7,SPOILED_BEFORE_PICKUP:6  sailings=0/0 delivered=0 failed=0 shipped=0kg
+HARVEST   seed=101        fulfilled=  0.0%  localSupply=  3.1%  waste=   1015kg  substituted=   2034kg  demands= 0/13  events=  115  digest=8672f60e4f085ca3  causes=NO_READY_SUPPLY:7,APPROVAL_REJECTED:5,INSUFFICIENT_SUPPLY:1  sailings=0/0 delivered=0 failed=0 shipped=0kg
+BASELINE  seed=202        fulfilled= 18.2%  localSupply= 34.1%  waste=    862kg  substituted=   1315kg  demands= 2/11  events=   99  digest=7e5c2309634a9278  causes=NO_READY_SUPPLY:4,MISSION_LATE:1,SPOILED_BEFORE_PICKUP:4  sailings=0/0 delivered=0 failed=0 shipped=0kg
+HARVEST   seed=202        fulfilled= 27.3%  localSupply= 19.7%  waste=    954kg  substituted=   1548kg  demands= 3/11  events=  133  digest=9d7cb22758991e6b  causes=NO_READY_SUPPLY:3,APPROVAL_REJECTED:3,INSUFFICIENT_SUPPLY:2  sailings=1/2 delivered=1 failed=0 shipped=53kg
+BASELINE  seed=303        fulfilled=  0.0%  localSupply=  8.9%  waste=    861kg  substituted=   1691kg  demands= 0/10  events=   90  digest=a35d4a1c9a09f68e  causes=NO_READY_SUPPLY:5,MISSION_LATE:1,SPOILED_BEFORE_PICKUP:3,INSUFFICIENT_SUPPLY:1  sailings=0/0 delivered=0 failed=0 shipped=0kg
+HARVEST   seed=303        fulfilled=  0.0%  localSupply=  2.1%  waste=    907kg  substituted=   1747kg  demands= 0/10  events=  101  digest=525fd46714f328dd  causes=NO_READY_SUPPLY:6,APPROVAL_REJECTED:1,INSUFFICIENT_SUPPLY:3  sailings=0/0 delivered=0 failed=0 shipped=0kg
+BASELINE  seed=404        fulfilled=  0.0%  localSupply=  7.4%  waste=   1221kg  substituted=   1647kg  demands= 0/10  events=   91  digest=14edfbe609e89f18  causes=NO_READY_SUPPLY:7,SPOILED_BEFORE_PICKUP:2,INSUFFICIENT_SUPPLY:1  sailings=0/0 delivered=0 failed=0 shipped=0kg
+HARVEST   seed=404        fulfilled=  0.0%  localSupply=  2.4%  waste=   1281kg  substituted=   1736kg  demands= 0/10  events=  115  digest=cdc1119e6aff705b  causes=NO_READY_SUPPLY:6,APPROVAL_REJECTED:2,INSUFFICIENT_SUPPLY:2  sailings=0/0 delivered=0 failed=0 shipped=0kg
+
+Paired comparison (same world, policy is the only difference):
+  seed=42  fulfilment +9.1pp  waste -16kg  substituted +20kg
+  seed=8675309  fulfilment +0.0pp  waste +23kg  substituted +53kg
+  seed=7  fulfilment +0.0pp  waste +34kg  substituted +58kg
+  seed=19  fulfilment -8.3pp  waste +31kg  substituted +119kg
+  seed=23  fulfilment -7.7pp  waste +78kg  substituted +132kg
+  seed=31  fulfilment +7.7pp  waste -46kg  substituted -87kg
+  seed=101  fulfilment +0.0pp  waste +106kg  substituted +206kg
+  seed=202  fulfilment +9.1pp  waste +92kg  substituted +233kg
+  seed=303  fulfilment +0.0pp  waste +45kg  substituted +56kg
+  seed=404  fulfilment +0.0pp  waste +60kg  substituted +89kg
+
+SYNTHETIC SIMULATED COUNTERFACTUAL. Produced by a seeded simulation, not measured from a deployed system. Not evidence of real-world impact.
+Completed 20 run(s) in 50 ms.
+

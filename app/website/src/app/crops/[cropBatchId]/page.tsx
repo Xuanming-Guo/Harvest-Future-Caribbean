@@ -10,6 +10,7 @@ import { DecisionExplanation, decisionReasonLabel } from "@/components/decision-
 import { DeviceUpdateList, OfflineHint, useOnlineStatus, useOutbox } from "@/components/offline";
 import { useSession } from "@/components/providers";
 import { CropStandardCard } from "@/components/crop-standard-card";
+import { ForecastMethod } from "@/components/forecast-method";
 import { Badge, Card, ErrorState, LoadingState, PageHeader, SectionTitle } from "@/components/ui";
 import { ApiProblem, api } from "@/lib/api";
 import { compactId, dateInputOffset, formatDate, formatPercent, titleCase } from "@/lib/format";
@@ -255,6 +256,7 @@ export default function CropDetailPage() {
               <div className="split"><span>Expected harvest</span><strong>{formatDate(prediction.data.harvestWindow.start, false)} - {formatDate(prediction.data.harvestWindow.end, false)}</strong></div>
               <div className="split"><span>Confidence</span><strong>{formatPercent(prediction.data.confidence)}</strong></div>
               <div className="split"><span>Evidence</span><strong>{titleCase(prediction.data.provenance)}</strong></div>
+              <ForecastMethod prediction={prediction.data} />
               <div className="split"><span>Forecast updated</span><strong>{formatDate(prediction.data.generatedAt)}</strong></div>
               <div className="split"><span>Verification</span><Badge>{batch.data.verificationStatus ?? "UNVERIFIED"}</Badge></div>
               {prediction.data.warnings.length > 0 && <div className="notice"><strong>Please check</strong>{prediction.data.warnings.join("; ")}</div>}

@@ -11,6 +11,8 @@
 export { SimulationEngine, UNMET_CAUSES, runScenario } from './engine.js';
 export type {
   CoordinationMode,
+  InterIslandProposalView,
+  MaritimeEffectMetrics,
   DisruptionMissionImpact,
   EngineOptions,
   InjectedDisruption,
@@ -23,20 +25,103 @@ export type {
   UnmetCause,
 } from './engine.js';
 
-export { compactReplayTimeline, frameAt, interpolateAlongPath, missionPositionAt } from './replay.js';
+export { compactReplayTimeline, frameAt, interpolateAlongPath, missionPositionAt, vesselPositionAt } from './replay.js';
 export type {
   ControlRoomBatch,
   ControlRoomDemand,
   ControlRoomFrame,
   ControlRoomMission,
   ControlRoomScene,
+  ControlRoomShipment,
   ControlRoomTotals,
+  ControlRoomWeather,
   ReplayTimeline,
   SimulationAgentAction,
+  SimulationEstimationMode,
   SimulationOperationsSnapshot,
   SimulationOrderOutcomes,
   SimulationParticipant,
 } from './replay.js';
+
+export {
+  CLOUD_DAY_MM,
+  FORECAST_HORIZON_DAYS,
+  FORECAST_PROVENANCE,
+  RAIN_DAY_MM,
+  REALISED_WEATHER_PROVENANCE,
+  STORM_DAY_MM,
+  STORM_WIND_KPH,
+  WEATHER_LEGEND,
+  WeatherModel,
+  classifyCondition,
+  weatherKey,
+} from './world/weather.js';
+export type { ForecastDay, RealisedWeather, TempBand, WeatherCondition, WeatherLegend, WeatherReading } from './world/weather.js';
+export {
+  REFERENCE_CLOUD_FRACTION,
+  REFERENCE_COOL_MAX_C,
+  REFERENCE_HOT_MIN_C,
+  REFERENCE_RAIN_MM,
+  REFERENCE_STORM_RAIN_MM,
+  REFERENCE_STORM_WIND_KPH,
+  REFERENCE_WEATHER_EVIDENCE,
+  SAINT_LUCIA_WEATHER_REFERENCE,
+  SYNTHETIC_WEATHER_EVIDENCE,
+  buildWeatherReferenceSeries,
+  classifyReferenceCondition,
+  loadWeatherReference,
+  pickReferenceYear,
+  referenceTempBand,
+  toReferenceReading,
+} from './world/weather-reference.js';
+export type {
+  ReferenceDayReading,
+  WeatherEvidenceType,
+  WeatherReferenceDay,
+  WeatherReferenceFile,
+  WeatherReferenceSeries,
+  WeatherReferenceStation,
+} from './world/weather-reference.js';
+
+export {
+  COMPARISON_CURRENCY,
+  CUSTOMS_BASE_DELAY_HOURS,
+  CUSTOMS_DISCLAIMER,
+  CUSTOMS_FIXED_FEE_XCD,
+  CUSTOMS_INSPECTION_EXTRA_HOURS,
+  CUSTOMS_INSPECTION_PROBABILITY,
+  FREIGHT_PER_KG_XCD,
+  MARITIME_NETWORK_V1,
+  MARITIME_SYNTHETIC_DISCLAIMER,
+  PORT_HANDLING_HOURS,
+  SAILING_CAPACITY_KG,
+  SAILING_FAILURE_PROBABILITY,
+  SYNTHETIC_SEA_LEG_HOURS,
+  bestRouteBetween,
+  findPort,
+  findRate,
+  maritimeAttributions,
+  portPosition,
+  portsForIsland,
+  reachableIslandIds,
+  routesBetween,
+  scopeMaritimeNetwork,
+  seaLegHours,
+  shipmentCostXcd,
+  toDualCurrency,
+} from './world/maritime.js';
+export type {
+  DualCurrencyAmount,
+  MaritimeAttribution,
+  MaritimeExchangeRate,
+  MaritimeLink,
+  MaritimeNetworkFile,
+  MaritimePort,
+  MaritimeReference,
+  MaritimeRoute,
+  ScopedMaritimeNetwork,
+  ShipmentCostLines,
+} from './world/maritime.js';
 
 export { EventQueue, Priority } from './core/queue.js';
 export type { ScheduledEvent } from './core/queue.js';
@@ -53,8 +138,8 @@ export { CARIBBEAN_REFERENCE_PLACES_V1, CARIBBEAN_REFERENCE_DATA_SOURCES_V1, ref
 export type { Scenario, ScenarioContext } from './scenario/types.js';
 
 export { baselinePolicy } from './policy/baseline.js';
-export { harvestPolicy } from './policy/harvest.js';
-export type { CoordinationPolicy, DecisionRecord, PolicyCapabilities, PolicyContext } from './policy/types.js';
+export { MIN_INTER_ISLAND_SHIPMENT_KG, harvestPolicy, interIslandTransitHours } from './policy/harvest.js';
+export type { CoordinationPolicy, DecisionRecord, InterIslandFill, InterIslandProposal, PolicyCapabilities, PolicyContext } from './policy/types.js';
 
 export { assertNoTruthLeak, toObservableWorld, worldDigest } from './world/observable.js';
 export type { ObservableWorldView } from './world/observable.js';
