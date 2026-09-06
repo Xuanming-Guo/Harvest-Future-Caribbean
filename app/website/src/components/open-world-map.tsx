@@ -221,7 +221,11 @@ export function OpenWorldMap({ world, mission, role, onClearRoute, onSceneChange
   const sceneLayer = useRef<HTMLDivElement>(null);
   const mapRoot = useRef<HTMLDivElement>(null);
   const entryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (entryTimer.current) clearTimeout(entryTimer.current); }, []);
+  const focusFrame = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (entryTimer.current) clearTimeout(entryTimer.current);
+    if (focusFrame.current !== null) cancelAnimationFrame(focusFrame.current);
+  }, []);
   const [dragging, setDragging] = useState(false);
   const { stageRef, viewport, mapView, setMapView, clampView, inertiaFrame } = useIslandCamera(12);
   const gesture = useRef<{
@@ -336,9 +340,11 @@ export function OpenWorldMap({ world, mission, role, onClearRoute, onSceneChange
       setSelectedNodeId(undefined);
       onSceneChange?.(false);
       entryTimer.current = null;
-      requestAnimationFrame(() => {
+      if (focusFrame.current !== null) cancelAnimationFrame(focusFrame.current);
+      focusFrame.current = requestAnimationFrame(() => {
         const place = Array.from(mapRoot.current?.querySelectorAll<HTMLButtonElement>("[data-world-node]") ?? []).find(button => button.dataset.worldNode === selectedNodeId);
         (returnFocus.current?.isConnected ? returnFocus.current : place)?.focus({ preventScroll: true });
+        focusFrame.current = null;
       });
     };
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) finish();
