@@ -58,6 +58,16 @@ The extended demand book and weather horizon change the world. Historical
 reports below use their original 21-day horizon and must not be read as a
 controlled before/after comparison of the forward-promise policy alone.
 
+## Connected Product outcome evidence (#53)
+
+`2026-09-06-connected-outcomes.json` records two independently repeated runs for
+each hero seed and every order's final status, quantities and cause. Seed 42 has
+3 fulfilled, 3 partial and 5 unfulfilled orders; seed 8675309 has 1 fulfilled,
+8 partial and 3 unfulfilled. Neither has pending orders. Final Product snapshots,
+replay statuses and engine counts agree. These connected outcomes use Product
+status definitions, distinct from standalone buyer-threshold scoring. See
+[the investigation](../../docs/fulfilment-investigation.md) for limitations.
+
 ## Historical reports (before the settlement window)
 
 ## Weather changed the world again, and it cost Harvest most

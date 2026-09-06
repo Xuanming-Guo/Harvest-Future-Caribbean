@@ -1145,6 +1145,13 @@ missing event or apply an event whose schema it cannot validate.
 | Sailing scheduled / `MARITIME_SHIPMENT_SCHEDULED` | Stores the consignment, its three legs and its synthetic customs checkpoint | Schedules departure, the sea leg, the checkpoint and delivery | Control room draws the sea route and a vessel; order page lists the legs |
 | Payment confirmed / `PAYMENT_CONFIRMED` | Stores `paidAt` and the buyer's reference; no other state changes | None; the payload is settlement evidence only | Farmer money-owed total drops and the order shows paid |
 
+Connected runs consume the existing `ORDER_FULFILLED`,
+`ORDER_PARTIALLY_FULFILLED` and `ORDER_REJECTED` events as the authoritative
+status for their mapped demand. They retain that status through subsequent
+deadline and settlement events. Accepted kilograms still come only from
+`DELIVERY_ACCEPTED`, so the order event never counts produce twice. The
+standalone paired-policy scoring rule is unchanged.
+
 The full event list and payload purpose is in
 [`EVENT_CATALOGUE.md`](../contracts/events/EVENT_CATALOGUE.md).
 

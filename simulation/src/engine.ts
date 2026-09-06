@@ -141,6 +141,10 @@ export type ProductSimulationEffect =
       rejectedKg: number;
     })
   | (ProductEffectEnvelope & {
+      type: 'ORDER_FULFILLED' | 'ORDER_PARTIALLY_FULFILLED' | 'ORDER_REJECTED';
+      demandId: string;
+    })
+  | (ProductEffectEnvelope & {
       type: 'ALLOCATION_INVALIDATED' | 'ORDER_CANCELLED';
       demandId: string;
     })
@@ -571,6 +575,7 @@ export class SimulationEngine {
   private decisionsAtLastFrame = 0;
   private readonly appliedProductEventIds = new Set<string>();
   private lastProductCursor = 0n;
+  private readonly productDemandOutcomes = new Map<string, BuyerDemand['status']>();
   private readonly commitmentByDemandId = new Map<string, string>();
   private readonly missionByProductId = new Map<string, string>();
   /** Safe causal facts for the Product bridge; severity and other truth stay private. */
@@ -2102,6 +2107,17 @@ export class SimulationEngine {
         return this.applyMissionDelayed(effect);
       case 'DELIVERY_ACCEPTED':
         return this.applyDeliveryAccepted(effect);
+      case 'ORDER_FULFILLED':
+      case 'ORDER_PARTIALLY_FULFILLED':
+      case 'ORDER_REJECTED': {
+        const demand = this.world.observed.demands.get(effect.demandId);
+        if (!demand) return { applied: false, reason: 'REJECTED' };
+        const status = effect.type === 'ORDER_FULFILLED' ? 'FULFILLED'
+          : effect.type === 'ORDER_PARTIALLY_FULFILLED' ? 'PARTIALLY_FULFILLED' : 'UNMET';
+        this.productDemandOutcomes.set(effect.demandId, status);
+        demand.status = status;
+        return { applied: true, reason: 'APPLIED' };
+      }
       case 'INTER_ISLAND_COMMITMENT_APPROVED':
         return this.applyInterIslandApproved(effect);
       case 'ALLOCATION_INVALIDATED':
@@ -2285,6 +2301,14 @@ export class SimulationEngine {
    * caller honest and the compiler informed.
    */
   private updateDemandStatus(demand: BuyerDemand): BuyerDemand['status'] {
+    // The Product API owns connected outcomes. Its final events must survive
+    // later deadline/settlement passes instead of being promoted by the
+    // standalone buyer's minimum-acceptable-fraction scoring rule.
+    const productOutcome = this.productDemandOutcomes.get(demand.demandId);
+    if (productOutcome) {
+      demand.status = productOutcome;
+      return productOutcome;
+    }
     const buyer = this.world.buyers.get(demand.buyerId);
     const threshold = (buyer?.minimumAcceptableFraction ?? 0.9) * demand.quantity.value;
 

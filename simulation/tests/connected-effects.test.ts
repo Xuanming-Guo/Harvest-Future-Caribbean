@@ -47,6 +47,21 @@ describe('stepped simulation execution', () => {
 });
 
 describe('validated Product effects', () => {
+  it.each([
+    ['ORDER_FULFILLED', 'FULFILLED'],
+    ['ORDER_PARTIALLY_FULFILLED', 'PARTIALLY_FULFILLED'],
+    ['ORDER_REJECTED', 'UNMET'],
+  ] as const)('preserves the Product %s outcome through settlement', (type, status) => {
+    const engine = new SimulationEngine({ scenarioId: SCENARIO, policy: 'HARVEST', seed: 42, captureFrames: true, coordinationMode: 'EXTERNAL_PRODUCT_API' });
+    engine.start();
+    const demand = advanceUntilDemand(engine);
+    const effect = { eventId: '10000000-0000-4000-8000-000000000090', cursor: '90', atMs: engine.currentTime, type, demandId: demand.demandId };
+    expect(engine.applyProductEffect(effect)).toMatchObject({ applied: true });
+    expect(engine.applyProductEffect(effect)).toMatchObject({ reason: 'DUPLICATE' });
+    const final = engine.finish().timeline!.frames.at(-1)!;
+    expect(final.demands.find((row) => row.demandId === demand.demandId)?.status).toBe(status);
+  });
+
   it('creates deterministic future work and applies each event only once', () => {
     const engine = new SimulationEngine({
       scenarioId: SCENARIO,

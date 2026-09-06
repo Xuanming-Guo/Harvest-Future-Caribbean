@@ -7,11 +7,24 @@ participant can be inspected in the normal website read-only.
 Read [`simulation_vision.md`](simulation_vision.md) for the intended experience
 and [`api_info.md`](api_info.md) for endpoint/effect rules.
 
-> The numeric seed examples below were captured before #91 added the seven-day
-> settlement window. They are historical evidence, not current golden values.
-> Current runs end on September 29 after demand stops on September 22. Verify
-> current connected totals against the final Product snapshot and replay; the
-> standalone benchmark report must not be substituted for connected outcomes.
+## Current outcome evidence (September 6, 2026)
+
+Runs now have 21 demand days and seven settlement days. For the deterministic
+Saint Lucia connected runs, the final Product snapshot, final replay demand
+statuses and engine outcome counts agree:
+
+| Seed | Fulfilled | Partial | Unfulfilled | Pending | Accepted kg |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 42 | 3 | 3 | 5 | 0 | 885.68 |
+| 8675309 | 1 | 8 | 3 | 0 | 1323.21 |
+
+Both seeds were run twice with matching normalized outcomes and digests. See
+[the investigation](fulfilment-investigation.md) for the per-order report,
+remaining failures, cause interpretation and standalone comparison.
+
+> Numeric examples in the walkthrough below were captured before #91 added
+> settlement. They are historical diagnostics, not current golden values.
+> Current runs end on September 29 after demand stops on September 22.
 
 ## What runs where
 

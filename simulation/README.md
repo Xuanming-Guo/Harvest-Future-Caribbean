@@ -91,6 +91,11 @@ orders. See [the current report](benchmarks/README.md#current-forward-promise-an
 for counts and deterministic repeat evidence. These are synthetic standalone
 outcomes; connected Product API outcomes are measured separately.
 
+Connected hero outcomes and their remaining failures are documented in the
+[fulfilment investigation](../docs/fulfilment-investigation.md). Final Product
+snapshots, engine counts and replay demand statuses now agree; the existing
+Product final-order events are authoritative for connected status.
+
 ## Historical comparison before the settlement window
 
 **On the pre-settlement scenario the Harvest policy outperformed the fragmented

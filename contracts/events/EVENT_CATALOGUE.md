@@ -13,7 +13,11 @@ simulation time.
 During a synchronous connected run, the in-process adapter consumes the same
 ordered event records that SSE would expose. `ALLOCATION_APPROVED`,
 `DELIVERY_MISSION_ACCEPTED`, `RECOVERY_APPROVED` and `DELIVERY_ACCEPTED` alter
-only future physical commitments, schedules or outcomes. Delivery updates that
+only future physical commitments, schedules or outcomes. The canonical
+`ORDER_FULFILLED`, `ORDER_PARTIALLY_FULFILLED` and `ORDER_REJECTED` events
+also set connected demand outcomes. Later deadline and settlement passes retain
+that Product status; they do not re-score a partial delivery as fulfilled using
+the standalone buyer's minimum acceptable fraction. Delivery updates that
 were themselves caused by a physical departure/arrival are consumed as echoes
 and never advance the engine twice. Product UUIDs are dedupe/correlation keys,
 not seeded physical-world identifiers.

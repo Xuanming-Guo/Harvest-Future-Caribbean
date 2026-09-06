@@ -960,6 +960,14 @@ class ProductEventProjector {
       }
     }
 
+    if (event.eventType === "ORDER_FULFILLED" || event.eventType === "ORDER_PARTIALLY_FULFILLED" || event.eventType === "ORDER_REJECTED") {
+      const orderId = textValue(payload.orderId);
+      const demandId = orderId ? this.productOrderToDemand.get(orderId) : undefined;
+      if (demandId && payload.status === event.eventType.slice("ORDER_".length)) {
+        return { ...base, type: event.eventType, demandId };
+      }
+    }
+
     if (event.eventType === "ALLOCATION_INVALIDATED" || event.eventType === "ORDER_CANCELLED") {
       const orderId = textValue(payload.orderId);
       const demandId = orderId ? this.productOrderToDemand.get(orderId) : undefined;
