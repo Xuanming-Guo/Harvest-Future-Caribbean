@@ -23,15 +23,6 @@ const useIslandWeather = (islandId?: string) =>
     refetchInterval: 60_000,
   });
 
-/** Every weather panel says where its numbers came from, because none of them were measured. */
-function WeatherProvenance() {
-  return (
-    <p className="muted-copy weather-provenance">
-      Synthetic conditions and a deliberately imperfect forecast. Recorded days are synthetic records; forecast days are
-      model predictions and can be wrong. No live weather service is used.
-    </p>
-  );
-}
 
 /**
  * Today's conditions, a short outlook, and what they mean for the crop.
@@ -50,7 +41,7 @@ export function FarmWeather({ islandId }: { islandId?: string }) {
     <Card className="weather-card" data-testid="farm-weather">
       <SectionTitle title="Weather on your island" detail={current ? `Recorded ${current.date}` : "No reading yet"} />
       {!current ? (
-        <EmptyState title="No conditions recorded yet" detail="Today's weather will appear here once the day is recorded." />
+        <EmptyState title="No conditions recorded yet" />
       ) : (
         <>
           <div className="weather-today">
@@ -78,7 +69,6 @@ export function FarmWeather({ islandId }: { islandId?: string }) {
           <p className="weather-risk">{cropRiskNote(data)}</p>
         </>
       )}
-      <WeatherProvenance />
     </Card>
   );
 }
@@ -96,7 +86,7 @@ export function IslandWeatherTable({ islandIds }: { islandIds?: readonly string[
   const islands = islandIds?.length ? islandIds : [undefined];
   return (
     <Card className="section-gap" data-testid="island-weather-table">
-      <SectionTitle title="Island weather" detail="Shared with every farmer and driver" />
+      <SectionTitle title="Island weather" />
       <div className="weather-table-scroll">
         <table className="weather-table">
           <thead>
@@ -115,7 +105,6 @@ export function IslandWeatherTable({ islandIds }: { islandIds?: readonly string[
           </tbody>
         </table>
       </div>
-      <WeatherProvenance />
     </Card>
   );
 }

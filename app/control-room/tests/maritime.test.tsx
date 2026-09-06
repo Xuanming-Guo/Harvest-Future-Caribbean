@@ -120,12 +120,12 @@ describe("the vessel marker", () => {
 });
 
 describe("reference attribution", () => {
-  it("names the maritime publishers separately and keeps the caveat visible", () => {
+  it("names maritime publishers without explanatory copy", () => {
     render(
       <ReferenceAttribution
         sources={[]}
         maritime={[attribution]}
-        maritimeNote="Ports, links and exchange rates are public references. Schedules, capacities, prices and outcomes are SYNTHETIC."
+
       />,
     );
     // The publishers are named on the collapsed line and detailed one click in;
@@ -135,7 +135,7 @@ describe("reference attribution", () => {
     const link = screen.getByRole("link", { name: attribution.publisher });
     expect(link).toHaveAttribute("href", attribution.sourceUrl);
     expect(screen.getByText(/retrieved 2026-09-03/)).toBeInTheDocument();
-    expect(screen.getByText(/Schedules, capacities, prices and outcomes are SYNTHETIC/)).toBeInTheDocument();
+    expect(screen.queryByText(/Schedules, capacities, prices and outcomes are SYNTHETIC/)).not.toBeInTheDocument();
   });
 
   it("renders nothing at all when a run has no reference data", () => {

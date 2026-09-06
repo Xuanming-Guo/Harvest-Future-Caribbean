@@ -8,7 +8,6 @@ import type { SessionActor } from "@/lib/api";
 import { roleHome } from "@/lib/api";
 import {
   clearOnboardingStatus,
-  readOnboardingStatus,
   roleTutorials,
   type TutorialStep,
   writeOnboardingStatus,
@@ -58,7 +57,7 @@ export function OnboardingGuide({ actor, restartSignal }: { actor: SessionActor;
 
   useEffect(() => {
     setStepIndex(0);
-    setStage(readOnboardingStatus(actor) ? "hidden" : "prompt");
+    setStage("hidden");
   }, [actor]);
 
   useEffect(() => {

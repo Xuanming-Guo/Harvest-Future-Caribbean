@@ -326,33 +326,9 @@ a:focus-visible {
   box-shadow: var(--shadow-panel);
 }
 .launch-card .run-toolbar,
-.launch-card .run-error,
-.launch-card .launch-note { grid-column: 1 / -1; }
+.launch-card .run-error { grid-column: 1 / -1; }
 .launch-card p { margin: 3px 0 0; color: var(--text-muted); }
-.launch-note { font-size: 11px; line-height: 1.55; }
 
-/*
- * The synthetic-evidence badge.
- *
- * Deliberately always visible, never dismissible, and inside the same element
- * as the title. A judge or a screenshot must not be able to separate the claim
- * from its label; the repository evidence policy turns on exactly that.
- */
-.evidence-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 9px;
-  border: 1px solid rgba(217, 155, 43, 0.45);
-  border-radius: 999px;
-  background: rgba(217, 155, 43, 0.12);
-  color: var(--amber);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
 
 .policy-toggle {
   display: flex;
@@ -430,7 +406,6 @@ a:focus-visible {
   gap: 8px;
 }
 
-.metrics-source,
 .metrics-unavailable {
   margin: 0 0 10px;
   color: var(--text-dim);
@@ -805,7 +780,6 @@ a:focus-visible {
 .weather-now-reading { color: var(--text-muted); font-size: 11px; line-height: 1.4; }
 .weather-now-forecast { color: var(--text-dim); font-size: 10px; line-height: 1.4; }
 
-.weather-provenance { margin-bottom: 0; }
 
 /*
  * Attribution is an obligation, not a panel. ODbL requires the OpenStreetMap
@@ -1004,15 +978,8 @@ a:focus-visible {
   box-shadow: var(--shadow-panel);
 }
 .action-preview-panel .panel-header { margin: 0 -15px; padding-inline: 15px; }
-.action-preview-panel .action-preview-provenance {
-  margin: 9px 0;
-  padding: 7px 10px;
-  border-left: 2px solid var(--agent);
-  color: var(--text-muted);
-  font-size: 10px;
-  line-height: 1.55;
-}
 .action-preview-frame {
+  margin-top: 10px;
   flex: 1;
   min-height: 0;
   display: grid;
@@ -1024,12 +991,7 @@ a:focus-visible {
 }
 .action-preview-frame iframe { width: 100%; height: 100%; border: 0; }
 .action-preview-frame .empty-state, .action-preview-frame .run-error { padding: 0 24px; text-align: center; }
-.action-preview-panel .panel-help { margin: 8px 0 0; }
 
-@media (max-height: 720px) {
-  .action-preview-panel .action-preview-provenance { margin: 6px 0; }
-  .action-preview-panel .panel-help { display: none; }
-}
 
 /* Caribbean explorer: the same Harvest family, with a quiet map-first layout. */
 .harvest-select { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; min-width:0; min-height:38px; padding:9px 12px; border:1px solid var(--line-bright); border-radius:8px; background:var(--surface); text-align:left; color:var(--text); font:inherit; }
@@ -1088,7 +1050,6 @@ input:focus-visible, button:focus-visible, summary:focus-visible { outline:2px s
 .route-result strong { font-size:18px; font-family:Manrope,sans-serif; }
 .route-result p { color:var(--text-muted); line-height:1.6; font-size:12px; margin-bottom:0; }
 .route-result .route-warning { color:#ecc078; }
-.route-evidence { color:var(--text-muted); font-size:10px; line-height:1.7; }
 .subtle-button { color:#b5dca5; font-size:12px; padding:7px 0; }
 .workspace-details { flex-shrink:0; }
 .workspace-details summary { list-style:none; padding:14px 16px; border:1px solid var(--line); background:var(--surface); border-radius:10px; cursor:pointer; font-weight:600; font-size:12px; }
@@ -1096,10 +1057,10 @@ input:focus-visible, button:focus-visible, summary:focus-visible { outline:2px s
 .workspace-details[open] summary::after { content:" −"; }
 .workspace-details > .panel { margin-top:12px; }
 .launch-screen { background:radial-gradient(ellipse at 80% 15%,#254e393d,transparent 55%), var(--void); overflow:auto; }
-.launch-card { width:min(920px,calc(100vw - 40px)); border:1px solid var(--line); border-radius:20px; padding:36px; box-shadow:0 24px 90px #0003; }
+.launch-card { width:min(920px,100%); border:1px solid var(--line); border-radius:20px; padding:36px; box-shadow:0 24px 90px #0003; }
+.launch-card > .masthead-mark { align-self:center; }
 .launch-card h1 { font-size:34px; letter-spacing:-.04em; }
 .launch-card .run-toolbar { background:none; padding:20px 0 0; border:0; gap:16px; }
-.launch-card .launch-note { border-top:1px solid var(--line); padding-top:20px; }
 @media (max-width:900px) {
   .chrome { grid-template-columns:280px 1fr 260px; padding:10px; gap:10px; }
   .masthead .pill { display:none; }
@@ -1111,7 +1072,6 @@ input:focus-visible, button:focus-visible, summary:focus-visible { outline:2px s
   .masthead { padding:10px; gap:8px; }
   .masthead-title { font-size:15px; }
   .masthead-sub { max-width:145px; overflow:hidden; text-overflow:ellipsis; }
-  .evidence-badge { font-size:8px; padding:5px; }
   .workspace-actions a { display:none; }
   .workspace-location { font-size:11px; width:100%; }
   .chrome-left { max-height:calc(100dvh - 250px); }

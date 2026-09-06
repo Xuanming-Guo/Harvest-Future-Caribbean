@@ -10,13 +10,12 @@
  * judge sees the actual interface.
  *
  * Nothing is replayed as input. The website receives a payload describing what
- * was recorded and rings the corresponding control itself, which is why the
- * header says so in as many words. Playback is untouched: this panel holds no
+ * was recorded and rings the corresponding control itself. Playback is untouched: this panel holds no
  * transport state and stopping or starting the timeline while it is open
  * changes nothing here.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { isActionPreviewReadyMessage, type ActionPreviewMessage } from "@harvest/shared";
 
 import { PARTICIPANT_WEBSITE_ORIGIN } from "@/lib/action-preview";
@@ -30,13 +29,11 @@ export interface ActionPreviewProps {
 
 export default function ActionPreview({ message, frameUrl, error, onClose }: ActionPreviewProps): React.JSX.Element {
   const frame = useRef<HTMLIFrameElement>(null);
-  const [delivered, setDelivered] = useState(false);
 
   const send = useCallback(() => {
     const target = frame.current?.contentWindow;
     if (!target) return;
     target.postMessage(message, PARTICIPANT_WEBSITE_ORIGIN);
-    setDelivered(true);
   }, [message]);
 
   // The frame asks for its payload once it has a session and has mounted its
@@ -71,15 +68,11 @@ export default function ActionPreview({ message, frameUrl, error, onClose }: Act
           Close
         </button>
       </header>
-      <p className="action-preview-provenance">
-        Replay of a typed Product API action, not browser automation. The participant website below is open on a
-        read-only replay session; nothing is submitted and the saved run cannot change.
-      </p>
       <div className="action-preview-frame">
         {error ? (
           <p className="run-error" role="alert">{error}</p>
         ) : !frameUrl ? (
-          <p className="empty-state">Opening the participant’s read-only session…</p>
+          <p className="empty-state">Opening workspace…</p>
         ) : (
           <iframe
             ref={frame}
@@ -93,11 +86,6 @@ export default function ActionPreview({ message, frameUrl, error, onClose }: Act
           />
         )}
       </div>
-      <p className="panel-help">
-        {delivered
-          ? "Sent this action's role, tool, safe summary, recorded outcome and simulation time. No private reasoning and no other participant's data."
-          : "Waiting for the workspace to open its read-only session."}
-      </p>
     </section>
   );
 }

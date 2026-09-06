@@ -353,10 +353,9 @@ export default function ControlRoomPage() {
       <main className="control-room launch-screen">
         <section className="launch-card">
           <HarvestMark />
-          <div><h1>Harvest control room</h1><p>Explore the islands. See how food moves. Compare what changes.</p></div>
+          <h1>Harvest control room</h1>
           {setup}
           {error && <p className="run-error" role="alert">{error}</p>}
-          <p className="launch-note">Runs are synthetic evidence. Harvest-mode agents use the Product API; baseline runs remain isolated.</p>
         </section>
       </main>
     );
@@ -369,7 +368,7 @@ export default function ControlRoomPage() {
       <div className="globe-layer">
         <CesiumGlobe scene={scene} frame={frame} atMs={state.atMs} selectedId={selectedId} onSelect={handleSelect} focusRegion={focusRegion} showWeather={weatherEnabled} mapTarget={mapTarget} route={route} routeEndpoints={routeEndpoints} />
       </div>
-      <ReferenceAttribution sources={scene.referenceDataSources} maritime={scene.maritimeAttributions ?? []} maritimeNote={scene.maritimeDisclaimer} recordedWeather={recordedWeather} />
+      <ReferenceAttribution sources={scene.referenceDataSources} maritime={scene.maritimeAttributions ?? []} recordedWeather={recordedWeather} />
       <div className="chrome">
         <div className="chrome-header">
           <Masthead scene={scene} frame={frame} estimationMode={currentRun?.estimationMode} estimationModeUsed={currentRun?.policy !== "BASELINE"} />
@@ -417,7 +416,6 @@ export default function ControlRoomPage() {
               <button type="button" className="run-button participant-button" disabled={!selectedParticipant || policy !== "HARVEST"} onClick={() => void openParticipant()}>
                 Open participant website
               </button>
-              <p className="panel-help" style={{ marginBottom: 0 }}>Opens the participant’s normal workspace in read-only replay mode.</p>
             </div>
           </section>
           <section className="panel">

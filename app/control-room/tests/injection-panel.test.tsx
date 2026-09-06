@@ -60,10 +60,10 @@ describe("control-room event injection", () => {
     ]);
   });
 
-  it("explains an honest no-change comparison", () => {
+  it("shows a no-change comparison", () => {
     renderPanel(startMs, { sourceRunId: "source-run", changes: [] });
 
-    expect(screen.getByText(/No measurable final-total change/i)).toBeInTheDocument();
+    expect(screen.getByText(/No change in final totals/i)).toBeInTheDocument();
   });
 
   it("lists final totals that changed", () => {

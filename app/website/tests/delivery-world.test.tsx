@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -102,7 +102,7 @@ const world: WorldMapView = {
 };
 
 describe("delivery world", () => {
-  it("lays out new world locations from data and lets a farmer open a hotel order board", () => {
+  it("lays out new world locations from data and lets a farmer open a hotel order board", async () => {
     const newFarm: WorldMapView["locations"][number] = {
       ...world.locations[0]!,
       locationId: "99999999-9999-4999-8999-999999999999",
@@ -113,27 +113,28 @@ describe("delivery world", () => {
     const growingWorld = { ...world, locations: [...world.locations, newFarm] };
     expect(layoutWorldLocations(growingWorld.locations).flatMap((node) => node.members).map((location) => location.displayName)).toContain("New Community Farm");
 
-    render(<OpenWorldMap world={growingWorld} role="FARMER" />);
+    const { container } = render(<OpenWorldMap world={growingWorld} role="FARMER" />);
     expect(screen.getByRole("button", { name: /1 open request across 1 hotel/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Hotel: Bay Gardens Hotel.*buyer request/i }));
-    expect(screen.getByText("Produce wanted")).toBeInTheDocument();
+    await act(async () => { fireEvent.load(container.querySelector(".hotel-scene-art")!); });
+    expect(await screen.findByText("Produce wanted")).toBeInTheDocument();
     expect(screen.getByText("20 kg Cucumber")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "2 matching fields" }));
     expect(screen.getByRole("link", { name: /Open Cucumber at Roseau Valley Farm/i })).toHaveAttribute("href", "/crops/11111111-1111-4111-8111-111111111111");
     expect(screen.getByRole("link", { name: /Open Cucumber at New Community Farm/i })).toHaveAttribute("href", "/crops/99999999-9999-4999-8999-999999999998");
     fireEvent.click(screen.getByRole("button", { name: /Back to island/i }));
-    expect(screen.getByRole("button", { name: /Farm: Roseau Valley Farm.*crop progress/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Farm: Roseau Valley Farm.*crop progress/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /3 island places/i }));
     expect(screen.getByRole("region", { name: "Canaries places" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Castries places" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Roseau Valley places" })).toBeInTheDocument();
   });
 
-  it("turns an owned farm into a crop-filled growth scene", () => {
-    const { container, getByText, unmount } = render(<OpenWorldMap world={world} role="FARMER" />);
+  it("turns an owned farm into a crop-filled growth scene", async () => {
+    const { container, unmount } = render(<OpenWorldMap world={world} role="FARMER" />);
 
     fireEvent.click(container.querySelector('button[aria-label="Farm: Roseau Valley Farm. Open crop progress"]')!);
-    expect(getByText("Your live crop workspace")).toBeInTheDocument();
+    await waitFor(() => expect(container.querySelector(".world-place-header h2")).toHaveTextContent("Roseau Valley Farm"), { timeout: 2500 });
     expect(container.querySelectorAll(".field-crop-art")).toHaveLength(12);
     expect(container.querySelector(".crop-stage-art")).toHaveAttribute("src", expect.stringContaining("cucumber-game.webp"));
     unmount();
@@ -180,7 +181,7 @@ describe("delivery world", () => {
     };
     const { container } = render(<OpenWorldMap world={populatedWorld} role="FARMER" />);
 
-    expect(container.querySelector(".world-map-hint")).toHaveTextContent("Tap a place · drag or pinch");
+    expect(container.querySelector(".world-map-hint")).toBeNull();
     const firstPlace = screen.getByRole("button", { name: /Island place 1/ });
     fireEvent.focus(firstPlace);
     expect(firstPlace).toHaveClass("is-selected");
@@ -194,10 +195,43 @@ describe("delivery world", () => {
     expect(worldMarkerState(nodes.find((node) => node.kind === "HOTEL")!)).toBe("OPEN");
 
     const { container } = render(<OpenWorldMap world={world} role="FARMER" />);
-    expect(container.querySelector(".island-art")).toHaveAttribute("src", expect.stringContaining("saint-lucia-terrain-v1.webp"));
+    expect(container.querySelector(".island-landscape image")).toHaveAttribute("href", "/art/islands/saint-lucia-world-v3.webp");
+    expect(container.querySelector(".world-place-name")).toBeVisible();
     expect(container.querySelector('[data-world-state="HARVEST_READY"]')).toBeInTheDocument();
     expect(container.querySelector('[data-world-state="OPEN"]')).toBeInTheDocument();
     expect(container.querySelector(".world-location-hit b")).not.toHaveTextContent("1");
+  });
+
+  it("waits for place artwork, crossfades without a pixelated deep zoom, and restores the island", async () => {
+    vi.useFakeTimers();
+    const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 900, 600));
+    const { container, unmount } = render(<OpenWorldMap world={world} role="FARMER" />);
+    try {
+      fireEvent.click(container.querySelector('button[aria-label="Farm: Roseau Valley Farm. Open crop progress"]')!);
+      expect(container.querySelector(".open-world-stage")).toHaveAttribute("data-camera-mode", "entering-place");
+      expect(container.querySelector(".world-pan-layer")).toHaveAttribute("data-zoom", "1.0");
+      expect(container.querySelector(".world-place-layer")).toHaveAttribute("aria-hidden", "true");
+      act(() => vi.advanceTimersByTime(2000));
+      expect(container.querySelector(".world-place-layer")).not.toHaveClass("is-visible");
+      await act(async () => { fireEvent.load(container.querySelector(".farm-scene-art")!); });
+      expect(container.querySelector(".world-place-layer")).toHaveClass("is-visible");
+      expect(Number(container.querySelector(".world-pan-layer")?.getAttribute("data-zoom"))).toBeLessThan(1.3);
+      act(() => vi.advanceTimersByTime(500));
+      expect(container.querySelector(".world-place-header h2")).toHaveTextContent("Roseau Valley Farm");
+      expect(container.querySelector(".world-back-button")).toHaveFocus();
+      fireEvent.click(container.querySelector(".world-back-button")!);
+      expect(container.querySelector(".world-place-layer")).not.toHaveClass("is-visible");
+      act(() => vi.advanceTimersByTime(450));
+      expect(container.querySelector(".world-place-layer")).not.toBeInTheDocument();
+      expect(container.querySelector(".world-pan-layer")).toHaveAttribute("data-zoom", "1.0");
+    } finally { unmount(); bounds.mockRestore(); vi.useRealTimers(); }
+  });
+
+  it("zooms the world with the mouse wheel", () => {
+    const { container, unmount } = render(<OpenWorldMap world={world} role="FARMER" />);
+    fireEvent.wheel(container.querySelector(".open-world-stage")!, { deltaY: -300, clientX: 300, clientY: 200 });
+    expect(Number(container.querySelector(".world-pan-layer")?.getAttribute("data-zoom"))).toBeGreaterThan(1);
+    unmount();
   });
 
   it("keeps delivery roads as an optional layer over the open world", () => {
@@ -253,7 +287,7 @@ describe("delivery world", () => {
     expect(screen.getByText("14 kg committed")).toBeInTheDocument();
     expect(screen.queryByText("6 kg committed")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Back to island/ }));
-    expect(screen.getByText("Illustrated route — not live GPS")).toBeInTheDocument();
+    expect(screen.queryByText("Illustrated route — not live GPS")).not.toBeInTheDocument();
   });
 
   it("does not expose crop progress on an available transporter job", () => {
@@ -272,16 +306,23 @@ describe("delivery world", () => {
   });
 
   it("supports button and keyboard map navigation", () => {
-    const { container } = render(<DeliveryJourney mission={mission} />);
-    const stage = container.querySelector(".island-stage")!;
-    const layer = container.querySelector(".world-pan-layer")!;
+    const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue(new DOMRect(0, 0, 900, 600));
+    const { container, unmount } = render(<DeliveryJourney mission={mission} />);
+    try {
+      const stage = container.querySelector(".island-stage")!;
+      const layer = container.querySelector(".world-pan-layer")!;
 
-    fireEvent.click(container.querySelector('button[aria-label="Zoom in"]')!);
-    expect(layer).toHaveAttribute("data-zoom", "1.2");
-    fireEvent.keyDown(stage, { key: "ArrowRight" });
-    expect(layer).toHaveStyle({ transform: "translate3d(-28px, 0px, 0) scale(1.2)" });
-    fireEvent.click(container.querySelector('button[aria-label="Reset map view"]')!);
-    expect(layer).toHaveAttribute("data-zoom", "1.0");
+      fireEvent.click(container.querySelector('button[aria-label="Zoom in"]')!);
+      expect(layer).toHaveAttribute("data-zoom", "1.2");
+      fireEvent.keyDown(stage, { key: "ArrowRight" });
+      expect(layer).toHaveStyle({ transform: "translate3d(-28px, 0px, 0) scale(1.2)" });
+      fireEvent.click(container.querySelector('button[aria-label="Reset map view"]')!);
+      expect(layer).toHaveAttribute("data-zoom", "1.0");
+    } finally {
+      unmount();
+      bounds.mockRestore();
+    }
   });
 
   it("renders empty, delayed, cancelled, and delivered route states", () => {

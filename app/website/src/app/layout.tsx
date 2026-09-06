@@ -6,7 +6,7 @@ import { Providers } from "@/components/providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Harvest Saint Lucia",
+  title: "Harvest",
   description: "Local farm-to-market coordination for farmers, buyers and transporters.",
 };
 

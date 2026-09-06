@@ -222,7 +222,6 @@ function LinkedReference({ reference }: { reference: ReferencePlace | undefined 
     <div className="reference-notice">
       <strong>Nearby public reference</strong>
       <span>{reference.name} · {REFERENCE_CATEGORY[reference.category]}</span>
-      <span>This participant is synthetic; the named location is not a Harvest customer or participant.</span>
     </div>
   );
 }
@@ -232,10 +231,6 @@ function ReferencePlaceView({ place, source, onClose }: { place: ReferencePlace;
     <>
       <Header title={place.name} subtitle="Reference location" onClose={onClose} />
       <div className="panel-body">
-        <div className="reference-notice is-prominent">
-          <strong>Reference location—not a Harvest participant or customer.</strong>
-          <span>Its name and position provide public geographic context only. All simulated behaviour and results remain synthetic.</span>
-        </div>
         <Row label="Category" value={REFERENCE_CATEGORY[place.category]} />
         <Row label="Evidence" value={place.evidenceType.replaceAll("_", " ").toLowerCase()} />
         <Row label="Retrieved" value={place.retrievedAt} />
@@ -264,10 +259,6 @@ function AgentActionView({ action, scene, onClose, onPreview }: { action: Simula
             <button type="button" className="run-button participant-button preview-button" onClick={() => onPreview(action)}>
               Preview in Harvest
             </button>
-            <p className="panel-help">
-              Opens this participant’s read-only workspace and points at the control a person would use. It is a replay
-              of a typed Product API action, not browser automation.
-            </p>
           </>
         )}
         <Row label="Role" value={action.role.toLowerCase()} />
@@ -279,7 +270,7 @@ function AgentActionView({ action, scene, onClose, onPreview }: { action: Simula
           <Row label="Harvest estimation" value={action.estimationMode === "LEARNED_MODEL" ? "learned model" : "deterministic fallback"} />
         )}
         <Row label="Simulation time" value={formatWhen(Date.parse(action.at))} />
-        <Row label="Approval" value={action.approval === "SYNTHETIC_PARTICIPANT" ? "synthetic participant decision" : "not required by this action"} />
+        <Row label="Approval" value={action.approval === "SYNTHETIC_PARTICIPANT" ? "Participant decision" : "Not required"} />
         <Row label="Summary" value={action.summary} />
         <Row label="Trace" value={safeReference(action.traceId)} />
         <Row label="Entity" value={safeReference(action.entityId)} />
@@ -315,7 +306,7 @@ export default function Inspector({ scene, frame, selectedId, selectedAction, on
           <span className="panel-title">Inspector</span>
         </header>
         <div className="panel-body">
-          <p className="empty-state">Click a participant, reference location, vehicle or disruption marker on the globe—or an item in the feed—to see its detail here.</p>
+          <p className="empty-state">Nothing selected</p>
         </div>
       </section>
     );

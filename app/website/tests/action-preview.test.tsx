@@ -122,7 +122,7 @@ describe("simulated action preview", () => {
   it("ignores a payload that did not come from the control room", async () => {
     render(<ActionPreviewController actor={readOnlyFarmer} />);
     deliver(action, "https://not-the-control-room.example");
-    await waitFor(() => expect(screen.getByText(/Waiting for the control room/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Waiting for action/)).toBeInTheDocument());
     expect(screen.queryByText(action.summary)).not.toBeInTheDocument();
   });
 
@@ -136,7 +136,7 @@ describe("simulated action preview", () => {
     expect(screen.getByText("publish listing")).toBeInTheDocument();
     expect(screen.getByText("succeeded")).toBeInTheDocument();
     expect(screen.getByText("50000000")).toBeInTheDocument();
-    expect(screen.getByText(/Replay of a typed Product API action, not browser automation/)).toBeInTheDocument();
+    expect(screen.queryByText(/Replay of a typed Product API action, not browser automation/)).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("action-preview-ring")).toBeInTheDocument());
     expect(screen.getByTestId("action-preview-pointer")).toBeInTheDocument();
   });

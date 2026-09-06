@@ -129,7 +129,7 @@ export default function OrderDetailPage() {
       </Card>
       <div className="grid two-column section-gap" data-tour="order-detail">
         <Card>
-          <SectionTitle title="Supply commitment" detail="Confirmed only after everyone approves" />
+          <SectionTitle title="Supply commitment"  />
           {order.data.cropStandardId && <p className="crop-standard-applied">Standard applied: <strong>{appliedStandard ? `${appliedStandard.publisherName} v${appliedStandard.version}` : "Loading standard..."}</strong></p>}
           {!order.data.allocation ? <p>Harvest is still finding safe supply for this order.</p> : (
             <div className="allocation-list">
@@ -142,7 +142,7 @@ export default function OrderDetailPage() {
         </Card>
         <Card>
           <SectionTitle title="Delivery" detail={mission ? titleCase(mission.status) : "Not scheduled"} />
-          {!mission ? <p>A delivery job will be created when the supply commitment is approved.</p> : (
+          {!mission ? <p>Awaiting commitment approval</p> : (
             <div className="delivery-summary"><Truck size={28} /><div><strong>{mission.quantity.value} kg</strong><span>Due {formatDate(mission.deadline)}</span></div><Link className="text-link" href={`/missions/${mission.missionId}`}>View delivery</Link></div>
           )}
           {order.data.deliveryAcceptance && (
@@ -162,11 +162,7 @@ export default function OrderDetailPage() {
             title="Cross-island supply"
             detail={shipment ? titleCase(shipment.status) : titleCase(interIsland.status)}
           />
-          <p className="payment-disclaimer">
-            Ports, the sailing and the exchange rate are public references with their own sources and licences. The
-            schedule, the capacity, the price, the customs check and the outcome are synthetic simulation values, not
-            an operator&rsquo;s figures.
-          </p>
+
           <div className="payment-card">
             <div className="split"><span>Route</span><strong>{titleCase(interIsland.originIslandId.replaceAll("-", " "))} to {titleCase(interIsland.destinationIslandId.replaceAll("-", " "))}</strong></div>
             <div className="split"><span>Operator</span><strong>{interIsland.route.operator}</strong></div>
@@ -174,13 +170,13 @@ export default function OrderDetailPage() {
               <span>Sailing time</span>
               <strong>
                 {interIsland.route.seaLegHours} h
-                {interIsland.route.journeyHoursSource === "PUBLIC_TIMETABLE" ? " (published)" : " (synthetic default)"}
+                {interIsland.route.journeyHoursSource === "PUBLIC_TIMETABLE" ? " (published)" : " (estimated)"}
               </strong>
             </div>
             <div className="split"><span>Approvals</span><strong>{interIsland.approvalSummary.approved} of {interIsland.approvalSummary.required} approved</strong></div>
             <div className="split">
               <span>Binding</span>
-              <strong>{interIsland.boundAt ? `Yes, from ${formatDate(interIsland.boundAt)}` : "Not yet — nothing ships until every approval is granted"}</strong>
+              <strong>{interIsland.boundAt ? `Yes, from ${formatDate(interIsland.boundAt)}` : "Awaiting approval"}</strong>
             </div>
             <div className="split">
               <span>Cost</span>
@@ -216,7 +212,6 @@ export default function OrderDetailPage() {
                   {" "}{shipment.customs.delayHours} h · {formatMoney(shipment.customs.feeXcd, "XCD")}
                 </span>
                 {shipment.customs.clearedAt && <span>Cleared {formatDate(shipment.customs.clearedAt)}</span>}
-                <small>{shipment.customs.disclaimer}</small>
               </div>
               {(shipment.weatherDelayHours ?? 0) > 0 && (
                 <div className="notice"><strong>Weather delayed the crossing by {shipment.weatherDelayHours} h</strong></div>
@@ -237,7 +232,6 @@ export default function OrderDetailPage() {
       {payment && (
         <Card className="section-gap" data-tour="order-payment">
           <SectionTitle title="Payment" detail={`${order.data.paymentTermsDays}-day terms`} />
-          <p className="payment-disclaimer">Harvest tracks payment; it does not move money. The amount is what the accepted produce is worth at the price the farmer published.</p>
           <div className="payment-card">
             <div className="split"><span>Status</span><Badge tone={payment.status.toLowerCase().replaceAll("_", "-")}>{PAYMENT_STATUS_LABELS[payment.status]}</Badge></div>
             <div className="split"><span>Amount</span><strong>{payment.amount ? formatMoney(payment.amount.amount, payment.amount.currency) : "-"}</strong></div>
@@ -271,7 +265,7 @@ export default function OrderDetailPage() {
                 {line.rejected > 0 && (
                   <ReasonChooser
                     idPrefix={`line-${line.cropBatchId}`}
-                    label="Reason for this crop batch (optional; the shared reason applies without one)"
+                    label="Crop batch reason (optional)"
                     onChange={(value) => setLineReasons((current) => ({ ...current, [line.cropBatchId]: value }))}
                     value={lineReasons[line.cropBatchId] ?? null}
                   />
@@ -292,7 +286,7 @@ export default function OrderDetailPage() {
               />
             )}
             <div className="field field-full"><label htmlFor="acceptance-note">Note (optional)</label><textarea id="acceptance-note" rows={2} value={note} onChange={(event) => setNote(event.target.value)} /></div>
-            {!online && <div className="field-full"><OfflineHint>Accepting a delivery settles what was received, so it is never queued. Reconnect to confirm.</OfflineHint></div>}
+            {!online && <div className="field-full"><OfflineHint>Reconnect to continue</OfflineHint></div>}
             {reasonMissing && <p className="form-error field-full">Choose a reason and say what the farmer should do next before recording a rejection.</p>}
             <button className="button field-full" data-tour="delivery-acceptance-submit" aria-disabled={!online || undefined} disabled={acceptance.isPending || !online || reasonMissing || Math.abs(accepted + rejected - mission.quantity.value) > 0.0001 || resolvedLines.some((line) => Math.abs(line.accepted + line.rejected - line.quantity) > 0.0001)}><CheckCircle2 size={17} />Confirm delivery</button>
           </form>

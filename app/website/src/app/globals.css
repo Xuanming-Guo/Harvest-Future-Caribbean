@@ -59,7 +59,7 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .sidebar nav { display: grid; gap: 7px; margin-top: 44px; }
 .sidebar nav a { display: flex; align-items: center; gap: 12px; padding: 12px 13px; border-radius: 10px; color: rgba(255,255,255,.72); font-weight: 600; }
 .sidebar nav a:hover, .sidebar nav a.active { color: white; background: rgba(255,255,255,.1); }
-.sidebar-context { margin-top: auto; padding: 16px; border: 1px solid rgba(255,255,255,.12); border-radius: 13px; background: rgba(255,255,255,.05); }
+.sidebar-context { margin-top: auto; padding: 0; border: 0; background: none; }
 .sidebar-context strong, .sidebar-context span { display: block; }
 .sidebar-context strong { margin-bottom: 7px; font-size: 14px; }
 .sidebar-context span { color: rgba(255,255,255,.62); font-size: 12px; line-height: 1.5; }
@@ -582,8 +582,8 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
 .island-stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; background: #2c9eab; cursor: grab; }
 .island-stage:focus-visible { outline: 5px solid #ffe173; outline-offset: -5px; }
 .island-stage.is-dragging { cursor: grabbing; }
-.world-pan-layer { position: absolute; inset: -1px; container-type: size; transform-origin: 50% 50%; transition: transform .32s cubic-bezier(.2,.8,.2,1); will-change: transform; }
-.island-stage.is-camera-moving .world-pan-layer { transition-duration: .68s; transition-timing-function: cubic-bezier(.16,.84,.24,1); }
+.world-pan-layer { position: absolute; inset: -1px; container-type: size; transform-origin: 50% 50%; transition: none; will-change: transform; }
+.island-stage.is-camera-moving .world-pan-layer { transition-property: transform; transition-duration: .68s; transition-timing-function: cubic-bezier(.16,.84,.24,1); }
 .island-stage.is-dragging .world-pan-layer { transition: none; }
 .world-scene-surface { position: absolute; top: 50%; left: 50%; width: max(100%, 150cqh); height: max(100%, 66.667cqw); overflow: hidden; transform: translate(-50%, -50%); }
 .island-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; user-select: none; }
@@ -1067,3 +1067,197 @@ h1, h2, h3, .brand strong { font-family: "Manrope", sans-serif; }
   *::-webkit-scrollbar-thumb { background:#aac0af; border-radius:8px; }
   *::-webkit-scrollbar-button { display:none; width:0; height:0; }
 }
+
+/* Harvest World uses the participant workspace palette and controls. */
+.harvest-world { --world-green:#204e3b; --text:var(--ink); --bg:var(--cream); display:grid; gap:20px; }
+.harvest-world-header { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:4px 0; }
+.harvest-world-title { display:flex; align-items:center; gap:13px; min-width:0; }
+.world-brand-icon { width:46px; height:46px; display:grid; place-items:center; border:1px solid var(--line); border-radius:14px; color:var(--world-green); background:#e9eee2; flex-shrink:0; }
+.harvest-world-title .eyebrow { font-size:10px; color:var(--muted); letter-spacing:.12em; }
+.harvest-world-title h1 { font-size:clamp(22px,2.6vw,30px); letter-spacing:-.04em; margin:4px 0 0; }
+.harvest-world-actions { display:flex; gap:8px; flex-shrink:0; }
+.world-count { background:#ffffff24; border-radius:5px; padding:1px 5px; font-size:11px; }
+.world-regional-layout { display:grid; grid-template-columns:258px minmax(0,1fr); height:calc(100dvh - 196px); min-height:460px; border:1px solid var(--line); border-radius:18px; overflow:hidden; background:var(--card); }
+.world-island-directory { display:flex; flex-direction:column; min-height:0; border-right:1px solid var(--line); padding:20px 14px 10px; gap:14px; }
+.world-island-directory > header { display:flex; align-items:center; justify-content:space-between; padding:0 5px; }
+.world-island-directory h2 { font-size:13px; }
+.world-island-directory > header > span { font-size:11px; color:var(--muted); background:var(--bg); padding:3px 7px; border-radius:6px; }
+.world-search { display:flex; gap:8px; align-items:center; border:1px solid var(--line); border-radius:9px; background:var(--card); padding:9px 10px; color:var(--muted); }
+.world-search:focus-within { outline:2px solid var(--world-green); outline-offset:2px; }
+.world-search input { background:none; border:0; padding:0; width:100%; min-width:0; outline:none; box-shadow:none; font:inherit; font-size:12px; color:var(--text); }
+.world-island-list { overflow:auto; flex:1; min-height:0; }
+.world-island-list > button, .world-overview { display:flex; width:100%; align-items:center; justify-content:space-between; gap:10px; padding:12px 10px; border:0; border-radius:8px; background:none; color:var(--muted); text-align:left; font:inherit; font-size:12px; cursor:pointer; }
+.world-island-list > button svg { flex-shrink:0; opacity:.5; }
+.world-island-list > button:hover, .world-overview:hover { background:#f1f3ea; color:var(--text); }
+.world-island-list > button.is-selected, .world-overview.is-selected { background:#e7efdf; color:#204e3b; font-weight:700; }
+.world-overview { justify-content:flex-start; padding:11px 10px; border:1px solid var(--line); flex-shrink:0; }
+.world-place-count { border-radius:20px; padding:2px 6px; background:#204e3b; color:#fff; font-size:10px; }
+.world-regional-map { position:relative; min-width:0; min-height:0; background:#acd4df; }
+.caribbean-map-surface, .caribbean-map-canvas { height:100%; width:100%; }
+.caribbean-map-canvas { z-index:0; background:#aad3df; }
+.caribbean-map-controls { position:absolute; right:16px; top:16px; z-index:5; display:grid; padding:4px; border:1px solid var(--line); border-radius:11px; box-shadow:0 4px 14px #102d2520; background:var(--card); }
+.caribbean-map-controls button { display:grid; place-items:center; width:34px; height:34px; background:none; border:0; color:#204e3b; border-radius:7px; cursor:pointer; }
+.caribbean-map-controls button:hover { background:#e7efdf; }
+.world-island-card { position:absolute; z-index:5; bottom:36px; left:20px; right:20px; display:flex; justify-content:space-between; gap:16px; align-items:center; padding:19px 22px; border:1px solid var(--line); border-radius:14px; background:#fffef8f5; box-shadow:0 8px 25px #204e3b18; }
+.world-island-card h2 { margin:5px 0; font-size:22px; letter-spacing:-.025em; }
+.world-island-card .eyebrow { font-size:10px; }
+.world-island-count { font-size:12px; color:var(--muted); }
+.world-empty { padding:20px 10px; color:var(--muted); font-size:13px; }
+.world-islands-toggle { display:none; }
+.world-local-view { position:relative; border:1px solid var(--line); border-radius:18px; overflow:hidden; }
+.world-local-view .open-world-stage { border-radius:0; }
+.world-delivery-picker { position:absolute; top:16px; right:16px; z-index:40; width:min(360px,calc(100% - 32px)); padding:18px; border:1px solid var(--line); border-radius:14px; background:var(--card); box-shadow:0 10px 30px #173e3426; }
+.world-delivery-picker > header { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+.world-delivery-picker h2 { font-size:18px; }
+.world-delivery-list { max-height:340px; overflow:auto; margin-top:10px; }
+.world-delivery-list > button { width:100%; display:flex; justify-content:space-between; align-items:center; gap:8px; text-align:left; padding:14px 4px; border:0; border-bottom:1px solid var(--line); background:none; cursor:pointer; }
+.world-delivery-list small { display:block; margin-top:4px; color:var(--muted); }
+
+.sidebar-tutorial-button { width:100%; }
+/* Match the island's existing controls to the surrounding product. */
+.delivery-game-hud { border:1px solid var(--line); background:var(--card); box-shadow:none; border-radius:14px; }
+.delivery-game-title h1 { color:var(--text); }
+@media (max-width:1000px) { .world-regional-layout { grid-template-columns:218px minmax(0,1fr); } .world-island-card { padding:15px; left:12px; right:12px; } .world-island-card h2 { font-size:18px; } }
+@media (max-width:720px) {
+ .harvest-world { gap:13px; }
+ .harvest-world-header { flex-wrap:wrap; gap:12px; padding:8px 4px; }
+ .harvest-world-title h1 { font-size:22px; }
+ .harvest-world-actions { width:100%; }
+ .harvest-world-actions .button { flex:1; justify-content:center; font-size:12px; padding:10px; }
+ .world-islands-toggle { display:inline-flex; }
+ .world-regional-layout { position:relative; display:block; height:calc(100dvh - 236px); min-height:400px; }
+ .world-regional-map { height:100%; }
+ .world-island-directory { display:none; position:absolute; z-index:20; inset:0 50px 0 0; background:var(--card); border-right:1px solid var(--line); box-shadow:10px 0 30px #173e3426; }
+ .world-island-directory.is-open { display:flex; }
+ .world-island-card { bottom:28px; gap:10px; flex-wrap:wrap; }
+ .world-island-card h2 { font-size:19px; }
+ .world-island-card .button { font-size:12px; padding:10px; }
+}
+
+/* Illustrated navigation extends the original terrain and sprite world. */
+.illustrated-caribbean { overflow:hidden; background:#0994b0; }
+.caribbean-illustration { display:block; width:100%; height:100%; touch-action:none; cursor:grab; }
+.caribbean-illustration:active { cursor:grabbing; }
+.illustrated-island { cursor:pointer; outline:none; }
+.illustrated-island-label { font-family:var(--font-body, "DM Sans",sans-serif); font-size:11px; font-weight:700; fill:#fff8df; stroke:#125969; stroke-width:3; paint-order:stroke; opacity:0; pointer-events:none; }
+.illustrated-island-label.is-prominent, .illustrated-island:hover .illustrated-island-label, .illustrated-island:focus .illustrated-island-label { opacity:1; }
+.illustrated-island:focus .illustrated-island-target, .illustrated-island.is-selected .illustrated-island-target { fill:#fff5ce30; stroke:#fff0b9; stroke-width:2; stroke-dasharray:3 4; }
+.illustrated-sea-name { fill:#d5fff4; opacity:.32; font:italic 24px Georgia,serif; letter-spacing:9px; pointer-events:none; }
+.illustrated-caribbean .caribbean-map-controls { border-color:#dcc38b; background:#fff8df; }
+.world-local-view .open-world-stage { border-radius:18px; }
+
+/* Shared map controls stay in screen space while the illustrated world moves. */
+.harvest-map-controls { position: absolute; z-index: 16; left: 20px; bottom: 20px; display: flex; align-items: center; padding: 5px; gap: 2px; border: 1px solid #d6dfcd; border-radius: 12px; color: #264e40; background: #fffdf2; box-shadow: 0 3px 15px #17453726; }
+.harvest-map-controls button { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: inherit; cursor: pointer; }
+.harvest-map-controls button:hover:not(:disabled) { background: #e6edda; }
+.harvest-map-controls button:focus-visible { outline: 2px solid #356f50; outline-offset: 1px; }
+.harvest-map-controls button:disabled { opacity: .35; cursor: default; }
+.harvest-map-controls output { min-width: 45px; text-align: center; font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.map-control-divider { height: 19px; width: 1px; background: #d6dfcd; margin: 0 4px; }
+.island-landscape { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.world-place-name { position: absolute; left: 50%; top: calc(50% + 29px); width: max-content; max-width: 185px; padding: 7px 11px; border: 1px solid #d8ca9d; border-radius: 7px; background: #fff9e8; color: #284e40; font: 600 13px/1.35 var(--font-body, Arial), sans-serif; text-align: center; text-wrap: balance; box-shadow: 0 2px 6px #284e4020; transform: translateX(-50%) scale(calc(1 / var(--map-zoom, 1))); transform-origin: top center; }
+.world-location-hit:has(.world-place-name):hover, .world-location-hit:has(.world-place-name):focus-visible { z-index: 10; }
+.world-location-hit::before { display: none; }
+.world-location-fallback b { display: none; }
+.island-empty-places { position: absolute; z-index: 12; top: 20px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 10px 16px; border: 1px solid #dbe3cf; border-radius: 20px; background: #fffdf2ed; color: #395b4c; font-size: 13px; }
+.geographic-island { cursor: pointer; outline: none; }
+.geographic-island:hover > path:first-of-type, .geographic-island:focus-visible > path:first-of-type, .geographic-island[aria-pressed="true"] > path:first-of-type { stroke: #fff3aa; stroke-width: 7px; }
+.geographic-label { cursor: pointer; }
+.geographic-label:hover rect { fill: #fff0bd; }
+.geographic-label text { font-family: var(--font-body, Arial), sans-serif; }
+.illustrated-caribbean { background: #239fab; }
+.world-island-card { bottom: 83px; }
+@media (max-width: 700px) { .harvest-map-controls { left: 12px; bottom: 12px; } .world-place-name { max-width: 150px; font-size: 12px; } }
+
+.world-local-view .open-world-shell { height: calc(100dvh - 208px); min-height: 420px; border: 0; border-radius: 17px; box-shadow: none; }
+.world-local-view .world-place-scene { min-height: calc(100dvh - 208px); }
+.world-local-view .world-route-ribbon { bottom: 80px; }
+@media (max-width: 720px) { .world-local-view .open-world-shell { height: calc(100dvh - 230px); min-height: 360px; } .world-local-view .world-place-scene { min-height: calc(100dvh - 230px); } }
+
+/* Place markers are navigation controls; building artwork uses geographic scale. */
+.open-world-stage .world-location-hit { width: 44px; height: 44px; transform: translate(-50%, -50%) scale(calc(1 / var(--map-zoom, 1))); }
+.open-world-stage .world-place-name { top: calc(50% + 11px); transform: translateX(-50%); }
+.world-place-pin { position: absolute; left: 50%; top: 50%; width: 9px; height: 9px; transform: translate(-50%, -50%); border: 2px solid #fffbe5; border-radius: 50%; background: #3c7950; box-shadow: 0 1px 5px #173e3470; }
+.is-hotel .world-place-pin { background: #c4913d; }
+.open-world-stage .world-location-fallback { display: none; }
+.open-world-stage.is-entering-place .world-pan-layer { transition: transform .8s cubic-bezier(.35,.05,.2,1); }
+.open-world-stage.is-entering-place .world-location-hit:not(.is-selected) { opacity: 0; transition: opacity .15s; }
+.open-world-stage.is-entering-place .world-place-pin { opacity: 0; transition: opacity .35s; }
+.open-world-stage.is-entering-place .world-demand-signal, .open-world-stage.is-entering-place .world-directory-button { opacity: 0; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .open-world-stage.is-entering-place .world-pan-layer { transition: none; } }
+
+.open-world-stage.is-entering-place .harvest-map-controls { opacity: 0; pointer-events: none; transition: opacity .1s; }
+
+/* Scene navigation keeps the landscape visible and avoids magnifying a bitmap. */
+.island-stage { overflow: clip; }
+.world-place-layer { position: absolute; z-index: 30; inset: 0; opacity: 0; pointer-events: none; transition: opacity .42s ease; }
+.world-place-layer.is-visible { opacity: 1; pointer-events: auto; }
+.world-place-layer .world-place-scene { width: 100%; height: 100%; min-height: 0; border: 0; border-radius: 0; box-shadow: none; overflow: clip; animation: none; }
+.world-place-layer .farm-scene-art, .world-place-layer .hotel-scene-art { animation: none; }
+.open-world-stage.is-entering-place .world-pan-layer { transition: transform .5s cubic-bezier(.2,.7,.25,1); }
+.open-world-stage.is-entering-place .world-location-hit { opacity: 0; transition: opacity .2s; }
+.world-place-header { gap: 10px; padding: 14px; }
+.world-place-header > div { padding: 7px 10px; border: 0; border-radius: 8px; box-shadow: 0 2px 10px #234d3920; }
+.world-place-header h2 { font-size: 17px; line-height: 1.25; }
+.world-place-header span { font-size: 9px; }
+.world-place-header .world-back-button { min-height: 40px; padding: 8px 11px; border: 1px solid #cbd6ba; border-radius: 8px; background: #fffbecef; color: #284e40; box-shadow: 0 2px 8px #234d3920; font-size: 12px; }
+.world-farm-scene .world-place-content, .world-hotel-scene .world-place-content { position: absolute; right: 14px; bottom: 14px; left: auto; width: min(310px,calc(100% - 28px)); max-height: 32%; margin: 0; padding: 0; overflow: auto; overscroll-behavior: contain; }
+.world-hotel-scene .world-place-content { left: 14px; right: auto; max-height: 36%; padding: 10px; border: 1px solid #d3c8a3; border-radius: 10px; background: #fff9e9f2; box-shadow: 0 3px 14px #284e4026; }
+.world-place-content .world-supply-board, .world-place-content .world-private-place { margin: 0; padding: 11px; gap: 8px; border: 1px solid #d3c8a3; border-radius: 10px; background: #fff9e9f2; box-shadow: none; }
+.world-supply-board h3, .world-private-place h3 { font-size: 13px; }
+.world-supply-ticket { padding: 6px 0; border: 0; border-radius: 0; background: transparent; font-size: 12px; }
+.world-place-content .button { min-height: 36px; padding: 7px 10px; font-size: 12px; }
+.world-crop-grid { grid-template-columns: minmax(0,1fr); gap: 8px; }
+.world-crop-grid .crop-progress-plot { grid-template-columns: 64px minmax(0,1fr); border: 1px solid #d3c8a3; border-radius: 9px; box-shadow: none; }
+.world-crop-grid .crop-stage-portrait { width: 64px; min-height: 110px; }
+.world-crop-grid .crop-progress-plot > div { padding: 8px; }
+.world-crop-grid .crop-progress-copy > div:first-child { flex-wrap: wrap; gap: 4px; }
+.world-crop-grid .crop-progress-copy > div > strong { font-size: 9px; }
+.world-crop-grid .crop-progress-plot h4 { margin: 5px 0; font-size: 12px; }
+.world-crop-grid .crop-stage-track { margin-top: 8px; }
+.world-crop-grid .crop-stage-track small { font-size: 7px; }
+.world-crop-grid .crop-stage-track i { width: 19px; height: 19px; font-size: 9px; }
+.hotel-order-board-title { gap: 7px; margin-bottom: 8px; }
+.hotel-order-board-title h3 { font-size: 14px; }
+.hotel-order-board-title > svg { width: 18px; }
+.hotel-order-ticket, .hotel-order-ticket.ticket-1, .hotel-order-ticket.ticket-2 { margin: 6px 0 0; padding: 9px; gap: 4px 8px; border: 1px solid #ded8bd; border-radius: 7px; background: #fffdf3; box-shadow: none; transform: none; }
+.hotel-order-ticket .ticket-pin { display: none; }
+.hotel-order-ticket h4 { font-size: 13px; }
+.hotel-order-ticket .badge { font-size: 8px; padding: 3px 5px; }
+.hotel-order-ticket > .badge { grid-column: 2; grid-row: 1; }
+.hotel-order-ticket h4 { grid-row: 1; }
+.open-world-stage .world-place-name { max-width: 150px; padding: 3px 6px; border: 0; border-radius: 4px; font-size: 11px; box-shadow: 0 1px 4px #284e4020; }
+.world-directory-button { padding: 7px 10px; border: 1px solid #d3d9bf; border-radius: 9px; color: #284e40; background: #fff9e8f2; box-shadow: 0 2px 9px #284e4020; font-size: 12px; font-weight: 600; }
+.world-directory-button b { color: #fffbe8; background: #3a7254; }
+.world-demand-signal { width: min(276px,calc(100% - 36px)); gap: 8px; padding: 8px 10px; border: 1px solid #d3d9bf; border-radius: 9px; background: #fff9e8f2; box-shadow: 0 2px 9px #284e4020; }
+.world-demand-signal strong { font-size: 10px; }
+.world-demand-signal small { font-size: 7px; }
+@media (max-width: 720px) {
+  .world-place-header { flex-direction: row; align-items: center; gap: 7px; padding: 10px; }
+  .world-place-header h2 { font-size: 14px; }
+  .world-place-header > div { min-width: 0; padding: 6px 8px; }
+  .world-place-header .world-back-button { font-size: 0; width: 38px; min-height: 38px; padding: 9px; flex-shrink: 0; }
+  .world-place-header .world-back-button svg { width: 17px; height: 17px; }
+  .world-farm-scene .world-place-content, .world-hotel-scene .world-place-content { right: 10px; bottom: 10px; left: auto; width: min(276px,calc(100% - 20px)); max-height: 30%; }
+  .world-hotel-scene .world-place-content { max-height: 34%; }
+  .world-place-layer .hotel-scene-art { top: 20%; right: 8%; width: 230px; }
+  .world-directory-button { min-height: 40px; }
+  .world-demand-signal { right: 12px; bottom: 66px; width: auto; max-width: 240px; }
+  .open-world-stage .world-place-name { max-width: 116px; font-size: 10px; }
+}
+/* Chromium must use the themed pseudo-elements, including nested scroll areas.
+   Non-auto standard scrollbar properties would override this styling. */
+@supports selector(::-webkit-scrollbar) {
+  * { scrollbar-width: auto !important; scrollbar-color: auto !important; }
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-track { background: #e9ede380; border-radius: 8px; }
+  *::-webkit-scrollbar-thumb { min-height: 32px; border: 2px solid transparent; border-radius: 8px; background: #769b81; background-clip: padding-box; }
+  *::-webkit-scrollbar-thumb:hover { background-color: #416d52; }
+  *::-webkit-scrollbar-corner { background: transparent; }
+  *::-webkit-scrollbar-button, *::-webkit-scrollbar-button:single-button { display: none; width: 0; height: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .world-place-layer, .open-world-stage.is-entering-place .world-pan-layer { transition: none; }
+}
+.world-place-layer .farm-scene-art { z-index: 0; }
+.world-place-layer .farm-field-crops { z-index: 1; }

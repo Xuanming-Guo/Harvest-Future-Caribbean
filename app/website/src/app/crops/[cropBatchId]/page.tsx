@@ -233,7 +233,7 @@ export default function CropDetailPage() {
   return (
     <>
       <Link className="back-link" href={actor?.role === "COORDINATOR" ? "/coordinator" : "/farmer"}><ArrowLeft size={16} />Back to crops</Link>
-      <PageHeader eyebrow="Crop batch" title={batch.data.cropType} description={`${batch.data.availableToPromise.value} kg can currently be promised without overcommitting.`} actions={<Badge>{batch.data.status}</Badge>} />
+      <PageHeader eyebrow="Crop batch" title={batch.data.cropType} description={`${batch.data.availableToPromise.value} kg available to promise`} actions={<Badge>{batch.data.status}</Badge>} />
       {batch.data.latestDecision && (
         <Card className="decision-card">
           <SectionTitle title="What was wrong, and what to do next" detail={`Recorded ${formatDate(batch.data.latestDecision.decidedAt)}`} />
@@ -270,7 +270,7 @@ export default function CropDetailPage() {
                   >
                     <RefreshCw size={16} />Refresh forecast
                   </button>
-                  {!online && <OfflineHint>A new forecast is calculated by Harvest, so it needs a connection.</OfflineHint>}
+                  {!online && <OfflineHint>Reconnect to continue</OfflineHint>}
                 </>
               )}
             </div>
@@ -290,15 +290,15 @@ export default function CropDetailPage() {
               >
                 <Sparkles size={16} />{intake.isPending ? "Preparing draft..." : "Prepare editable draft"}
               </button>
-              {!online && <div className="field-full"><OfflineHint>Harvest fills this draft for you, so it needs a connection. You can still fill the form yourself.</OfflineHint></div>}
-              <p className="field-full muted-copy">Harvest only fills the form below. Nothing is saved until you review it and select Save crop update.</p>
+              {!online && <div className="field-full"><OfflineHint>Reconnect to continue</OfflineHint></div>}
+
               {draftNotice && <div className="notice field-full"><strong>Human review required</strong>{draftNotice}</div>}
             </div>
             <form className="form-grid" onSubmit={(event: FormEvent) => { event.preventDefault(); observation.mutate(); }}>
               <div className="field"><label htmlFor="stage">Crop stage</label><select id="stage" value={stage} onChange={(event) => setStage(event.target.value)}><option>GROWING</option><option>FLOWERING</option><option>FRUITING</option><option>HARVEST_READY</option><option>HARVESTED</option></select></div>
               <div className="field"><label htmlFor="estimate">Estimated crop (kg)</label><input id="estimate" type="number" min="0" step="0.5" value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} /></div>
               <div className="field field-full"><label htmlFor="notes">What have you noticed?</label><textarea id="notes" rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="For example: heavy rain, pest damage, or good growth" /></div>
-              {!online && <div className="field-full"><OfflineHint>No connection. This update is kept on your device and sent on its own when you are back online.</OfflineHint></div>}
+              {!online && <div className="field-full"><OfflineHint>Saved on this device · awaiting connection</OfflineHint></div>}
               <button className="button field-full" data-tour="crop-update-save" disabled={observation.isPending}><Save size={16} />{observation.isPending ? "Saving..." : "Save crop update"}</button>
             </form>
           </Card></div>
@@ -321,13 +321,13 @@ export default function CropDetailPage() {
           </div>
           <div className="section-gap" id="offer-produce" data-tour="crop-listing"><Card>
             <SectionTitle title="Offer produce to buyers" detail={`Up to ${batch.data.availableToPromise.value} kg safe to promise`} />
-            {batch.data.promisableFrom && <p className="section-lede">Earliest promise date: <strong>{formatDate(batch.data.promisableFrom, false)}</strong>. Choose this date or later below; a growing crop is reserved for its forecast window, not marked ready today.</p>}
+            {batch.data.promisableFrom && <p className="section-lede">Earliest promise date: <strong>{formatDate(batch.data.promisableFrom, false)}</strong></p>}
             <form className="form-grid four-fields" onSubmit={(event: FormEvent) => { event.preventDefault(); listing.mutate(); }}>
               <div className="field"><label>Quantity (kg)</label><input type="number" min="0.1" max={batch.data.availableToPromise.value} step="0.1" value={listingQuantity} onChange={(event) => setListingQuantity(Number(event.target.value))} /></div>
               <div className="field"><label>Price per kg (EC$)</label><input type="number" min="0" step="0.25" value={price} onChange={(event) => setPrice(Number(event.target.value))} /></div>
               <div className="field"><label>Available from</label><input type="date" value={availableFrom} onChange={(event) => setAvailableFrom(event.target.value)} /></div>
               <div className="field"><label>Available until</label><input type="date" value={availableUntil} onChange={(event) => setAvailableUntil(event.target.value)} /></div>
-              {!online && <div className="field-full"><OfflineHint>No connection. This offer is kept on your device, and Harvest checks the safe quantity again before publishing it.</OfflineHint></div>}
+              {!online && <div className="field-full"><OfflineHint>Saved on this device · awaiting connection</OfflineHint></div>}
               <button className="button field-full" data-tour="crop-listing-submit" disabled={listing.isPending || listingQuantity > batch.data.availableToPromise.value}><Store size={16} />{listing.isPending ? "Publishing..." : "List in marketplace"}</button>
             </form>
           </Card></div>
@@ -349,7 +349,7 @@ export default function CropDetailPage() {
             <div>
               <strong>Farm</strong>
               <p>{actor?.role === "FARMER" ? `${actor.name}, farm ${compactId(batch.data.farmId)}` : `Farm ${compactId(batch.data.farmId)}`}</p>
-              <small>Exact farm coordinates are never shown here.</small>
+
             </div>
           </li>
           <li>

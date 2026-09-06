@@ -1,0 +1,345 @@
+{
+  "status": "Implemented with the authorized open-source Blender fallback. Image API attempt returned credit_balance_exhausted; no API image was generated.",
+  "styleReference": "reference-world-style.png",
+  "commonDirection": "Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting.",
+  "scenes": [
+    {
+      "id": "anguilla",
+      "name": "Anguilla",
+      "layoutGuide": "../public/art/islands/anguilla-terrain-v2.webp",
+      "terrainCharacter": "limestone",
+      "sourceElevationRangeMeters": [
+        0,
+        72
+      ],
+      "prompt": "Anguilla. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is limestone; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/anguilla-world-v3.webp"
+    },
+    {
+      "id": "antigua-barbuda",
+      "name": "Antigua and Barbuda",
+      "layoutGuide": "../public/art/islands/antigua-barbuda-terrain-v2.webp",
+      "terrainCharacter": "seasonal",
+      "sourceElevationRangeMeters": [
+        0,
+        383
+      ],
+      "prompt": "Antigua and Barbuda. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is seasonal; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/antigua-barbuda-world-v3.webp"
+    },
+    {
+      "id": "aruba",
+      "name": "Aruba",
+      "layoutGuide": "../public/art/islands/aruba-terrain-v2.webp",
+      "terrainCharacter": "dry",
+      "sourceElevationRangeMeters": [
+        0,
+        187
+      ],
+      "prompt": "Aruba. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is dry; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/aruba-world-v3.webp"
+    },
+    {
+      "id": "bahamas",
+      "name": "Bahamas",
+      "layoutGuide": "../public/art/islands/bahamas-terrain-v2.webp",
+      "terrainCharacter": "limestone",
+      "sourceElevationRangeMeters": [
+        0,
+        169
+      ],
+      "prompt": "Bahamas. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is limestone; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/bahamas-world-v3.webp"
+    },
+    {
+      "id": "barbados",
+      "name": "Barbados",
+      "layoutGuide": "../public/art/islands/barbados-terrain-v2.webp",
+      "terrainCharacter": "seasonal",
+      "sourceElevationRangeMeters": [
+        0,
+        341
+      ],
+      "prompt": "Barbados. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is seasonal; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/barbados-world-v3.webp"
+    },
+    {
+      "id": "bonaire-sint-eustatius-saba",
+      "name": "Bonaire, Sint Eustatius and Saba",
+      "layoutGuide": "../public/art/islands/bonaire-sint-eustatius-saba-terrain-v2.webp",
+      "terrainCharacter": "dry",
+      "sourceElevationRangeMeters": [
+        0,
+        624
+      ],
+      "prompt": "Bonaire, Sint Eustatius and Saba. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is dry; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/bonaire-sint-eustatius-saba-world-v3.webp"
+    },
+    {
+      "id": "british-virgin-islands",
+      "name": "British Virgin Islands",
+      "layoutGuide": "../public/art/islands/british-virgin-islands-terrain-v2.webp",
+      "terrainCharacter": "seasonal",
+      "sourceElevationRangeMeters": [
+        0,
+        524
+      ],
+      "prompt": "British Virgin Islands. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is seasonal; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/british-virgin-islands-world-v3.webp"
+    },
+    {
+      "id": "cayman-islands",
+      "name": "Cayman Islands",
+      "layoutGuide": "../public/art/islands/cayman-islands-terrain-v2.webp",
+      "terrainCharacter": "limestone",
+      "sourceElevationRangeMeters": [
+        0,
+        129
+      ],
+      "prompt": "Cayman Islands. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is limestone; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/cayman-islands-world-v3.webp"
+    },
+    {
+      "id": "cuba",
+      "name": "Cuba",
+      "layoutGuide": "../public/art/islands/cuba-terrain-v2.webp",
+      "terrainCharacter": "seasonal",
+      "sourceElevationRangeMeters": [
+        0,
+        1726
+      ],
+      "prompt": "Cuba. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is seasonal; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/cuba-world-v3.webp"
+    },
+    {
+      "id": "curacao",
+      "name": "CuraÃ§ao",
+      "layoutGuide": "../public/art/islands/curacao-terrain-v2.webp",
+      "terrainCharacter": "dry",
+      "sourceElevationRangeMeters": [
+        0,
+        338
+      ],
+      "prompt": "CuraÃ§ao. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is dry; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/curacao-world-v3.webp"
+    },
+    {
+      "id": "dominica",
+      "name": "Dominica",
+      "layoutGuide": "../public/art/islands/dominica-terrain-v2.webp",
+      "terrainCharacter": "rainforest",
+      "sourceElevationRangeMeters": [
+        0,
+        1425
+      ],
+      "prompt": "Dominica. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is rainforest; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/dominica-world-v3.webp"
+    },
+    {
+      "id": "dominican-republic",
+      "name": "Dominican Republic",
+      "layoutGuide": "../public/art/islands/dominican-republic-terrain-v2.webp",
+      "terrainCharacter": "rainforest",
+      "sourceElevationRangeMeters": [
+        0,
+        3049
+      ],
+      "prompt": "Dominican Republic. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is rainforest; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/dominican-republic-world-v3.webp"
+    },
+    {
+      "id": "grenada",
+      "name": "Grenada",
+      "layoutGuide": "../public/art/islands/grenada-terrain-v2.webp",
+      "terrainCharacter": "rainforest",
+      "sourceElevationRangeMeters": [
+        0,
+        817
+      ],
+      "prompt": "Grenada. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is rainforest; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/grenada-world-v3.webp"
+    },
+    {
+      "id": "guadeloupe",
+      "name": "Guadeloupe",
+      "layoutGuide": "../public/art/islands/guadeloupe-terrain-v2.webp",
+      "terrainCharacter": "rainforest",
+      "sourceElevationRangeMeters": [
+        0,
+        1452
+      ],
+      "prompt": "Guadeloupe. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is rainforest; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/guadeloupe-world-v3.webp"
+    },
+    {
+      "id": "haiti",
+      "name": "Haiti",
+      "layoutGuide": "../public/art/islands/haiti-terrain-v2.webp",
+      "terrainCharacter": "seasonal",
+      "sourceElevationRangeMeters": [
+        0,
+        2603
+      ],
+      "prompt": "Haiti. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is seasonal; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/haiti-world-v3.webp"
+    },
+    {
+      "id": "jamaica",
+      "name": "Jamaica",
+      "layoutGuide": "../public/art/islands/jamaica-terrain-v2.webp",
+      "terrainCharacter": "rainforest",
+      "sourceElevationRangeMeters": [
+        0,
+        2215
+      ],
+      "prompt": "Jamaica. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is rainforest; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/jamaica-world-v3.webp"
+    },
+    {
+      "id": "martinique",
+      "name": "Martinique",
+      "layoutGuide": "../public/art/islands/martinique-terrain-v2.webp",
+      "terrainCharacter": "rainforest",
+      "sourceElevationRangeMeters": [
+        0,
+        1379
+      ],
+      "prompt": "Martinique. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is rainforest; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/martinique-world-v3.webp"
+    },
+    {
+      "id": "montserrat",
+      "name": "Montserrat",
+      "layoutGuide": "../public/art/islands/montserrat-terrain-v2.webp",
+      "terrainCharacter": "rainforest",
+      "sourceElevationRangeMeters": [
+        0,
+        907
+      ],
+      "prompt": "Montserrat. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is rainforest; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/montserrat-world-v3.webp"
+    },
+    {
+      "id": "puerto-rico",
+      "name": "Puerto Rico",
+      "layoutGuide": "../public/art/islands/puerto-rico-terrain-v2.webp",
+      "terrainCharacter": "rainforest",
+      "sourceElevationRangeMeters": [
+        0,
+        1297
+      ],
+      "prompt": "Puerto Rico. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is rainforest; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/puerto-rico-world-v3.webp"
+    },
+    {
+      "id": "saint-barthelemy",
+      "name": "Saint BarthÃ©lemy",
+      "layoutGuide": "../public/art/islands/saint-barthelemy-terrain-v2.webp",
+      "terrainCharacter": "seasonal",
+      "sourceElevationRangeMeters": [
+        0,
+        284
+      ],
+      "prompt": "Saint BarthÃ©lemy. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is seasonal; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/saint-barthelemy-world-v3.webp"
+    },
+    {
+      "id": "saint-kitts-nevis",
+      "name": "Saint Kitts and Nevis",
+      "layoutGuide": "../public/art/islands/saint-kitts-nevis-terrain-v2.webp",
+      "terrainCharacter": "rainforest",
+      "sourceElevationRangeMeters": [
+        0,
+        1119
+      ],
+      "prompt": "Saint Kitts and Nevis. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is rainforest; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/saint-kitts-nevis-world-v3.webp"
+    },
+    {
+      "id": "saint-lucia",
+      "name": "Saint Lucia",
+      "layoutGuide": "../public/art/islands/saint-lucia-terrain-v2.webp",
+      "terrainCharacter": "rainforest",
+      "sourceElevationRangeMeters": [
+        0,
+        911
+      ],
+      "prompt": "Saint Lucia. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is rainforest; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/saint-lucia-world-v3.webp"
+    },
+    {
+      "id": "saint-martin-french-part",
+      "name": "Saint Martin (French part)",
+      "layoutGuide": "../public/art/islands/saint-martin-french-part-terrain-v2.webp",
+      "terrainCharacter": "seasonal",
+      "sourceElevationRangeMeters": [
+        0,
+        420
+      ],
+      "prompt": "Saint Martin (French part). Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is seasonal; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/saint-martin-french-part-world-v3.webp"
+    },
+    {
+      "id": "saint-vincent-grenadines",
+      "name": "Saint Vincent and the Grenadines",
+      "layoutGuide": "../public/art/islands/saint-vincent-grenadines-terrain-v2.webp",
+      "terrainCharacter": "rainforest",
+      "sourceElevationRangeMeters": [
+        0,
+        1199
+      ],
+      "prompt": "Saint Vincent and the Grenadines. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is rainforest; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/saint-vincent-grenadines-world-v3.webp"
+    },
+    {
+      "id": "sint-maarten-dutch-part",
+      "name": "Sint Maarten (Dutch part)",
+      "layoutGuide": "../public/art/islands/sint-maarten-dutch-part-terrain-v2.webp",
+      "terrainCharacter": "seasonal",
+      "sourceElevationRangeMeters": [
+        0,
+        309
+      ],
+      "prompt": "Sint Maarten (Dutch part). Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is seasonal; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/sint-maarten-dutch-part-world-v3.webp"
+    },
+    {
+      "id": "trinidad-tobago",
+      "name": "Trinidad and Tobago",
+      "layoutGuide": "../public/art/islands/trinidad-tobago-terrain-v2.webp",
+      "terrainCharacter": "rainforest",
+      "sourceElevationRangeMeters": [
+        0,
+        920
+      ],
+      "prompt": "Trinidad and Tobago. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is rainforest; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/trinidad-tobago-world-v3.webp"
+    },
+    {
+      "id": "turks-caicos-islands",
+      "name": "Turks and Caicos Islands",
+      "layoutGuide": "../public/art/islands/turks-caicos-islands-terrain-v2.webp",
+      "terrainCharacter": "limestone",
+      "sourceElevationRangeMeters": [
+        0,
+        98
+      ],
+      "prompt": "Turks and Caicos Islands. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is limestone; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/turks-caicos-islands-world-v3.webp"
+    },
+    {
+      "id": "united-states-virgin-islands",
+      "name": "United States Virgin Islands",
+      "layoutGuide": "../public/art/islands/united-states-virgin-islands-terrain-v2.webp",
+      "terrainCharacter": "seasonal",
+      "sourceElevationRangeMeters": [
+        0,
+        462
+      ],
+      "prompt": "United States Virgin Islands. Create a complete individualized island environment for the Harvest app. Use reference-world-style.png for the rich hand-painted farming-game aesthetic: an oblique perspective, dimensional hills, rocky coastal edges, vibrant layered turquoise water, shoreline foam, palms and broadleaf trees, flowering shrubs, grassy clearings, warm directional light, and a lively, crafted landscape. Use this island's terrain guide ONLY to place the coastline, mountain masses and lowlands; do not copy its flat atlas rendering, dot textures or colour treatment. Compose a complete landscape specifically for this island. Give mountains, forests and coasts visible dimensional form. Match the lighting and viewpoint across the set. Wide 3:2 composition; whole island or island group visible; ocean margins; no cropped land at the image edges. Outer sea blends into #239fab. Do not add UI, text, labels, flags, pins, markers or oversized landmarks. No property buildings or connecting roads: the app adds physically small property artwork and navigates into a separate close-up scene. The design is an illustration, not satellite photography or a topographic chart. Preserve a stable landmass placement and sufficient coast margins for responsive fitting. Use this island's supplied guide, not another Caribbean island's landform. The overall terrain character is seasonal; retain the distinguishing relief visible in its guide.",
+      "plannedOutput": "../public/art/islands/united-states-virgin-islands-world-v3.webp"
+    }
+  ],
+  "renderer": "../scripts/render-island-world.py",
+  "manifest": "../public/art/islands/world-manifest.json"
+}

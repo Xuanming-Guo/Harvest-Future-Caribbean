@@ -33,7 +33,7 @@ and handles play, pause, speed, rewind, scrub and reset locally:
   present, collapsed by default to a single credit line under the globe — the
   OpenStreetMap credit, the scene's other reference datasets named in words,
   and a **Sources** button that opens the full publishers, licences, retrieval
-  dates and synthetic-outcomes caveat upward over it;
+  dates upward over it;
 - injecting a disruption creates a new derived run and preserves the source;
 - Harvest agent actions and adapter provenance appear in purple in the feed,
   and a forecast-producing action also names the estimation method that ran;
@@ -323,9 +323,8 @@ layer draws nothing rather than inventing any.
 The map key carries the condition swatches and a **Weather now** readout for
 the frame on screen: island, date, condition, rainfall in mm, wind in kph with
 a compass point, temperature band, and the forecast with its own confidence.
-Realised weather is labelled `SYNTHETIC` and the forecast `MODEL_PREDICTED`,
-because a record and a prediction are different claims; those labels and the
-masthead's synthetic-simulation badge are not dismissible.
+Weather provenance remains in saved run data. The interface shows readings and
+forecast confidence without explanatory badges or paragraphs.
 
 ## Reading the interface
 
@@ -355,9 +354,8 @@ a long debugging detour once already.
 Everything operational on screen is **synthetic**. Map tiles and the
 named OpenStreetMap reference places are public geographic context, but every
 farm, buyer, order, yield and delivery is invented. Selecting a reference shows
-its source, licence, retrieval metadata and the explicit statement that it is
-not a Harvest participant or customer. The synthetic-simulation badge in the masthead is deliberately not
-dismissible: a screenshot must not be able to separate a claim from its label.
+its source, licence and retrieval metadata. The interface keeps source credits and concise operational labels; explanatory
+badges and disclaimer paragraphs are omitted.
 
 Nothing shown here is measured impact from a deployed system, and it must never
 be presented as such.
@@ -373,9 +371,8 @@ explicitly geographic context, with no implied simulated activity.
 **A → B route** accepts two clicks on mapped participants or two accessible point
 selections. It finds the shortest distance on the saved, undirected road graph,
 using each segment's recorded distance. Unconnected public places and cross-island
-pairs show **No recorded road connection**. No access roads, maritime transfers,
-travel times or actual road geometry are invented. Routes are clearly labelled
-synthetic/schematic; this is an exploration tool and creates no operational state.
+pairs show **No route available**. No access roads, maritime transfers,
+travel times or actual road geometry are invented. Route distances use the saved graph; this exploration tool creates no operational state.
 Recorded degraded segments are flagged, rather than equated with road closures.
 Roads and sea-link lines are hidden by default; mission paths appear only when
 selected, while vehicle markers and weather remain visible.

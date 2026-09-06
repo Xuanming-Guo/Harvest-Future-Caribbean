@@ -193,10 +193,6 @@ export default function InjectionPanel({ scene, injections, comparison, onChange
           ))}
         </SelectControl>
 
-        <p style={{ margin: "10px 0 12px", fontSize: 12, lineHeight: 1.5, color: "var(--text-muted)" }}>
-          {option?.description}
-        </p>
-
         <p style={{ margin: "0 0 12px", fontSize: 11, lineHeight: 1.5, color: "var(--text-dim)" }}>
           <strong>Target:</strong> {targetLabelFor(option)}<br />
           <strong>Time:</strong> {canInject ? `Day ${dayNumber} - ${injectionAt}` : "Rewind before the scenario ends"}
@@ -215,18 +211,13 @@ export default function InjectionPanel({ scene, injections, comparison, onChange
           {canInject ? `Inject on day ${dayNumber}` : "Rewind to inject an event"}
         </button>
 
-        {!canInject && (
-          <p role="status" style={{ margin: "10px 0 0", fontSize: 11, lineHeight: 1.5, color: "var(--text-muted)" }}>
-            The scenario has reached its horizon. Rewind the timeline before adding another event.
-          </p>
-        )}
 
         {comparison && injections.length > 0 && (
           <div aria-live="polite" style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
             <div className="metric-label">Impact versus source run</div>
             {comparison.changes.length === 0 ? (
               <p style={{ margin: "6px 0 0", fontSize: 11, lineHeight: 1.5, color: "var(--text-muted)" }}>
-                No measurable final-total change; this event did not intersect activity that changed the final results.
+                No change in final totals
               </p>
             ) : (
               <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 11, lineHeight: 1.5, color: "var(--text-muted)" }}>
@@ -236,11 +227,6 @@ export default function InjectionPanel({ scene, injections, comparison, onChange
           </div>
         )}
 
-        <p style={{ margin: "10px 0 0", fontSize: 11, lineHeight: 1.5, color: "var(--text-dim)" }}>
-          The API saves a derived run, so the source stays unchanged and the whole
-          timeline remains reproducible and scrubbable. An event may leave final totals
-          unchanged when it does not overlap relevant crop or delivery activity.
-        </p>
       </div>
     </section>
   );

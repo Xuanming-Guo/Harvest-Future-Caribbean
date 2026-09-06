@@ -40,7 +40,7 @@ describe("agent-action inspector", () => {
 
     expect(screen.getByText(/Mabouya Valley smallholding/)).toBeInTheDocument();
     expect(screen.getByText("decide approval")).toBeInTheDocument();
-    expect(screen.getByText("synthetic participant decision")).toBeInTheDocument();
+    expect(screen.getByText("Participant decision")).toBeInTheDocument();
     expect(screen.getByText("40000000")).toBeInTheDocument();
     expect(screen.getByText("60000000")).toBeInTheDocument();
     expect(screen.queryByText(/chain-of-thought/i)).not.toBeInTheDocument();

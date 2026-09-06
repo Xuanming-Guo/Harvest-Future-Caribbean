@@ -27,22 +27,22 @@ import { useSession } from "./providers";
 const navigation = {
   FARMER: [
     ["/farmer", "My farm", Sprout],
-    ["/map", "Map", MapIcon],
+    ["/map", "Harvest World", MapIcon],
     ["/orders", "Orders", PackageCheck],
   ],
   BUYER: [
     ["/buyer", "Overview", Leaf],
-    ["/map", "Map", MapIcon],
+    ["/map", "Harvest World", MapIcon],
     ["/marketplace", "Marketplace", ShoppingBasket],
     ["/orders", "Orders", PackageCheck],
   ],
   TRANSPORTER: [
-    ["/map", "Map", MapIcon],
+    ["/map", "Harvest World", MapIcon],
     ["/transporter", "Delivery jobs", Truck],
   ],
   COORDINATOR: [
     ["/coordinator", "Coordination tasks", ClipboardCheck],
-    ["/map", "Map", MapIcon],
+    ["/map", "Harvest World", MapIcon],
     ["/orders", "Orders", PackageCheck],
   ],
 } as const;
@@ -85,7 +85,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <aside className={`sidebar ${open ? "sidebar-open" : ""}`}>
         <div className="brand">
           <span className="brand-mark"><Leaf size={22} /></span>
-          <div><strong>Harvest</strong><small>Saint Lucia</small></div>
+          <div><strong>Harvest</strong><small>Caribbean</small></div>
         </div>
         <nav aria-label="Main navigation">
           {links.map(([href, label, Icon]) => (
@@ -100,9 +100,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
         <div className="sidebar-context">
-          <p className="eyebrow">Need help?</p>
-          <strong>Learn your workspace</strong>
-          <span>Replay the short guide for your role whenever you need it.</span>
           <button className="sidebar-tutorial-button" onClick={() => { setOpen(false); setTutorialRequest((value) => value + 1); }}>
             <Compass size={16} />Take the tutorial
           </button>
@@ -111,7 +108,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="main-column">
         {actor.readOnly && (
           <div className="simulation-replay-banner" role="status">
-            Synthetic simulation replay · read-only · run {actor.simulationRunId?.slice(0, 8)}
+            Read-only · {actor.simulationRunId?.slice(0, 8)}
           </div>
         )}
         <header className="topbar">

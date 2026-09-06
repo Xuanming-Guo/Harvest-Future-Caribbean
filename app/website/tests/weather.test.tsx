@@ -136,7 +136,7 @@ describe("farmer weather panel", () => {
     const panel = screen.getByTestId("farm-weather");
     expect(panel.querySelectorAll(".weather-forecast li")).toHaveLength(3);
     expect(screen.getByText(/Storm forecast in 3 days/)).toBeInTheDocument();
-    expect(screen.getByText(/deliberately imperfect forecast/)).toBeInTheDocument();
+    expect(screen.queryByText(/deliberately imperfect forecast/)).not.toBeInTheDocument();
   });
 
   it("says nothing has been recorded rather than showing an empty reading", async () => {

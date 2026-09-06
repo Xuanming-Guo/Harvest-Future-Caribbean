@@ -11,6 +11,7 @@ export type IslandMarker = {
   sequence: number;
   state: IslandMarkerState;
   variant: number;
+  width?: number;
 };
 
 type IslandGameCanvasProps = {
@@ -22,6 +23,9 @@ type IslandGameCanvasProps = {
   points: IslandPoint[];
   selectedStop: number;
   showAllLabels?: boolean;
+  externalLabels?: boolean;
+  showNetwork?: boolean;
+  vehicleWidth?: number;
 };
 
 type Curve = {
@@ -98,7 +102,7 @@ function curveDirection(curve: Curve, progress: number) {
   return { x: after.x - before.x, y: after.y - before.y };
 }
 
-export function IslandGameCanvas({ activeSegment, delivered, markers, moving, onReady, points, selectedStop, showAllLabels = false }: IslandGameCanvasProps) {
+export function IslandGameCanvas({ activeSegment, delivered, markers, moving, onReady, points, selectedStop, showAllLabels = false, externalLabels = false, showNetwork = true, vehicleWidth }: IslandGameCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const onReadyRef = useRef(onReady);
@@ -211,7 +215,6 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
       const normalizedMarkers = JSON.parse(markerPayload) as IslandMarker[];
       const worldMarkers = normalizedMarkers.map((marker) => {
         const container = new Container();
-        const labelSide = marker.point.x < 0.42 ? "right" : marker.point.x > 0.58 ? "left" : "center";
         const markerColor = marker.kind === "PICKUP" ? 0x55c982 : marker.kind === "DROPOFF" ? 0xff8262 : 0xffca52;
         const isReady = marker.state === "HARVEST_READY";
         const hasDemand = marker.state === "OPEN";
@@ -293,24 +296,23 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
         const label = new Text({
           text: marker.label,
           style: {
-            align: labelSide === "right" ? "left" : labelSide === "left" ? "right" : "center",
+            align: "center",
             fill: 0x315140,
             fontFamily: "Arial",
-            fontSize: 10,
+            fontSize: 12,
             fontWeight: "800",
             wordWrap: true,
-            wordWrapWidth: 104,
+            wordWrapWidth: 145,
           },
         });
-        const labelWidth = Math.min(118, Math.max(70, label.width + 18));
-        const labelX = labelSide === "right" ? 48 : labelSide === "left" ? -48 : 0;
-        const boardX = labelSide === "right" ? 43 : labelSide === "left" ? -43 - labelWidth : -labelWidth / 2;
-        label.anchor.set(labelSide === "right" ? 0 : labelSide === "left" ? 1 : 0.5, 0);
-        label.position.set(labelX, 28);
+        const labelWidth = Math.max(80, label.width + 20);
+        label.anchor.set(0.5, 0);
+        label.position.set(0, 26);
+        label.resolution = 3;
         const labelBoard = new Graphics()
-          .roundRect(boardX, 24, labelWidth, label.height + 10, 7)
-          .fill({ color: 0xfff5c9, alpha: 0.96 })
-          .stroke({ color: 0xb98943, width: 2 });
+          .roundRect(-labelWidth / 2, 21, labelWidth, label.height + 12, 7)
+          .fill({ color: 0xfff8df, alpha: 0.98 })
+          .stroke({ color: 0xd4c399, width: 1 });
         const statusSparks = isReady ? Array.from({ length: 3 }, (_, index) => {
           const spark = new Graphics()
             .poly([0, -6, 2, -2, 6, 0, 2, 2, 0, 6, -2, 2, -6, 0, -2, -2])
@@ -321,6 +323,11 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
           return spark;
         }) : [];
         container.addChild(footprint, groundGlow, pulse, symbol, accessory, labelBoard, label);
+        footprint.visible = false;
+        groundGlow.visible = false;
+        pulse.visible = false;
+        label.visible = !externalLabels;
+        labelBoard.visible = !externalLabels;
         container.zIndex = marker.point.y * 1000;
         markerLayer.addChild(container);
         return { accessory, container, groundGlow, label, labelBoard, marker, pulse, point: marker.point, statusSparks };
@@ -344,7 +351,7 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
       }) : [];
 
       markerLayer.sortableChildren = true;
-      const roadSegments = buildIslandRoadNetwork(normalizedMarkers);
+      const roadSegments = showNetwork ? buildIslandRoadNetwork(normalizedMarkers) : [];
       const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
       const normalizedPoints = pointKey ? pointKey.split(";").map((value) => {
         const [x, y] = value.split(",").map(Number);
@@ -454,7 +461,7 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
         const point = curve ? curvePoint(curve, progress) : undefined;
         const direction = curve ? curveDirection(curve, progress) : { x: 1, y: 0 };
         const suspension = reducedMotion.matches ? 0 : Math.sin(elapsed / 115) * (moving && entrance < 1 ? 2.4 : 0.8);
-        const truckWidth = Math.max(72, Math.min(118, width * 0.12));
+        const truckWidth = vehicleWidth ?? Math.max(72, Math.min(118, width * 0.12));
         const scale = truckWidth / truckTexture.width;
 
         truckLayer.visible = Boolean(point);
@@ -490,7 +497,7 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
         });
         worldMarkers.forEach(({ accessory, container, groundGlow, label, labelBoard, marker, pulse, statusSparks }, index) => {
           const selected = marker.kind !== "DEPOT" && selectedStopRef.current === marker.sequence;
-          const markerScale = Math.max(0.66, Math.min(1.08, width / 900)) * (showAllLabels ? 1.08 : 1) * (selected ? 1.08 : 1);
+          const markerScale = marker.width !== undefined ? marker.width / ((marker.kind === "DROPOFF" ? 122 : 119) + marker.variant * 4) : Math.max(0.66, Math.min(1.08, width / 900)) * (showAllLabels ? 1.08 : 1) * (selected ? 1.08 : 1);
           container.scale.set(markerScale);
           container.y = marker.point.y * height;
           const lively = marker.state === "HARVEST_READY" || marker.state === "OPEN";
@@ -551,7 +558,7 @@ export function IslandGameCanvas({ activeSegment, delivered, markers, moving, on
       cancelled = true;
       cleanup();
     };
-  }, [activeSegment, delivered, markerPayload, moving, pointKey, showAllLabels]);
+  }, [activeSegment, delivered, markerPayload, moving, pointKey, showAllLabels, externalLabels, showNetwork, vehicleWidth]);
 
   return (
     <div

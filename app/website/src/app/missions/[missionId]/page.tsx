@@ -86,8 +86,8 @@ export default function MissionDetailPage() {
           {mayDeliver && <button className="button button-secondary" disabled={update.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) update.mutate("DELIVERED"); }}><Check size={17} />Mark delivered</button>}
         </div>
       )}
-      {!online && <OfflineHint>Delivery progress is only recorded live, so it is never queued. Reconnect to report it.</OfflineHint>}
-      {mission.data.status === "DELIVERED" && <p className="form-success">Every stop is complete. The hotel can now record the delivery outcome.</p>}
+      {!online && <OfflineHint>Reconnect to continue</OfflineHint>}
+      {mission.data.status === "DELIVERED" && <p className="form-success">All stops complete</p>}
       {mission.data.status === "CANCELLED" && <p className="form-error">This route was cancelled. No further updates can be recorded.</p>}
     </>
   ) : undefined;
@@ -133,7 +133,7 @@ export default function MissionDetailPage() {
             <div className="field"><label htmlFor="delay">What happened?</label><input id="delay" required minLength={3} value={delayNote} onChange={(event) => setDelayNote(event.target.value)} placeholder="For example: road closure near Castries" /></div>
             <button className="button button-danger" data-tour="mission-report-problem" disabled={delay.isPending} aria-disabled={!online || undefined}><AlertTriangle size={17} />Report problem</button>
           </form>
-          {!online && <OfflineHint>A coordinator has to see this straight away, so it is never queued. Reconnect to report it.</OfflineHint>}
+          {!online && <OfflineHint>Reconnect to continue</OfflineHint>}
         </Card>
       )}
       {(message || mutationError) && <p className={mutationError ? "form-error" : "form-success"}>{message ?? mutationError?.message}</p>}

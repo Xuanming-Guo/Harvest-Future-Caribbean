@@ -6,8 +6,8 @@ import { useEffect, useState } from "react";
 
 import { titleCase } from "@/lib/format";
 
-export function PageHeader({ eyebrow, title, description, actions }: { eyebrow?: string; title: string; description: string; actions?: React.ReactNode }) {
-  return <header className="page-header"><div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1>{title}</h1><p>{description}</p></div>{actions && <div className="page-actions">{actions}</div>}</header>;
+export function PageHeader({ eyebrow, title, description, actions }: { eyebrow?: string; title: string; description?: string; actions?: React.ReactNode }) {
+  return <header className="page-header"><div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1>{title}</h1>{description && <p>{description}</p>}</div>{actions && <div className="page-actions">{actions}</div>}</header>;
 }
 
 export function Card({ children, className = "", ...props }: React.ComponentPropsWithoutRef<"section">) {
@@ -35,8 +35,8 @@ export function ErrorState({ error }: { error: unknown }) {
   return <div className="state-panel error"><strong>We could not load this page.</strong><span>{error instanceof Error ? error.message : "Harvest is temporarily unavailable."}</span></div>;
 }
 
-export function EmptyState({ title, detail }: { title: string; detail: string }) {
-  return <div className="empty-state"><strong>{title}</strong><span>{detail}</span></div>;
+export function EmptyState({ title, detail }: { title: string; detail?: string }) {
+  return <div className="empty-state"><strong>{title}</strong>{detail && <span>{detail}</span>}</div>;
 }
 
 /**

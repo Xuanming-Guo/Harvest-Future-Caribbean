@@ -53,8 +53,8 @@ export default function TransporterHome() {
       <div className="delivery-game-hud" data-tour="transporter-home">
         <div className="delivery-game-title">
           <span><Sparkles size={14} />Driver world</span>
-          <h1>Choose a route. Move the harvest.</h1>
-          <p>Pick a delivery ticket, explore the island and keep each farm-to-hotel journey moving.</p>
+          <h1>Delivery jobs</h1>
+
         </div>
         <div className="delivery-hud-stats" aria-label="Delivery summary">
           <span><PackageCheck size={17} /><strong>{available.length}</strong> ready</span>
@@ -69,7 +69,7 @@ export default function TransporterHome() {
       <div className="delivery-workspace-grid">
         <div className="delivery-map-main" data-tour="transporter-jobs">
           {!selected ? (
-            <Card><EmptyState title="Choose a delivery ticket" detail="Select a job to see its island route, cargo and timing." /></Card>
+            <Card><EmptyState title="Choose a delivery ticket" /></Card>
           ) : (
             <DeliveryJourney
               key={selected.missionId}
@@ -81,7 +81,7 @@ export default function TransporterHome() {
                 <>
                   <div className="delivery-selected-summary">
                     <h3>Ready to claim this route?</h3>
-                    <p>{vehicleId ? "Harvest will check the selected vehicle’s capacity." : "Choose a vehicle above before accepting."}</p>
+                    {!vehicleId && <p>Select a vehicle</p>}
                   </div>
                   <button
                     className="button"
@@ -92,13 +92,13 @@ export default function TransporterHome() {
                   >
                     <Truck size={17} />Accept delivery
                   </button>
-                  {!online && <OfflineHint>Accepting a job commits you to a delivery, so it is never queued. Reconnect to accept.</OfflineHint>}
+                  {!online && <OfflineHint>Reconnect to continue</OfflineHint>}
                 </>
               ) : (
                 <>
                   <div className="delivery-selected-summary">
                     <h3>{selected.status === "DELIVERED" ? "Route completed" : "Your route is active"}</h3>
-                    <p>Open the full journey to confirm stops or report a problem.</p>
+
                   </div>
                   <Link className="button" href={"/missions/" + selected.missionId}>Open full route<ArrowRight size={17} /></Link>
                 </>

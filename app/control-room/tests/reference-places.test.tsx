@@ -44,18 +44,18 @@ const scene = {
 const frame = { batches: [], demands: [], missions: [], disruptions: [] } as unknown as ControlRoomFrame;
 
 describe("reference-place presentation", () => {
-  it("shows provenance, licence and the non-participant disclaimer", () => {
+  it("shows reference metadata without a disclaimer", () => {
     render(<Inspector scene={scene} frame={frame} selectedId={place.referencePlaceId} selectedAction={null} onClose={vi.fn()} />);
-    expect(screen.getByText("Reference location—not a Harvest participant or customer.")).toBeInTheDocument();
+    expect(screen.queryByText("Reference location—not a Harvest participant or customer.")).not.toBeInTheDocument();
     expect(screen.getByText("Supermarket or public market")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "OpenStreetMap contributors" })).toHaveAttribute("href", place.sourceUrl);
     expect(screen.getByRole("link", { name: source.licenceName })).toHaveAttribute("href", source.licenceUrl);
   });
 
-  it("keeps the actor synthetic while showing its nearby reference", () => {
+  it("shows the nearby reference without explanatory copy", () => {
     render(<Inspector scene={scene} frame={frame} selectedId="farm-1" selectedAction={null} onClose={vi.fn()} />);
     expect(screen.getByText("Nearby public reference")).toBeInTheDocument();
-    expect(screen.getByText(/This participant is synthetic/)).toBeInTheDocument();
+    expect(screen.queryByText(/This participant is synthetic/)).not.toBeInTheDocument();
   });
 
   it("renders persistent attribution and all reference categories in the key", () => {
@@ -103,7 +103,7 @@ describe("reference-place presentation", () => {
           licence: "Operator published timetable, reference use",
           retrievedAt: "2026-09-03",
         }]}
-        maritimeNote="Ports, links and exchange rates are public references. Schedules, capacities, prices and outcomes are SYNTHETIC."
+
         recordedWeather
       />,
     );
@@ -121,8 +121,8 @@ describe("reference-place presentation", () => {
     expect(screen.getByRole("link", { name: source.attribution })).toHaveAttribute("href", source.sourceUrl);
     expect(screen.getByRole("link", { name: source.licenceName })).toHaveAttribute("href", source.licenceUrl);
     expect(screen.getByText(/retrieved 2026-09-03/)).toBeVisible();
-    expect(screen.getByText(/Schedules, capacities, prices and outcomes are SYNTHETIC/)).toBeVisible();
-    expect(screen.getByText(/days labelled PUBLIC_REFERENCE/)).toBeVisible();
+    expect(screen.queryByText(/Schedules, capacities, prices and outcomes are SYNTHETIC/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/days labelled PUBLIC_REFERENCE/)).not.toBeInTheDocument();
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");

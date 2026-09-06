@@ -38,7 +38,7 @@ export function ApprovalList({ compact = false, embedded = false }: { compact?: 
   if (approvals.error) return <ErrorState error={approvals.error} />;
   if (!approvals.data) return <LoadingState label="Loading requests..." />;
   if (!approvals.data.items.length) {
-    return <EmptyState title="Nothing waiting for you" detail="New supply or recovery requests will appear here." />;
+    return <EmptyState title="Nothing waiting for you" />;
   }
 
   // The Product API refuses a decline without a reason and a next action.
@@ -60,7 +60,6 @@ export function ApprovalList({ compact = false, embedded = false }: { compact?: 
             </div>
             {decliningId === approval.approvalId && (
               <div className="decline-panel form-grid">
-                <p className="field-full muted-copy">Declining stops this commitment. Say what was wrong and what should happen next so the other participants can act on it.</p>
                 <DecisionReasonFields
                   disabled={decision.isPending}
                   idPrefix={`decline-${approval.approvalId}`}
