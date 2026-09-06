@@ -150,7 +150,7 @@ describe("a cross-island order", () => {
     // The border check, with the sentence that says what it is not.
     expect(screen.getByText(/Customs: Cleared/)).toBeInTheDocument();
     expect(screen.getByText(/SYN-CUSTOMS-9F31A0C2/)).toBeInTheDocument();
-    expect(screen.getByText(/not a legal customs model/i)).toBeInTheDocument();
+    expect(screen.queryByText(/not a legal customs model/i)).not.toBeInTheDocument();
 
     // Local value and the XCD comparison, and the rate that connects them.
     expect(screen.getByText(/EUR 251\.36 · XCD 291\.00/)).toBeInTheDocument();
@@ -159,7 +159,7 @@ describe("a cross-island order", () => {
     expect(screen.getByText(/Weather delayed the crossing by 1\.25 h/)).toBeInTheDocument();
   });
 
-  it("says plainly that nothing ships before every approval lands", async () => {
+  it("shows the pending approval state before shipment", async () => {
     vi.spyOn(api, "order").mockResolvedValue(
       order({
         lifecycleStatus: "AWAITING_APPROVAL",
@@ -175,7 +175,7 @@ describe("a cross-island order", () => {
 
     await waitFor(() => expect(screen.getByText("Cross-island supply")).toBeInTheDocument());
     expect(screen.getByText("1 of 2 approved")).toBeInTheDocument();
-    expect(screen.getByText(/Not yet — nothing ships until every approval is granted/)).toBeInTheDocument();
+    expect(screen.getByText(/Awaiting approval/)).toBeInTheDocument();
     expect(screen.queryByText("Shipment legs")).not.toBeInTheDocument();
   });
 

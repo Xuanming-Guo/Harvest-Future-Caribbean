@@ -53,7 +53,7 @@ describe("preview in Harvest", () => {
     render(<Inspector scene={scene} frame={frame} selectedId={null} selectedAction={action} onClose={vi.fn()} onPreviewAction={onPreviewAction} />);
 
     const button = screen.getByRole("button", { name: "Preview in Harvest" });
-    expect(screen.getByText(/replay of a typed Product API action, not browser automation/i)).toBeInTheDocument();
+    expect(screen.queryByText(/replay of a typed Product API action, not browser automation/i)).not.toBeInTheDocument();
     fireEvent.click(button);
     expect(onPreviewAction).toHaveBeenCalledWith(action);
   });
@@ -129,12 +129,12 @@ describe("preview in Harvest", () => {
     }
   });
 
-  it("closes on demand and states that it is a replay, not browser automation", () => {
+  it("closes on demand without explanatory copy", () => {
     const onClose = vi.fn();
     render(<ActionPreview message={toActionPreviewMessage(action, participant)} frameUrl={null} error={null} onClose={onClose} />);
 
-    expect(screen.getByText(/Replay of a typed Product API action, not browser automation/)).toBeInTheDocument();
-    expect(screen.getByText(/Opening the participant/)).toBeInTheDocument();
+    expect(screen.queryByText(/Replay of a typed Product API action, not browser automation/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Opening workspace/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close the Harvest preview" }));
     expect(onClose).toHaveBeenCalledTimes(1);
 

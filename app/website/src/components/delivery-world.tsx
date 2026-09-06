@@ -9,11 +9,7 @@ import {
   Clock3,
   Flag,
   MapPin,
-  Maximize2,
-  Minus,
-  Move,
   PackageCheck,
-  Plus,
   Route,
   Sprout,
   Truck,
@@ -24,6 +20,8 @@ import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type K
 
 import { Badge, Card, EmptyState, SectionTitle } from "@/components/ui";
 import { IslandGameCanvas, type IslandMarkerState } from "@/components/island-game-canvas";
+import { MapControls } from "@/components/map-controls";
+import { useIslandCamera } from "@/components/use-island-camera";
 import { formatDate, titleCase } from "@/lib/format";
 
 export type DeliveryMissionView = ApiSchema<"DeliveryMissionView">;
@@ -96,7 +94,7 @@ export function DeliveryBoard({
   ].filter((group) => group.items.length);
 
   if (!missions.length) {
-    return <EmptyState title="No delivery tickets yet" detail="Approved local orders will be pinned here automatically." />;
+    return <EmptyState title="No delivery tickets yet" />;
   }
 
   return (
@@ -277,16 +275,16 @@ function IslandBackdrop() {
   );
 }
 
-export function EmptyIslandWorld({ title = "The island is quiet", detail = "Delivery routes will appear here as soon as an order is ready to move." }: { title?: string; detail?: string }) {
+export function EmptyIslandWorld({ title = "The island is quiet" }: { title?: string; detail?: string }) {
   return (
     <Card className="delivery-journey empty-island-world">
       <div className="journey-heading">
-        <div className="journey-title-lockup"><span>Island map</span><SectionTitle title="Saint Lucia delivery world" detail="Explore local farm-to-hotel routes" /></div>
+        <div className="journey-title-lockup"><span>Island map</span><SectionTitle title="Delivery world" /></div>
       </div>
       <div className="journey-layout">
         <div className="island-stage empty-island-stage">
           <IslandBackdrop />
-          <div className="empty-world-message"><Sprout size={27} /><EmptyState title={title} detail={detail} /></div>
+          <div className="empty-world-message"><Sprout size={27} /><EmptyState title={title} /></div>
         </div>
       </div>
     </Card>
@@ -315,14 +313,13 @@ export function DeliveryJourney({
   const anchors = useMemo(() => routeAnchors(mission), [mission]);
   const [selectedStop, setSelectedStop] = useState(Math.max(1, mission.currentStopSequence || 1));
   const [zoomFarmId, setZoomFarmId] = useState<string | null>(null);
-  const [mapView, setMapView] = useState({ x: 0, y: 0, zoom: 1 });
+  const { stageRef, mapView, setMapView, clampView: clampMapView, inertiaFrame } = useIslandCamera();
   const [detailsOpen, setDetailsOpen] = useState(detailsInitiallyOpen);
   const [cameraBusy, setCameraBusy] = useState(false);
   const [farmLeaving, setFarmLeaving] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [rendererReady, setRendererReady] = useState(false);
   const transitionTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const inertiaFrame = useRef<number | null>(null);
   const gesture = useRef<{
     pointers: Map<number, { x: number; y: number }>;
     lastCenter: { x: number; y: number };
@@ -354,7 +351,6 @@ export function DeliveryJourney({
 
   useEffect(() => () => {
     transitionTimers.current.forEach(clearTimeout);
-    if (inertiaFrame.current !== null) cancelAnimationFrame(inertiaFrame.current);
   }, []);
 
   function scheduleTransition(callback: () => void, delay: number) {
@@ -411,16 +407,6 @@ export function DeliveryJourney({
     setMapView((current) => clampMapView(current.x + x, current.y + y, current.zoom));
   }
 
-  function clampMapView(x: number, y: number, zoom: number) {
-    const boundedZoom = Math.min(1.8, Math.max(1, zoom));
-    const horizontalLimit = 220 + Math.max(0, boundedZoom - 1) * 180;
-    const verticalLimit = 140 + Math.max(0, boundedZoom - 1) * 130;
-    return {
-      x: Math.max(-horizontalLimit, Math.min(horizontalLimit, x)),
-      y: Math.max(-verticalLimit, Math.min(verticalLimit, y)),
-      zoom: boundedZoom,
-    };
-  }
 
   function pointerCenter(pointers: Map<number, { x: number; y: number }>) {
     const points = [...pointers.values()];
@@ -526,11 +512,12 @@ export function DeliveryJourney({
   return (
     <Card className={`delivery-journey ${compact ? "is-compact" : ""} ${immersive ? "is-immersive" : ""}`}>
       <div className="journey-heading">
-        <div className="journey-title-lockup"><span>Island route</span><SectionTitle title="Saint Lucia delivery journey" detail={`${mission.stops.length} local stops`} /></div>
+        <div className="journey-title-lockup"><span>Island route</span><SectionTitle title="Delivery journey" detail={`${mission.stops.length} local stops`} /></div>
         <div className="journey-labels"><Badge>{mission.status}</Badge>{mission.atRisk && <Badge tone="high">At risk</Badge>}</div>
       </div>
       <div className="journey-layout">
         <div
+          ref={stageRef}
           className={`island-stage ${dragging ? "is-dragging" : ""} ${cameraBusy ? "is-camera-moving" : ""}`}
           tabIndex={zoomFarm ? -1 : 0}
           aria-busy={cameraBusy}
@@ -581,12 +568,7 @@ export function DeliveryJourney({
                   })}
                 </div>
               </div>
-              <div className="world-map-hint"><Move size={15} /><span>Illustrated island · drag to explore</span></div>
-              <div className="world-map-controls" aria-label="Map controls">
-                <button type="button" onClick={() => changeZoom(.2)} aria-label="Zoom in"><Plus size={18} /></button>
-                <button type="button" onClick={() => changeZoom(-.2)} aria-label="Zoom out" disabled={mapView.zoom === 1}><Minus size={18} /></button>
-                <button type="button" onClick={() => setMapView({ x: 0, y: 0, zoom: 1 })} aria-label="Reset map view"><Maximize2 size={17} /></button>
-              </div>
+              <MapControls zoom={mapView.zoom} onZoom={zoom => changeZoom(zoom - mapView.zoom)} onReset={() => setMapView({ x: 0, y: 0, zoom: 1 })} />
               {mission.atRisk && <span className="journey-warning" aria-hidden="true"><AlertTriangle size={19} /></span>}
             </>
           )}
@@ -596,7 +578,7 @@ export function DeliveryJourney({
         </button>
         <div className={`journey-panel ${detailsOpen ? "is-open" : ""}`}>
           <div className="journey-panel-handle"><span>Route card</span><button type="button" aria-label="Close route card" onClick={() => setDetailsOpen(false)}>×</button></div>
-          <div className="estimated-banner"><Truck size={18} /><span><strong>Estimated journey</strong><small>Illustrated route — not live GPS</small></span></div>
+          <div className="estimated-banner"><Truck size={18} /><span><strong>Estimated journey</strong></span></div>
           <div className="journey-facts">
             <div><Route size={17} /><span><strong>{mission.estimatedDistanceKm ?? "—"} km</strong><small>Route distance</small></span></div>
             <div><Clock3 size={17} /><span><strong>{mission.estimatedDurationMinutes ?? "—"} min</strong><small>Planned duration</small></span></div>

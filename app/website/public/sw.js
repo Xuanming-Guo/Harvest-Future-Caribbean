@@ -8,7 +8,7 @@
  * could otherwise be mistaken for current operational state.
  */
 
-const CACHE = "harvest-shell-v2";
+const CACHE = "harvest-shell-v3";
 const SHELL_ROUTES = ["/", "/farmer", "/marketplace"];
 
 function isShellDocument(url) {
@@ -70,7 +70,10 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin || url.pathname.startsWith("/v1/")) return;
   if (url.pathname.startsWith("/_next/static/")) {
-    event.respondWith(cacheFirst(request));
+    // Production chunks contain a content hash; development chunks reuse names.
+    // Reused names must check the network so a refresh can load the new UI.
+    const fingerprinted = /[a-f0-9]{8,}/i.test(url.pathname.split("/").pop());
+    event.respondWith(fingerprinted ? cacheFirst(request) : networkFirst(request));
     return;
   }
   if (wantsDocument(request) && isShellDocument(url)) {

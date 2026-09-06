@@ -39,7 +39,6 @@ import {
 } from "@/lib/recommended-action";
 
 /** The single sentence this workspace has to earn, quoted from issue #54. */
-const FARMER_VALUE = "Know what buyers need, show what you can supply, coordinate collection and keep a clear delivery history.";
 
 const OPEN_MISSION_STATUSES = ["AVAILABLE", "ASSIGNED", "PICKUP_IN_PROGRESS", "IN_TRANSIT"];
 const FINISHED_ORDER_STATUSES = ["FULFILLED", "PARTIALLY_FULFILLED", "REJECTED", "CANCELLED"];
@@ -116,10 +115,7 @@ export default function FarmerHome() {
         <PageHeader
           eyebrow="My farm"
           title={`Welcome, ${actor?.name.split(" ")[0] ?? "farmer"}`}
-          description="Do the one thing at the top, then work down the list only if you need to."
-          actions={<Badge>Synthetic demo data</Badge>}
         />
-        <p className="workspace-intro">{FARMER_VALUE}</p>
         <RecommendedNow
           action={recommendation}
           onDismiss={(key) => setDismissed((keys) => [...keys, key])}
@@ -142,7 +138,6 @@ export default function FarmerHome() {
         <div className="owed-summary">
           <span className="owed-mark" aria-hidden="true"><Wallet size={22} /></span>
           <b className={owed.overdueCount ? "owed-amount owed-amount-late" : "owed-amount"}>{formatMoney(owed.amount, owed.currency)}</b>
-          <p>Harvest tracks payment; it does not move money. This is what buyers have agreed to pay you for produce they already accepted.</p>
         </div>
       </Card>
 
@@ -185,9 +180,8 @@ export default function FarmerHome() {
           title="Update what is growing"
           summary={openBatches.length ? `${plural(openBatches.length, "crop")} · ${formatKg(safeToSell)} safe to promise` : "No crops recorded yet"}
         >
-          <p className="section-lede">Tell Harvest what you see in the field. Each update keeps your harvest range and the amount you can safely sell close to the truth.</p>
           {!cropBatches.length ? (
-            <EmptyState title="No crops recorded yet" detail="Your crop batches appear here once your first one is created." />
+            <EmptyState title="No crops recorded yet" />
           ) : (
             <>
               <div className="crop-grid">
@@ -227,9 +221,8 @@ export default function FarmerHome() {
           title="Offer current or future harvests"
           summary={!offerableBatches.length ? "No forecast supply to offer yet" : stillToOffer ? `${plural(stillToOffer, "crop")} still to offer` : "Available harvests are already offered"}
         >
-          <p className="section-lede">Offer ready produce or reserve a future harvest from its forecast date. Harvest checks the safe quantity and collection window before a commitment can be approved.</p>
           {!offerableBatches.length ? (
-            <EmptyState title="No forecast supply to offer yet" detail="Share a crop update to get a safe quantity and the earliest date you can promise it." />
+            <EmptyState title="No forecast supply to offer yet" />
           ) : (
             offerableBatches.map((batch) => {
               const offered = offeredBatchIds.has(batch.cropBatchId);
@@ -257,9 +250,8 @@ export default function FarmerHome() {
           title="View buyer demand"
           summary={buyerNeeds.length ? `${plural(buyerNeeds.length, "buyer")} ${buyerNeeds.length === 1 ? "wants" : "want"} crops you grow` : "No open demand for your crops"}
         >
-          <p className="section-lede">Open needs from buyers near you, matched to the crops you grow. Buyer names and exact addresses stay private until an order is agreed.</p>
           {!buyerNeeds.length ? (
-            <EmptyState title="No matching demand yet" detail="Open buyer needs for your crops will appear here." />
+            <EmptyState title="No matching demand yet" />
           ) : (
             <>
               <div className="task-list">
@@ -294,7 +286,6 @@ export default function FarmerHome() {
           title="Respond to an opportunity"
           summary={pendingApprovals.length ? `${plural(pendingApprovals.length, "decision")} waiting for you` : `${plural(liveOrders.length, "request")} in progress`}
         >
-          <p className="section-lede">A buyer has asked for produce from your farm. Nothing is promised on your behalf until you agree to it.</p>
           <ApprovalList compact embedded />
           <h3 className="panel-heading">Requests in progress</h3>
           <OrderList
@@ -314,9 +305,8 @@ export default function FarmerHome() {
           title="Track collection"
           summary={collections.length ? `${plural(collections.length, "collection")} planned` : "No collection planned"}
         >
-          <p className="section-lede">A driver comes to your farm, collects the produce and takes it to the buyer. Open a collection to see the stops and when the driver is on the way.</p>
           {!collections.length ? (
-            <EmptyState title="No pickups scheduled" detail="Approved commitments create a collection here." />
+            <EmptyState title="No pickups scheduled" />
           ) : (
             <>
               <div className="mission-list">
@@ -350,9 +340,8 @@ export default function FarmerHome() {
           title="View previous deliveries"
           summary={finishedOrders.length ? `${plural(finishedOrders.length, "delivery", "deliveries")} · ${formatKg(acceptedKg)} accepted` : "No finished deliveries yet"}
         >
-          <p className="section-lede">What buyers actually took, kept in one place. This record is what makes your farm easy to buy from again.</p>
           {!finishedOrders.length ? (
-            <EmptyState title="No finished deliveries yet" detail="Once an order is delivered and checked by the buyer, it is recorded here." />
+            <EmptyState title="No finished deliveries yet" />
           ) : (
             <>
               <p className="history-summary">Buyers accepted {formatKg(acceptedKg)} of the {formatKg(requestedKg)} asked for, across {plural(finishedOrders.length, "finished order")}.</p>
@@ -414,9 +403,6 @@ function RecommendedNow({
       <h2 className="recommended-headline" id="recommended-headline">
         {action ? action.headline : "Nothing is waiting for you"}
       </h2>
-      <p className="recommended-support">
-        {action ? action.support : "Your crops are up to date and no buyer is waiting on you. The next thing to do will appear here."}
-      </p>
       {action && (
         <div className="recommended-actions">
           <Link className="button button-hero" href={action.href}>

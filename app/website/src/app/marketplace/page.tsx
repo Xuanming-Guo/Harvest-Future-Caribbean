@@ -63,11 +63,11 @@ export default function MarketplacePage() {
 
   return (
     <>
-      <PageHeader eyebrow="Local marketplace" title="Find produce you can rely on" description="Browse quantities that farmers can safely promise, then place an order or record future demand." />
+      <PageHeader eyebrow="Local marketplace" title="Find produce you can rely on" />
       <div className="grid marketplace-layout">
         <div data-tour="marketplace-supply">
           <div className="filter-row"><label htmlFor="crop-filter">Crop</label><input id="crop-filter" value={cropType} onChange={(event) => setCropType(event.target.value.toUpperCase())} /></div>
-          {listings.error ? <ErrorState error={listings.error} /> : !listings.data ? <LoadingState label="Loading local produce..." /> : !listings.data.items.length ? <EmptyState title="No produce listed yet" detail="Record your demand so coordinators and farmers can respond." /> : (
+          {listings.error ? <ErrorState error={listings.error} /> : !listings.data ? <LoadingState label="Loading local produce..." /> : !listings.data.items.length ? <EmptyState title="No produce listed yet" /> : (
             <div className="listing-grid">
               {listings.data.items.map((listing) => (
                 <button type="button" className={`listing-card card ${selected.includes(listing.listingId) ? "selected" : ""}`} key={listing.listingId} onClick={() => toggle(listing.listingId)}>
@@ -119,10 +119,9 @@ export default function MarketplacePage() {
                   </button>
                 ))}
               </div>
-              <small className="field-hint">Hotels often take part of an order and source the rest elsewhere.</small>
             </div>
             <div className="field-full order-summary"><span>Requested <strong>{quantity} kg</strong></span><span>Selected <strong>{selectedSupply} kg</strong></span></div>
-            {!online && <div className="field-full"><OfflineHint>An order reserves supply from other farms, so it is never queued. Reconnect to send it.</OfflineHint></div>}
+            {!online && <div className="field-full"><OfflineHint>Reconnect to continue</OfflineHint></div>}
             <button type="button" className="button button-secondary" data-tour="marketplace-demand-save" disabled={demand.isPending} aria-disabled={!online || undefined} onClick={() => { if (online) demand.mutate(); }}><Plus size={16} />{demand.isPending ? "Saving..." : "Save as demand"}</button>
             <button className="button" data-tour="marketplace-order-submit" aria-disabled={!online || undefined} disabled={order.isPending || !selected.length || !actor?.deliveryLocation}><ShoppingCart size={16} />{order.isPending ? "Placing order..." : "Place order"}</button>
           </form>

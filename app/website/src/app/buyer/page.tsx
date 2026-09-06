@@ -27,7 +27,7 @@ export default function BuyerHome() {
 
   return (
     <>
-      <div data-tour="buyer-home"><PageHeader eyebrow="Buyer overview" title={`Welcome, ${actor?.name ?? "buyer"}`} description="Plan local demand, confirm safe supply and follow every delivery in one place." actions={<Link href="/marketplace" className="button" data-tour="buyer-marketplace-link"><ShoppingBasket size={17} />Find local produce</Link>} /></div>
+      <div data-tour="buyer-home"><PageHeader eyebrow="Buyer overview" title={`Welcome, ${actor?.name ?? "buyer"}`} actions={<Link href="/marketplace" className="button" data-tour="buyer-marketplace-link"><ShoppingBasket size={17} />Find local produce</Link>} /></div>
       <div className="metric-grid">
         <Metric label="Open demand" value={demands.data?.items.filter((item) => item.status !== "SATISFIED" && item.status !== "CANCELLED").length ?? "-"} detail="Needs being sourced" icon={ClipboardList} />
         <Metric label="Active orders" value={orderItems.filter((item) => !["FULFILLED", "REJECTED", "CANCELLED"].includes(item.lifecycleStatus)).length} detail="In progress" icon={ShoppingBasket} tone="blue" />
@@ -40,8 +40,7 @@ export default function BuyerHome() {
       </div>
       <Card className="section-gap" data-tour="buyer-payments">
         <SectionTitle title="Payments due" detail={`${payable.length} awaiting your confirmation`} />
-        <p className="payment-disclaimer">Harvest tracks payment; it does not move money. Pay the farmer the way you already do, then confirm it here so they can see it settled.</p>
-        {!payable.length ? <EmptyState title="Nothing outstanding" detail="Accepted deliveries you still owe for will appear here with their due date." /> : (
+        {!payable.length ? <EmptyState title="Nothing outstanding" /> : (
           <div className="payment-list">{payable.map((order) => (
             <div className="payment-row" key={order.orderId}>
               <div>
@@ -60,7 +59,7 @@ export default function BuyerHome() {
       </Card>
       <Card className="section-gap">
         <SectionTitle title="Demand history" detail={`${demands.data?.items.length ?? 0} requests`} />
-        {!demands.data?.items.length ? <EmptyState title="No demand recorded" detail="Save a requirement from the marketplace to start sourcing." /> : (
+        {!demands.data?.items.length ? <EmptyState title="No demand recorded" /> : (
           <div className="order-list">{demands.data.items.map((item) => (
             <div className="order-row" key={item.demandId}><div><strong>{titleCase(item.cropType)}</strong><small>Needed {formatDate(item.neededBy)}</small></div><span>{item.quantity.value} kg</span><Badge>{item.status}</Badge></div>
           ))}</div>

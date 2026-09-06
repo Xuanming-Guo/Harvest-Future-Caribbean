@@ -458,11 +458,10 @@ describe("weather controls and readout", () => {
     expect(screen.getByText(/Storm · 61 mm rain · 72 kph from S · Cool/)).toBeInTheDocument();
   });
 
-  it("keeps the synthetic and model-predicted labels visible", () => {
+  it("omits explanatory weather copy", () => {
     render(<LegendHarness frame={frameWith([reading()])} />);
-    expect(screen.getByText(/SYNTHETIC realised weather/)).toBeInTheDocument();
-    expect(screen.getByText(/MODEL_PREDICTED forecast/)).toBeInTheDocument();
-    expect(screen.getByText(/No live weather service/)).toBeInTheDocument();
+    expect(screen.queryByText(/SYNTHETIC realised weather/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No live weather service/)).not.toBeInTheDocument();
   });
 
   it("still renders the crop key alone, for the launch screen", () => {

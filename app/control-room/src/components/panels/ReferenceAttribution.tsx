@@ -13,7 +13,7 @@ import type { MaritimeAttribution, ReferenceDataSource } from "@harvest/simulati
  * while a sailing or a delivery plays. Collapsing is not removing: ODbL
  * requires the OpenStreetMap credit wherever the data is drawn, so the credit
  * itself is never behind the toggle, only the apparatus around it. The panel
- * drops nothing, and the synthetic-outcomes caveat is one click away.
+ * preserves the publisher and licence details.
  *
  * Two groups, kept apart rather than merged: the places snapshot is
  * OpenStreetMap under ODbL, while the ports, ferry links and exchange rates
@@ -34,12 +34,10 @@ function Caret(): React.JSX.Element {
 export default function ReferenceAttribution({
   sources,
   maritime = [],
-  maritimeNote,
   recordedWeather = false,
 }: {
   sources: ReferenceDataSource[];
   maritime?: MaritimeAttribution[];
-  maritimeNote?: string;
   /**
    * True when this run's realised weather includes recorded `PUBLIC_REFERENCE`
    * days. Named on the collapsed line because a viewer reading a storm off the
@@ -115,14 +113,6 @@ export default function ReferenceAttribution({
                 {` · ${attribution.licence} · retrieved ${attribution.retrievedAt}`}
               </span>
             ))}
-            {maritimeNote && <span className="reference-attribution-note"> {maritimeNote}</span>}
-          </p>
-        )}
-        {recordedWeather && (
-          <p className="reference-attribution-group">
-            Recorded weather: days labelled PUBLIC_REFERENCE are read from a committed reference
-            dataset on disk, never a live service. The orders, deliveries and outcomes around them
-            stay synthetic.
           </p>
         )}
       </div>

@@ -38,13 +38,13 @@ describe("control-room outcome source", () => {
     render(<MetricsPanel frame={frame} policy="HARVEST" />);
 
     expect(screen.getByText("Harvest product outcomes")).toBeInTheDocument();
-    expect(screen.getByText(/run-scoped Product API records/i)).toBeInTheDocument();
+    expect(screen.queryByText(/run-scoped Product API records/i)).not.toBeInTheDocument();
     expect(screen.getByText("854")).toBeInTheDocument();
     expect(screen.getByText("Total orders").nextElementSibling).toHaveTextContent("12");
     expect(screen.getByText("Fulfilled").nextElementSibling).toHaveTextContent("4");
     expect(screen.getByText("Completed delivery missions").nextElementSibling).toHaveTextContent("4");
     expect(screen.getByText("Overdue payments").nextElementSibling).toHaveTextContent("2");
-    expect(screen.getByText(/does not move money/i)).toBeInTheDocument();
+    expect(screen.queryByText(/does not move money/i)).not.toBeInTheDocument();
     expect(screen.queryByText("Substituted")).not.toBeInTheDocument();
     expect(screen.getByText("Why orders were missed")).toBeInTheDocument();
     expect(screen.getByText("No ready supply").nextElementSibling).toHaveTextContent("3");
@@ -55,7 +55,7 @@ describe("control-room outcome source", () => {
     render(<MetricsPanel frame={frame} policy="BASELINE" />);
 
     expect(screen.getByText("Fragmented baseline outcomes")).toBeInTheDocument();
-    expect(screen.getByText(/physical simulation engine/i)).toBeInTheDocument();
+    expect(screen.queryByText(/physical simulation engine/i)).not.toBeInTheDocument();
     expect(screen.getByText("Substituted").nextElementSibling).toHaveTextContent("2,033");
     expect(screen.queryByText("Approved commitments")).not.toBeInTheDocument();
     expect(screen.queryByText("Overdue payments")).not.toBeInTheDocument();

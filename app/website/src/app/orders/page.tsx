@@ -14,7 +14,6 @@ export default function OrdersPage() {
       <PageHeader
         eyebrow="Shared commitments"
         title="Orders"
-        description={actor?.role === "BUYER" ? "Follow every order from request through delivery acceptance." : "See the orders that include your farm or need your coordination."}
         actions={actor?.role === "BUYER" ? <Link href="/marketplace" className="button"><ShoppingBasket size={17} />Find produce</Link> : undefined}
       />
       <OrderList />

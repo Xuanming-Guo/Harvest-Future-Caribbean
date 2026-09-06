@@ -66,19 +66,11 @@ describe("weather evidence saved with a replay", () => {
     expect(weatherHeadline({ ...(frames[0] as ControlRoomFrame), weather: undefined })).toBeNull();
   });
 
-  it("shows the weather beside the mandatory synthetic badge", () => {
+  it("shows the weather without explanatory badges", () => {
     render(<Masthead scene={scene} frame={frames.at(-1) as ControlRoomFrame} />);
-    expect(screen.getByText("Synthetic simulation")).toBeInTheDocument();
+    expect(screen.queryByText("Synthetic simulation")).not.toBeInTheDocument();
     expect(screen.getByText(/storm|rain|settled/)).toBeInTheDocument();
-  });
-
-  it("keeps the provenance caveat on the masthead pill itself (#39)", () => {
-    // The overlay put the weather on the globe, where a screenshot can crop
-    // the panels away. The claim and its caveat therefore stay in one element.
-    render(<Masthead scene={scene} frame={frames.at(-1) as ControlRoomFrame} />);
-    const pill = screen.getByText(/storm|rain|settled/);
-    expect(pill.getAttribute("title")).toMatch(/[Ss]ynthetic/);
-    expect(pill.getAttribute("title")).toMatch(/forecasts are model predictions/);
+    expect(screen.getByText(/storm|rain|settled/)).not.toHaveAttribute("title");
   });
 
   it("draws the same weather on the globe that the masthead and panel word (#39)", () => {

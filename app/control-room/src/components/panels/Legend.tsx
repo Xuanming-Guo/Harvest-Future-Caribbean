@@ -131,21 +131,6 @@ export default function Legend(props: LegendProps = {}): React.JSX.Element {
               </ul>
             </div>
           )}
-
-          {/*
-           * Never dropped, and never behind a hover: realised weather is a
-           * synthetic record and a forecast is a model prediction, which are
-           * two different claims. The repository's evidence policy turns on
-           * saying so wherever the numbers appear.
-           */}
-          <p className="panel-help weather-provenance">
-            {weatherLegend?.realisedProvenance ?? "SYNTHETIC"} realised weather ·{" "}
-            {weatherLegend?.forecastProvenance ?? "MODEL_PREDICTED"} forecast.{" "}
-            {/* The published note opens by restating the provenance label, which
-                the line above has already said. */}
-            {(weatherLegend?.note ?? "Realised weather is generated from the run seed. No live weather service is used anywhere in this system.")
-              .replace(/^SYNTHETIC\.\s*/, "")}
-          </p>
         </section>
       )}
     </>

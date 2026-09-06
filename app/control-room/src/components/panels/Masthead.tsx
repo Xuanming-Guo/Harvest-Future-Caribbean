@@ -1,14 +1,6 @@
 "use client";
 
-/**
- * The control room's masthead: wordmark, policy toggle, seed control, and the
- * mandatory evidence badge.
- *
- * The evidence badge sits in the same visual unit as the title deliberately —
- * see globals.css's note on `.evidence-badge`. A screenshot cropped to "look
- * impressive" cannot separate the claim from its caveat if the caveat lives
- * right next to the claim.
- */
+/** Run title, settings, and weather. */
 
 import type { ControlRoomFrame, ControlRoomScene } from "@harvest/simulation";
 
@@ -48,7 +40,7 @@ export default function Masthead({ scene, frame, estimationMode, estimationModeU
       <span className="pill">{scene.policy.toLowerCase()}</span>
       <span className="pill">seed {scene.seed}</span>
       {weather && (
-        <span className="pill" title="Synthetic realised weather; forecasts are model predictions and can be wrong.">
+        <span className="pill">
           {weather}
         </span>
       )}
@@ -60,26 +52,12 @@ export default function Masthead({ scene, frame, estimationMode, estimationModeU
        * the inspector.
        */}
       {estimationMode && (
-        <span
-          className="pill"
-          title={estimationModeUsed
-            ? `Forecasts in this run were produced by the ${ESTIMATION_LABELS[estimationMode]}.`
-            : "Baseline runs do not use the Product API or a harvest-estimation model; the choice is recorded but unused."}
-        >
+        <span className="pill">
           {estimationModeUsed
             ? `estimate: ${ESTIMATION_LABELS[estimationMode]}`
             : `estimate: ${ESTIMATION_LABELS[estimationMode]} (unused)`}
         </span>
       )}
-
-      {/*
-       * Mandatory, never dismissible: this run is entirely synthetic and must
-       * never be read as measured real-world impact. `title` carries the fuller
-       * provenance note for anyone who hovers.
-       */}
-      <span className="evidence-badge" title={scene.evidenceLabel} style={{ marginLeft: "auto" }}>
-        Synthetic simulation
-      </span>
     </div>
   );
 }

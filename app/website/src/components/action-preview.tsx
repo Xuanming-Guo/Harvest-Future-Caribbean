@@ -105,7 +105,7 @@ export function ActionPreviewCaption({ action, control, located, unmappedReason,
   const rejected = action.status === "REJECTED";
   return (
     <aside className={`action-preview-caption${side === "left" ? " is-left" : ""}`} role="status" aria-live="polite">
-      <p className="action-preview-eyebrow">Simulated action replay</p>
+      <p className="action-preview-eyebrow">Action replay</p>
       <h2>{action.participantName}</h2>
       <dl className="action-preview-facts">
         <div><dt>Role</dt><dd>{action.role.toLowerCase()}</dd></div>
@@ -132,9 +132,6 @@ export function ActionPreviewCaption({ action, control, located, unmappedReason,
             ? <p className="action-preview-note">A person does this with <strong>{control}</strong>, highlighted here.</p>
             : <p className="action-preview-note">A person does this with <strong>{control}</strong>. It is not on screen at this point in the saved run, so the section that owns it is shown instead.</p>
         )}
-      <p className="action-preview-provenance">
-        Replay of a typed Product API action, not browser automation. Nothing is sent, and the saved run cannot change.
-      </p>
     </aside>
   );
 }
@@ -251,7 +248,7 @@ export function ActionPreviewController({ actor }: { actor: SessionActor }) {
   if (!action) {
     return (
       <div className="action-preview-layer" data-testid="action-preview-layer">
-        <aside className="action-preview-caption"><p className="action-preview-eyebrow">Simulated action replay</p><p className="action-preview-summary">Waiting for the control room to send this action.</p></aside>
+        <aside className="action-preview-caption"><p className="action-preview-eyebrow">Action replay</p><p className="action-preview-summary">Waiting for action…</p></aside>
       </div>
     );
   }

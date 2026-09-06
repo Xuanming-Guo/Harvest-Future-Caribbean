@@ -18,7 +18,6 @@ export function OrderList({
   embedded = false,
   filter,
   emptyTitle = "No orders yet",
-  emptyDetail = "Orders you take part in will appear here.",
 }: {
   limit?: number;
   embedded?: boolean;
@@ -31,7 +30,7 @@ export function OrderList({
   if (!orders.data) return <LoadingState label="Loading orders..." />;
   const matching = filter ? orders.data.items.filter(filter) : orders.data.items;
   const items = limit ? matching.slice(0, limit) : matching;
-  if (!items.length) return <EmptyState title={emptyTitle} detail={emptyDetail} />;
+  if (!items.length) return <EmptyState title={emptyTitle} />;
   const list = (
     <div className="order-list">
       {items.map((order) => (

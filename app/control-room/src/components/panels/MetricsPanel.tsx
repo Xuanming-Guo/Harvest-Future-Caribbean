@@ -69,7 +69,6 @@ export default function MetricsPanel({ frame, policy }: MetricsPanelProps): Reac
           <span className="panel-title">Harvest product outcomes</span>
         </header>
         <div className="panel-body">
-          <p className="metrics-source">From run-scoped Product API records at this replay instant.</p>
           {snapshot ? (
             <>
               <div className="metric-grid">
@@ -83,11 +82,10 @@ export default function MetricsPanel({ frame, policy }: MetricsPanelProps): Reac
                 <Metric label="Completed delivery missions" value={snapshot.completedMissionCount} />
                 <Metric label="Overdue payments" value={snapshot.paymentOverdueCount ?? 0} />
               </div>
-              <p className="metrics-source">Harvest tracks payment terms and status; it does not move money.</p>
               <MissedOrderCauses causes={snapshot.orderOutcomes.causes} />
             </>
           ) : (
-            <p className="metrics-unavailable">No Product API snapshot is available for this older saved frame.</p>
+            <p className="metrics-unavailable">No outcomes available</p>
           )}
         </div>
       </section>
@@ -102,7 +100,6 @@ export default function MetricsPanel({ frame, policy }: MetricsPanelProps): Reac
         <span className="panel-title">Fragmented baseline outcomes</span>
       </header>
       <div className="panel-body">
-        <p className="metrics-source">From the physical simulation engine; baseline actors do not use Harvest.</p>
         <div className="metric-grid">
           <Metric label="Delivered" value={frame.totals.acceptedKg} unit="kg" />
           <Metric label="Substituted" value={frame.totals.substitutedKg} unit="kg" />
