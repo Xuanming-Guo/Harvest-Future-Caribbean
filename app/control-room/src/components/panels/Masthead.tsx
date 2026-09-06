@@ -12,6 +12,7 @@
 
 import type { ControlRoomFrame, ControlRoomScene } from "@harvest/simulation";
 
+import HarvestMark from "@/components/HarvestMark";
 import { weatherHeadline } from "@/lib/run";
 
 import type { EstimationMode } from "@/lib/run";
@@ -37,13 +38,11 @@ export default function Masthead({ scene, frame, estimationMode, estimationModeU
   const weather = frame ? weatherHeadline(frame) : null;
   return (
     <div className="masthead">
-      <span className="masthead-mark" aria-hidden="true">
-        H
-      </span>
+      <HarvestMark />
 
       <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
         <span className="masthead-title">Harvest control room</span>
-        <span className="masthead-sub">{scene.scenarioId}</span>
+        <span className="masthead-sub">{scene.scenarioId === "caribbean-islands-v1" ? "Caribbean food network" : scene.scenarioId === "saint-lucia-demo-v1" ? "Saint Lucia benchmark" : scene.scenarioId.replace(/^caribbean-/, "").replace(/-v1$/, "").replaceAll("-", " ")}</span>
       </div>
 
       <span className="pill">{scene.policy.toLowerCase()}</span>

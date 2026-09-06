@@ -282,6 +282,7 @@ export function syncScene(Cesium: CesiumModule, viewer: Viewer, scene: ControlRo
   for (const road of scene.roads) {
     viewer.entities.add({
       id: road.roadSegmentId,
+      show: false,
       name: road.name,
       polyline: {
         positions: Cesium.Cartesian3.fromDegreesArray([
@@ -355,6 +356,7 @@ function syncMaritimeScene(Cesium: CesiumModule, viewer: Viewer, scene: ControlR
     if (!from || !to) continue;
     viewer.entities.add({
       id: `sea-link::${link.id}`,
+      show: false,
       name: `${link.operator} — ${from.name} to ${to.name}`,
       polyline: {
         positions: Cesium.Cartesian3.fromDegreesArray([from.longitude, from.latitude, to.longitude, to.latitude]),
@@ -475,7 +477,7 @@ function syncMissions(
     const drawPath = mission.status === "PLANNED" || mission.status === "ACTIVE" || mission.status === "DELAYED";
     const pathEntity = ensurePolylineEntity(Cesium, viewer, mission.missionId, mission.path);
     if (pathEntity.polyline) {
-      pathEntity.show = drawPath && mission.path.length >= 2;
+      pathEntity.show = drawPath && mission.missionId === selectedId && mission.path.length >= 2;
       const selected = isSelected(mission.missionId, selectedId);
       pathEntity.polyline.width = new Cesium.ConstantProperty(selected ? 4 : 2);
       pathEntity.polyline.material = new Cesium.ColorMaterialProperty(
@@ -553,7 +555,7 @@ function syncShipments(
       });
       route.polyline.width = new Cesium.ConstantProperty(selected ? 5 : 3);
     }
-    route.show = true;
+    route.show = selected;
     route.name = `${shipment.operator} · ${shipment.status.toLowerCase()}`;
 
     const vesselId = `vessel::${shipment.shipmentId}`;
