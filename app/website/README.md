@@ -102,3 +102,13 @@ demo token, actor summary, and tutorial preference, never operational records.
 All seeded records are demo data. The participant interface presents them as
 normal workflow records and does not describe simulated outcomes as deployed
 impact.
+
+## Dated harvest offers
+
+The farmer workspace offers forecast supply as well as harvest-ready produce.
+Growing/maturing batches need a published `promisableFrom` date and positive
+available-to-promise quantity before an offer is recommended. Labels distinguish
+future harvests from ready crops. Calendar-only contract dates retain their
+published day; actual timestamps still display in Saint Lucia time. Expired
+buyer needs are not recommended as current work. The Product API continues to
+validate quantities, availability dates and every human approval.

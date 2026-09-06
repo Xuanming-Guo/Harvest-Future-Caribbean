@@ -93,6 +93,18 @@ const everything = (): RecommendedActionInput =>
   });
 
 describe("recommended action", () => {
+  it("offers dated forecast supply without calling it harvest ready", () => {
+    const action = selectRecommendedAction(input({ batches: [batch({ cropBatchId: "future", status: "GROWING", availableToPromise: { value: 20, unit: "kg" }, promisableFrom: "2026-09-08" })] }));
+    expect(action?.headline).toContain("can be promised from");
+    expect(action?.headline).toContain("8 Sept 2026");
+    expect(action?.href).toBe("/crops/future#offer-produce");
+  });
+
+  it("does not recommend a buyer need after its deadline", () => {
+    const actions = recommendedActions(input({ ...everything(), opportunities: [opportunity({ opportunityId: "expired", neededBy: "2026-09-02T12:00:00Z" })] }));
+    expect(actions.some((action) => action.kind === "RESPOND_TO_BUYER")).toBe(false);
+  });
+
   it("puts ready produce nobody can buy yet at the top", () => {
     const action = selectRecommendedAction(input({
       ...everything(),

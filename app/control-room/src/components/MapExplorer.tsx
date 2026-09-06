@@ -26,7 +26,7 @@ export default function MapExplorer({ islands, scene, frame, activeIsland, onIsl
     </div>
     {!routeMode ? <>
       <input className="island-search" aria-label="Search islands" placeholder="Search 28 islands & territories…" value={query} onChange={(event) => setQuery(event.target.value)} />
-      <button type="button" className={`island-overview ${activeIsland === null ? "is-active" : ""}`} onClick={() => onIsland(null)}><span>◎ Caribbean overview</span><small>{scope.size} islands in this run</small></button>
+      <button type="button" className={`island-overview ${activeIsland === null ? "is-active" : ""}`} onClick={() => onIsland(null)}><span>◎ Caribbean overview</span><small>{scope.size} {scope.size === 1 ? "island" : "islands"} in this run</small></button>
       <div className="island-directory">
         {filtered.map((island) => <button type="button" key={island.islandId} className={activeIsland === island.islandId ? "is-active" : ""} aria-pressed={activeIsland === island.islandId} onClick={() => onIsland(island.islandId)}>
           <span><strong>{island.name}</strong><small>{scope.has(island.islandId) ? `${scene.farms.filter((farm) => farm.islandId === island.islandId).length} farms · saved activity` : "Geographic context · outside this run"}</small></span><span aria-hidden="true">↗</span>

@@ -385,3 +385,8 @@ key remain under **Outcomes & scenario tools**. **Activity** reveals the inspect
 and event feed. Custom searchable menus preserve keyboard selection and Escape.
 The map pauses rendering when its WebGL drawing buffer has zero dimensions during
 an embedded-browser resize, and resumes when a drawable surface is available.
+
+The browser follow-up in #117 gives the desktop island directory its own
+scrollable area without a second outer scrollbar, leaves mobile explorer and
+playback controls separated, and preserves simultaneous activity events using
+frame ordinals instead of non-unique timestamp/type keys.
