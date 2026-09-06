@@ -193,7 +193,11 @@ scope, not only the role name.
   coordinator/operations/admin.
 - Request: UUID path parameter; no body.
 - Response: observable batch identity/type/status, latest observation and
-  prediction IDs, deterministic `availableToPromise`, and provenance. When the
+  prediction IDs, deterministic `availableToPromise`, `promisableFrom`, and
+  provenance. `promisableFrom` is the first date the promisable produce can be
+  handed over: today for a batch reported `HARVEST_READY` or `HARVESTED`, the
+  start of the forecast harvest window for one still growing. It is absent
+  until a forecast exists. When the
   batch's most recent verification decision was `REQUEST_CHANGES`, or its most
   recent delivery line was rejected, the response also carries the additive
   optional `latestDecision` object: `source` (`VERIFICATION` or `DELIVERY`),
@@ -317,18 +321,24 @@ scope, not only the role name.
 - Request: `cropBatchId`, `quantity`, `unitPrice`, `availableFrom`,
   `availableUntil`.
 - Response: listing ID plus owner/crop/status/created time and submitted fields.
-- Product state/event: verify the batch is reported `HARVEST_READY` or
-  `HARVESTED` and the quantity is within current ATP, store the active
-  listing, emit `LISTING_PUBLISHED`, then re-run matching once for every
-  `REQUESTED` order of that crop whose deadline is still ahead (oldest
-  deadline first). Before any matching pass, listings whose `availableUntil`
-  has passed move to `EXPIRED` with `LISTING_EXPIRED`.
+- Product state/event: verify the batch has promisable produce, that
+  `availableFrom` is not before the batch's `promisableFrom`, and that the
+  quantity is within current ATP; store the active listing, emit
+  `LISTING_PUBLISHED`, then re-run matching once for every `REQUESTED` order of
+  that crop whose deadline is still ahead (oldest deadline first). Before any
+  matching pass, listings whose `availableUntil` has passed move to `EXPIRED`
+  with `LISTING_EXPIRED`. A growing crop may be listed: reserving a future
+  harvest is the product, and the window is what keeps the promise honest.
 - Simulation effect: make supply discoverable to eligible buyer actors at later
   scheduled actions; do not change biological yield.
 - Consumers: farmer inventory/listing view, marketplace, operations supply.
-- Rules/failures: return `422` `CROP_NOT_READY` for a growing batch, `422`
+- Rules/failures: return `422` `LISTING_BEFORE_HARVEST_WINDOW` when
+  `availableFrom` precedes the batch's `promisableFrom`, `422` `CROP_NOT_READY`
+  for a batch with nothing promisable at all (`PLANNED` or `CLOSED`), `422`
   `ATP_EXCEEDED` when quantity exceeds ATP, `422` when dates/prices are
-  invalid; `409` when a concurrent reservation makes supply unsafe.
+  invalid; `409` when a concurrent reservation makes supply unsafe. An
+  observation that takes a crop out of readiness, or out of the promisable
+  states entirely, withdraws its active listings.
 
 #### `POST /v1/buyer-demands`
 
@@ -372,10 +382,15 @@ scope, not only the role name.
   Harvest records the term and derives the resulting status; it never moves
   money, holds funds, or verifies a transfer.
 - Product state/event: store `REQUESTED`, start matching, and emit
-  `ORDER_REQUESTED`. Creation does not reserve stock. An order whose safe cover
-  falls below `minimumAcceptableFraction` stays `REQUESTED` with `outcomeCause`
-  `NO_READY_SUPPLY` or `INSUFFICIENT_SUPPLY` and is re-matched automatically
-  when a later listing of the same crop is published. When a published crop
+  `ORDER_REQUESTED`. Creation does not reserve stock. Matching pairs an order
+  only with listings whose produce can reach it: `availableFrom` plus the
+  collection lead time — an hour to get a vehicle on the road, the drive from
+  that farm, and the handling at each end — must not pass `neededBy`. An order
+  whose safe cover falls below `minimumAcceptableFraction` stays `REQUESTED`
+  with `outcomeCause` `NO_READY_SUPPLY`, `NOT_READY_IN_TIME` when supply is
+  offered but cannot be harvested and delivered in time, or
+  `INSUFFICIENT_SUPPLY`, and is re-matched automatically when a later listing
+  of the same crop is published. When a published crop
   standard exists, creation records the newest published version for that crop
   in `cropStandardId`; later standard versions do not rewrite the order.
 - Simulation effect: mark buyer demand pending and schedule matching/actor
@@ -411,10 +426,12 @@ scope, not only the role name.
   recorded (including its `reasonCode`/`nextAction` and any per-line reasons, so
   the affected farmer reads the same explanation the buyer recorded), and
   `outcomeCause`/`outcomeNote` (the latest recorded reason the
-  order is not fulfilled: `NO_READY_SUPPLY`, `INSUFFICIENT_SUPPLY`,
-  `SUPPLY_CHANGED`, `APPROVAL_REJECTED`, `DELIVERY_REJECTED`, `CANCELLED`).
+  order is not fulfilled: `NO_READY_SUPPLY`, `NOT_READY_IN_TIME`,
+  `INSUFFICIENT_SUPPLY`, `SUPPLY_CHANGED`, `APPROVAL_REJECTED`,
+  `DELIVERY_REJECTED`, `CANCELLED`).
   The mission view includes role-safe route labels and only the crop batches
   allocated to this order.
+
   Private farm coordinates are not exposed here.
 - `payment` is present once an approved commitment prices the order and absent
   before then, because nothing is owed until supply is reserved. It carries
@@ -512,10 +529,15 @@ scope, not only the role name.
 - Callers: transporter (available/owned jobs) and actors participating in the
   related order; coordinators remain limited to relevant orders.
 - Request: optional status, cursor, limit.
-- Response: visible mission page with route stops, safe farm/buyer labels,
-  order crop and risk, allocated cargo, quantity, deadline, assignment/status,
-  estimated distance/duration/arrival, and `pageInfo`. Crop status is withheld
+- Response: visible mission page with route stops, quantity, deadline,
+  `collectFrom`, assignment/status, pickup batch quantities, estimated
+  distance/duration/arrival, and `pageInfo`. `collectFrom` is the first instant
+  the whole load is collectable, taken from the harvest windows of the listings
+  it draws on, so a transporter can tell a job for today from a job for next
+  week. The estimated arrival runs from it rather than from now.
+  Labels, order crop/risk and cargo remain role-safe; crop status is withheld
   from an available job until that transporter accepts it.
+
 - Product state/event: none.
 - Simulation effect: none until a simulated transporter takes its scheduled
   browse/accept action.
@@ -528,9 +550,10 @@ scope, not only the role name.
   related order.
 - Request: mission UUID.
 - Response: mission/order IDs, status, assignment, vehicle, quantity, deadline,
-  ordered labelled stops, order crop/risk, buyer name, and allocated cargo.
+  `collectFrom`, ordered labelled stops, order crop/risk, buyer name, and allocated cargo.
   Buyers see crop status only for batches committed to their own order;
   transporters see it only after assignment.
+
 - Product state/event: none.
 - Simulation effect: none.
 - Consumers: transporter job detail and participant delivery tracking.
@@ -909,9 +932,15 @@ provenance are stored. Replay reads never execute a new simulation or LLM call.
 
 - Callers: operations/admin/control-room operator.
 - Response: safe scenario metadata, current policies, supported decision modes,
-  islands, duration and provenance. The regional scenario exposes every current
-  UN M49 Caribbean country or area as an independently simulated, synthetic
-  local system; the Saint Lucia recipe remains the focused benchmark.
+  islands, duration, settlement window and provenance. `durationDays` is the
+  ordering window, during which buyers raise demand; `settlementDays` is how
+  much longer the run continues so that an order raised on the last ordering
+  day can still be delivered and settled. A run therefore ends
+  `durationDays + settlementDays` after it starts, and that is the horizon an
+  order is measured against before it is called `HORIZON_TRUNCATED`. The
+  regional scenario exposes every current UN M49 Caribbean country or area as
+  an independently simulated, synthetic local system; the Saint Lucia recipe
+  remains the focused benchmark.
 
 #### `GET /v1/simulation-runs`
 
@@ -1186,9 +1215,9 @@ outbox adapter touch Prisma.
 A synthetic buyer places its orders on 7-day payment terms and then records
 paying its own accepted delivery a fixed ten simulated days later, in sorted
 order-ID order so the run stays deterministic. Both numbers are
-**stakeholder-calibrated** and scaled to the 21-day scenario: hotels quote
-short terms and pay in one to two months, a gap no 21-day window can contain,
-so 7 against 10 preserves "paid late" at demonstration scale. A delivered
+**stakeholder-calibrated** and scaled to the 28-day run: hotels quote short
+terms and pay in one to two months, a gap no four-week window can contain, so
+7 against 10 preserves "paid late" at demonstration scale. A delivered
 simulated order therefore falls due on day 7, reads as overdue from day 8, and
 is settled on day 10 unless the run window closes first. Real buyers keep the
 Product API's 14-day default. Baseline runs never call the operation, and
@@ -1237,21 +1266,29 @@ evidence must remain absent rather than being fabricated. The model returns:
 - `MODEL_PREDICTED` provenance and generation time.
 
 The Product API validates `q10 <= q50 <= q90`, units, dates, confidence ranges,
-IDs, and provenance. It then calculates—not the model—safe orderable supply.
-Available-to-promise is `0` while the crop batch is `PLANNED` or `GROWING`;
-the forecast stays visible as evidence, but only a batch whose latest
-observation reports `HARVEST_READY` or `HARVESTED` can be promised or listed,
-and a later observation that leaves readiness withdraws its active listings:
+IDs, and provenance. It then calculates—not the model—safe orderable supply and
+the date that supply can be handed over:
 
 ```text
 availableToPromise = max(
   0,
   q10MarketableYield - activeReservations - commitments - safetyBuffer
 )
+
+promisableFrom = today                      when the crop is reported ready
+promisableFrom = forecast harvest start     while the crop is growing
 ```
 
-All terms use kilograms and the same crop batch. A model/LLM result never
-directly mutates inventory, reserves supply, or makes a binding commitment.
+A growing crop therefore carries a real, conservative available-to-promise:
+buyers ask for future produce, and refusing to quote one deletes the product.
+It is the *date* that keeps such a promise keepable, which is why
+`promisableFrom` travels with it into listings, matching, and the delivery
+mission's `collectFrom`. Available-to-promise stays `0` for a `PLANNED` batch,
+which has nothing in the ground, and a `CLOSED` one, which has nothing left.
+
+All quantity terms use kilograms and the same crop batch. A model/LLM result
+never directly mutates inventory, reserves supply, or makes a binding
+commitment.
 
 ## Contract use in implementations
 

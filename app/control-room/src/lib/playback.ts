@@ -25,20 +25,21 @@ export type PlaybackSpeed = (typeof SPEED_OPTIONS)[number];
 /**
  * How much simulation time passes per real millisecond at speed 1.
  *
- * The demo scenario spans 21 simulated days. The brief for this control room
- * is that a full run at speed 1 should take roughly 90 real seconds, so an
- * operator can watch an entire fortnight-plus play out over a coffee-length
- * demo without it dragging. Solving for the constant:
+ * The demo scenario spans 28 simulated days: 21 in which buyers order and a
+ * 7-day settlement window in which the last of those orders are delivered and
+ * settled. The brief for this control room is that a full run at speed 1 should
+ * take roughly 90 real seconds, so an operator can watch an entire month play
+ * out over a coffee-length demo without it dragging. Solving for the constant:
  *
- *   simDurationMs / realDurationMs = 21 days / 90 s
- *                                  = (21 * 86_400_000 ms) / 90_000 ms
- *                                  = 1_814_400_000 / 90_000
- *                                  = 20_160
+ *   simDurationMs / realDurationMs = 28 days / 90 s
+ *                                  = (28 * 86_400_000 ms) / 90_000 ms
+ *                                  = 2_419_200_000 / 90_000
+ *                                  = 26_880
  *
  * At speed N, elapsed sim time is `deltaRealMs * N * SIM_MS_PER_REAL_MS`, so
  * higher speeds compress the same run into proportionally less real time.
  */
-export const SIM_MS_PER_REAL_MS = (21 * DAY_MS) / 90_000;
+export const SIM_MS_PER_REAL_MS = (28 * DAY_MS) / 90_000;
 
 export interface PlaybackState {
   atMs: number;

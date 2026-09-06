@@ -85,6 +85,7 @@ interface CropBatchDto {
   cropType: string;
   status: string;
   availableToPromise: QuantityDto;
+  promisableFrom?: string;
   latestObservationId?: string;
 }
 
@@ -140,6 +141,7 @@ interface MissionDto {
   transporterId?: string;
   quantity: QuantityDto;
   deadline: string;
+  collectFrom?: string;
   stops: MissionStopDto[];
   estimatedDurationMinutes?: number;
   estimatedArrival?: string;
@@ -224,8 +226,8 @@ const productStage = (stage: ControlRoomBatch["lastReportedStage"]) => {
 /**
  * Payment terms a synthetic hotel buyer agrees to, and the simulated days it
  * then actually waits before recording payment. Both are
- * stakeholder-calibrated and scaled to the 21-day scenario: hotels quote short
- * terms and pay in one to two months, so 7 against 10 preserves "paid late" at
+ * stakeholder-calibrated and scaled to the 28-day run: hotels quote short terms
+ * and pay in one to two months, so 7 against 10 preserves "paid late" at
  * demonstration scale. A delivered order therefore falls due on day 7, reads
  * as overdue from day 8, and is settled on day 10 unless the run window closes
  * first. Real buyers keep the Product API's 14-day default; only the synthetic
@@ -233,6 +235,18 @@ const productStage = (stage: ControlRoomBatch["lastReportedStage"]) => {
  */
 export const SIMULATED_PAYMENT_TERMS_DAYS = 7;
 export const PAYMENT_BEHAVIOUR_DAYS = 10;
+
+/**
+ * How far ahead of a mission's collection window a synthetic transporter will
+ * take the job.
+ *
+ * Accepting reserves the vehicle, so a transporter that took every forward
+ * promise the day it was approved would have both vans booked out for the
+ * fortnight the crops spend growing. A day's notice is what a carrier arranging
+ * a run would want; SYNTHETIC, and it is behaviour rather than a scenario
+ * constant, so it changes who carries what and never what the world contains.
+ */
+export const MISSION_DISPATCH_LEAD_MS = 24 * 60 * 60 * 1_000;
 
 interface PendingPayment {
   orderId: string;
@@ -1041,10 +1055,18 @@ async function acceptAvailableMissions(
     .sort((a, b) => a.simulationActorId.localeCompare(b.simulationActorId));
   if (!transporters.length) return;
   const missions = await tools.query<Page<MissionDto>>(transporters[0] as ProductParticipant, "/v1/delivery-missions?status=AVAILABLE&limit=100");
+  // A transporter takes a job when it is nearly time to run it. Accepting a
+  // forward promise the day it is approved would tie a vehicle up for the
+  // fortnight the crop spends growing, and the fleet is two vans: the run
+  // would starve itself of transport for a reason that is scheduling rather
+  // than coordination.
+  const dispatchableBy = Date.parse(at) + MISSION_DISPATCH_LEAD_MS;
+  const dispatchable = missions.items.filter((item) =>
+    item.status === "AVAILABLE" && (item.collectFrom === undefined || Date.parse(item.collectFrom) <= dispatchableBy));
   // Missions compete for the same vehicles, so which one is offered first
   // decides which is carried at all. That order has to be the run's own, not
   // the order of two random mission identifiers.
-  for (const mission of [...missions.items].filter((item) => item.status === "AVAILABLE").sort(byArrival(projector, (item) => item.missionId))) {
+  for (const mission of dispatchable.sort(byArrival(projector, (item) => item.missionId))) {
     for (const transporter of transporters) {
       const vehicles = await tools.query<Page<VehicleDto>>(transporter, "/v1/me/vehicles?limit=100");
       const vehicle = vehicles.items
@@ -1094,18 +1116,22 @@ async function processObservationFrame(
       tools.query<CropBatchDto>(farmer, `/v1/crop-batches/${cropBatchId}`),
       tools.query<Page<ListingDto>>(farmer, "/v1/listings?limit=100"),
     ]);
-    // Only observably ready produce is offered. ATP is already zero for a
-    // growing batch, but the stage check keeps the participant's intent
-    // honest even if a forecast path ever leaks supply early.
-    const readyToList = productBatch.status === "HARVEST_READY" || productBatch.status === "HARVESTED";
-    if (readyToList && !listings.items.some((item) => item.cropBatchId === cropBatchId && item.status === "ACTIVE") && productBatch.availableToPromise.value > 0) {
+    // A grower offers what the forecast says is safe, dated from the window it
+    // says the crop can be handed over in. For a crop already reported ready
+    // that is today; for one still growing it is the forecast harvest start,
+    // which is what makes the offer a forward promise rather than a guess. The
+    // API rejects any earlier date, so this is the participant agreeing with
+    // the contract rather than hoping.
+    const promisableFrom = productBatch.promisableFrom ?? frame.at.slice(0, 10);
+    const availableFrom = promisableFrom > frame.at.slice(0, 10) ? promisableFrom : frame.at.slice(0, 10);
+    if (!listings.items.some((item) => item.cropBatchId === cropBatchId && item.status === "ACTIVE") && productBatch.availableToPromise.value > 0) {
       recordResult(await tools.publishListing(farmer, frame.at, {
         cropBatchId,
         quantity: kilograms(productBatch.availableToPromise.value),
         unitPrice: { amount: 6.5, currency: "XCD" },
-        availableFrom: frame.at.slice(0, 10),
-        availableUntil: plusDays(frame.at, 7).slice(0, 10),
-      }, `Published ${productBatch.availableToPromise.value.toFixed(2)} kg of available ${batch.crop}.`), actions, projector);
+        availableFrom,
+        availableUntil: plusDays(`${availableFrom}T00:00:00.000Z`, 7).slice(0, 10),
+      }, `Published ${productBatch.availableToPromise.value.toFixed(2)} kg of ${batch.crop} available from ${availableFrom}.`), actions, projector);
     }
   }
   await verifyEvidence(tools, coordinator, frame.at, actions, projector);

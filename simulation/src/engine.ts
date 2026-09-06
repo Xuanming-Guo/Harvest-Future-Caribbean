@@ -262,12 +262,14 @@ export const UNMET_CAUSES = [
   /**
    * The run's horizon closed before the buyer's window did.
    *
-   * Demand generation no longer raises an order it cannot follow through to
-   * settlement, so on the hero scenario this stays at zero. It is kept as a
-   * guard rather than deleted: a scenario, an injected effect or a future
-   * demand source could reintroduce one, and letting such an order fall
-   * through to `MISSION_LATE` would read as a coordination failure that
-   * never happened.
+   * The run now keeps going for a settlement window after buyers stop
+   * ordering, long enough for the latest deadline the ordering window can
+   * produce, so on the hero scenario this stays at zero because every order
+   * raised is followed through rather than because late orders are withheld.
+   * It is kept as a guard: a scenario with a shorter settlement window, an
+   * injected effect or a future demand source could reintroduce one, and
+   * letting such an order fall through to `MISSION_LATE` would read as a
+   * coordination failure that never happened.
    */
   'HORIZON_TRUNCATED',
   /** Nothing was promised: no batch had evidence recent enough to commit against. */
@@ -296,6 +298,14 @@ export const UNMET_CAUSES = [
   'SHIPMENT_FAILED',
   /** Nothing reached the buyer in time: the delivery arrived late or never ran. */
   'MISSION_LATE',
+  /**
+   * The vehicle went, but the crop it was promised from had still not been
+   * reported ready when it left, so there was nothing to pick.
+   *
+   * Distinct from spoilage: nothing was lost, the promise was simply dated
+   * ahead of the field. This is the way a forward promise fails.
+   */
+  'NOT_READY_IN_TIME',
   /** The vehicle arrived, but the field no longer held what had been promised. */
   'SPOILED_BEFORE_PICKUP',
   /** The load arrived and part of it was refused at the gate. */
@@ -570,6 +580,9 @@ export class SimulationEngine {
 
   private clock: SimulationInstant;
   private readonly startsAt: SimulationInstant;
+  /** Last instant a buyer may raise an order. The ordering window closes here. */
+  private readonly demandEndsAt: SimulationInstant;
+  /** Last instant of the run, ordering window plus settlement window. */
   private readonly endsAt: SimulationInstant;
   private status: RunStatus = 'READY';
   private eventsProcessed = 0;
@@ -594,7 +607,11 @@ export class SimulationEngine {
     this.ids = new IdFactory(this.random.stream('ids'));
 
     this.startsAt = parseInstant(this.scenario.startsAtIso);
-    this.endsAt = this.startsAt + this.scenario.durationDays * DAY_MS;
+    // Two horizons, not one. Buyers order until `demandEndsAt`; the run keeps
+    // running to `endsAt` so the last orders raised can be delivered, settled
+    // and scored inside the window they were given.
+    this.demandEndsAt = this.startsAt + this.scenario.durationDays * DAY_MS;
+    this.endsAt = this.demandEndsAt + this.scenario.settlementDays * DAY_MS;
     this.clock = this.startsAt;
 
     // Always consume the deterministic id draw. The Product API may replace
@@ -665,8 +682,8 @@ export class SimulationEngine {
   }
 
   /** Scenario horizon for deterministic day stepping. */
-  get horizon(): { startsAt: SimulationInstant; endsAt: SimulationInstant } {
-    return { startsAt: this.startsAt, endsAt: this.endsAt };
+  get horizon(): { startsAt: SimulationInstant; demandEndsAt: SimulationInstant; endsAt: SimulationInstant } {
+    return { startsAt: this.startsAt, demandEndsAt: this.demandEndsAt, endsAt: this.endsAt };
   }
 
   /** Next queued physical instant, or null once only horizon settlement remains. */
@@ -1303,7 +1320,10 @@ export class SimulationEngine {
       if (previousStage !== 'READY' && truth.stage === 'READY') newlyReadyCrops.add(batch.crop);
     }
 
-    if (newlyReadyCrops.size > 0) this.rematchWaitingDemand(newlyReadyCrops);
+    if (newlyReadyCrops.size > 0) {
+      this.rematchWaitingDemand(newlyReadyCrops);
+      this.collectReportedReadyMissions();
+    }
 
     const intervalDays = 2 + (1 - farm.diligence) * 12;
     const jitter = stream.float(0.6, 1.4);
@@ -1367,12 +1387,18 @@ export class SimulationEngine {
     const stream = this.random.stream(`actor:${buyerId}:demand`);
     const quantityKg = Math.max(20, Math.round(stream.normal(buyer.typicalOrderKg, buyer.typicalOrderKg * 0.2)));
     const neededBy = this.clock + stream.int(3, 7) * DAY_MS;
-    // Drawn before the horizon guard below rather than after it, so this
-    // buyer's ordering rhythm, and every later draw on its stream, is the same
+    // Drawn before the ordering-window guard below rather than after it, so
+    // this buyer's rhythm, and every later draw on its stream, is the same
     // whether or not this particular order is raised.
     const nextOrderAt = this.clock + stream.int(4, 8) * DAY_MS;
 
-    if (this.settlesWithinHorizon(neededBy)) {
+    // Orders are raised inside the ordering window only. The deadline is not
+    // consulted: the settlement window exists precisely so that a deadline
+    // running past the ordering window is a normal order rather than one the
+    // run has to refuse. The buyer keeps its later check-ins either way, which
+    // is what lets a connected run keep approving and dispatching through the
+    // settlement window.
+    if (this.clock <= this.demandEndsAt) {
       const demand: BuyerDemand = {
         demandId: this.ids.next(),
         buyerId,
@@ -1405,14 +1431,14 @@ export class SimulationEngine {
    * `schedule` drops anything past the horizon, so a demand whose
    * `DEMAND_DEADLINE` falls outside the window never fires one: it sits
    * PENDING until `settleOutstandingDemand` sweeps it up and scores it short.
-   * The order was never given the days it asked for, so counting it against a
-   * coordinator measures the length of the run rather than the policy. Demand
-   * generation withholds those orders instead.
+   * Counting that against a coordinator measures the length of the run rather
+   * than the policy.
    *
-   * Withholding rather than clamping is deliberate. Pulling `neededBy` back
-   * inside the window would keep the order but turn it into an unusually
-   * urgent one, manufacturing exactly the tight deadlines a coordination
-   * benchmark is most sensitive to.
+   * The settlement window is what makes this true by construction on the hero
+   * scenario: the latest deadline the last ordering day can draw, plus the
+   * substitution grace, still lands before `endsAt`. This stays as a guard, so
+   * a scenario with too short a settlement window, or an injected effect,
+   * cannot have such an order silently recorded as a late delivery instead.
    */
   private settlesWithinHorizon(neededBy: SimulationInstant): boolean {
     return neededBy + SUBSTITUTION_GRACE_MS <= this.endsAt;
@@ -1577,7 +1603,7 @@ export class SimulationEngine {
       const observedCeiling = latest ? latest.estimatedYieldKg : batch.areaHectares * 1_500;
       const headroom = Math.max(0, observedCeiling - alreadyCommitted - batch.confirmedHarvestedKg);
 
-      const granted = Math.min(allocation.quantityKg, headroom);
+      const granted = Number(Math.min(allocation.quantityKg, headroom).toFixed(2));
       if (granted <= 0) continue;
 
       validated.push({ batchId: allocation.batchId, farmId: allocation.farmId, quantityKg: Number(granted.toFixed(2)) });
@@ -1698,18 +1724,87 @@ export class SimulationEngine {
    * seen, which is the foresight the benchmark exists to rule out.
    */
   private reportedReadyAt(allocations: Commitment['allocations']): SimulationInstant | null {
+    for (const allocation of allocations) {
+
+      const batch = this.world.observed.batches.get(allocation.batchId);
+      if (!batch || batch.lastReportedStage !== 'READY') return null;
+    }
+    return this.firstReportedReadyAt(allocations);
+  }
+
+  /**
+   * When every allocated batch had first been reported ready, or null if one
+   * of them never was.
+   *
+   * Unlike `reportedReadyAt` this ignores what the batches report *now*, which
+   * is what a settled run needs: a batch that was picked reports HARVESTED
+   * afterwards, and asking whether it had been ready at pickup time is exactly
+   * the question `classifyDemand` has to answer.
+   */
+  private firstReportedReadyAt(allocations: Commitment['allocations']): SimulationInstant | null {
     let latest: SimulationInstant | null = null;
     for (const allocation of allocations) {
       const batch = this.world.observed.batches.get(allocation.batchId);
-      if (!batch || batch.lastReportedStage !== 'READY') return null;
-      const firstReady = batch.observations.find((observation) => observation.reportedStage === 'READY');
+      const firstReady = batch?.observations.find((observation) => observation.reportedStage === 'READY');
       if (!firstReady) return null;
       latest = latest === null ? firstReady.observedAt : Math.max(latest, firstReady.observedAt);
     }
     return latest;
   }
 
+  /**
+   * Loading and unloading time for a route, one stop per pickup plus the drop.
+   *
+   * The same 25 minutes a stop that `planMission` allows, read off the route
+   * itself so a mission built by the Product API is costed the same way as one
+   * the engine planned.
+   */
+  private handlingMsForPath(stopCount: number): number {
+    return stopCount * 25 * MINUTE_MS;
+  }
+
+  /**
+   * Brings a planned pickup forward once every batch it collects is reported
+   * ready, and reschedules the run around the new departure.
+   *
+   * This is the forward-promise half of the rule `planMission` applies when a
+   * commitment is made against produce that is already ready. A promise made
+   * against a growing crop is planned to leave at the deadline, because on the
+   * day it was made nothing was collectable; the moment the grower reports the
+   * field ready, holding to that plan leaves promised produce spoiling for
+   * days. Readiness only ever moves a departure earlier, and it is the
+   * grower's report rather than the hidden `readyAt`, so it buys coordination
+   * and not foresight.
+   */
+  private collectReportedReadyMissions(): void {
+    const { collectOnReadiness, maxHoldMs } = this.policy.capabilities;
+    if (!collectOnReadiness) return;
+
+    for (const mission of [...this.world.observed.missions.values()].sort((left, right) =>
+      left.missionId.localeCompare(right.missionId))) {
+      if (mission.mode === 'MARITIME' || mission.status !== 'PLANNED' || mission.plannedDepartureAt <= this.clock) continue;
+      const commitment = this.world.observed.commitments.get(mission.commitmentId);
+      if (!commitment || commitment.status !== 'APPROVED') continue;
+
+      const reportedReadyAt = this.reportedReadyAt(commitment.allocations.filter((line) => !mission.batchIds || mission.batchIds.includes(line.batchId)));
+      if (reportedReadyAt === null) continue;
+      if (mission.plannedDepartureAt - reportedReadyAt <= maxHoldMs) continue;
+
+      const departAt = Math.max(this.clock + HOUR_MS, reportedReadyAt + this.handlingMsForPath(mission.path.length));
+      if (departAt >= mission.plannedDepartureAt) continue;
+
+      const journeyMs = mission.plannedArrivalAt - mission.plannedDepartureAt;
+      mission.plannedDepartureAt = departAt;
+      mission.plannedArrivalAt = departAt + journeyMs;
+      this.replaceMissionSchedule(mission, true);
+      // The earlier slot may sit inside a closure or breakdown that the later
+      // one avoided, so the world gets to push back on the new plan.
+      this.applyActiveDisruptionsToMission(mission);
+    }
+  }
+
   private planMission(commitment: Commitment, allocations: Commitment['allocations']): void {
+
     const demand = this.world.observed.demands.get(commitment.demandId);
     if (!demand) return;
     const buyer = this.world.buyers.get(demand.buyerId);
@@ -1741,7 +1836,7 @@ export class SimulationEngine {
 
     const travelMs = (distanceKm / vehicle.cruiseSpeedKmh) * HOUR_MS;
     // Load and unload time, one stop per pickup plus the drop.
-    const handlingMs = (pickupFarmIds.length + 1) * 25 * MINUTE_MS;
+    const handlingMs = this.handlingMsForPath(pickupFarmIds.length + 1);
 
     // Depart in time to arrive before the deadline, but not before now.
     const desiredArrival = demand.neededBy - HOUR_MS;
@@ -2067,8 +2162,30 @@ export class SimulationEngine {
       return { applied: false, reason: 'DUPLICATE', simulationMissionId: existingMissionId };
     }
 
-    const departure = Math.max(this.clock + MINUTE_MS, effect.plannedDepartureAt);
-    const arrival = Math.max(departure + MINUTE_MS, effect.plannedArrivalAt);
+    // When the vehicle actually leaves.
+    //
+    // The Product API offers a mission the moment its commitment is approved,
+    // which under forward promises can be days before the crop is pickable, so
+    // the accepting transporter's "now plus a minute" is not a departure time.
+    // The engine applies the same rule it applies to its own missions: leave
+    // once the growers have reported the whole load ready, never sooner than an
+    // hour from now, and never later than the last departure that still makes
+    // the buyer's deadline. If nobody reports it ready, the vehicle goes at
+    // that last moment anyway and collects whatever is truly in the field.
+    const journeyMs = Math.max(MINUTE_MS, effect.plannedArrivalAt - effect.plannedDepartureAt);
+    const earliestDeparture = Math.max(this.clock + MINUTE_MS, effect.plannedDepartureAt);
+    const demand = this.world.observed.demands.get(effect.demandId);
+    const deadlineDeparture = demand
+      ? Math.max(earliestDeparture, demand.neededBy - HOUR_MS - journeyMs)
+      : earliestDeparture;
+
+    const reportedReadyAt = this.policy.capabilities.collectOnReadiness ? this.reportedReadyAt(commitment.allocations) : null;
+    const promptDeparture = reportedReadyAt === null
+      ? deadlineDeparture
+      : Math.max(this.clock + HOUR_MS, reportedReadyAt + this.handlingMsForPath(effect.path.length));
+
+    const departure = Math.max(earliestDeparture, Math.min(deadlineDeparture, promptDeparture));
+    const arrival = departure + journeyMs;
     const mission: DeliveryMission = {
       missionId: this.ids.next(),
       commitmentId: commitment.commitmentId,
@@ -2226,12 +2343,11 @@ export class SimulationEngine {
    * reaches a policy, and it changes nothing about the run.
    */
   private classifyDemand(demand: BuyerDemand): UnmetCause {
-    // The scenario horizon closed before the buyer's window did, so this order
-    // was never given a chance rather than being coordinated badly. Demand
-    // generation now declines to raise these at all, so this rung should be
-    // unreachable on the hero scenario. It stays because a scenario or an
-    // injected effect could still produce one, and such an order must not be
-    // mistaken for a late delivery.
+    // The run closed before the buyer's window did, so this order was never
+    // given a chance rather than being coordinated badly. The settlement
+    // window makes this rung unreachable on the hero scenario. It stays
+    // because another scenario's window could be too short, and such an order
+    // must not be mistaken for a late delivery.
     if (!this.settlesWithinHorizon(demand.neededBy)) return 'HORIZON_TRUNCATED';
 
     const commitments = [...this.world.observed.commitments.values()].filter(
@@ -2268,8 +2384,16 @@ export class SimulationEngine {
 
     const committedKg = commitment.allocations.reduce((total, allocation) => total + allocation.quantityKg, 0);
     const loadedKg = completed.reduce((total, mission) => total + mission.loadedKg, 0);
-    if (loadedKg + CAUSE_TOLERANCE_KG < committedKg) return 'SPOILED_BEFORE_PICKUP';
+    if (loadedKg + CAUSE_TOLERANCE_KG < committedKg) {
+      const unreadyPickup = completed.some((mission) => {
+        const allocations = commitment.allocations.filter((line) => !mission.batchIds || mission.batchIds.includes(line.batchId));
+        const readyAt = this.firstReportedReadyAt(allocations);
+        return readyAt === null || readyAt > mission.plannedDepartureAt;
+      });
+      return unreadyPickup ? 'NOT_READY_IN_TIME' : 'SPOILED_BEFORE_PICKUP';
+    }
     if (demand.acceptedKg + CAUSE_TOLERANCE_KG < loadedKg) return 'DELIVERY_REJECTED';
+
 
     // Promised, collected, delivered and accepted in full: the promise itself
     // was smaller than the order. Unless the reason it was smaller was that
@@ -2877,7 +3001,7 @@ export class SimulationEngine {
       const latest = batch.observations.at(-1);
       const observedCeiling = latest ? latest.estimatedYieldKg : batch.areaHectares * 1_500;
       const headroom = Math.max(0, observedCeiling - alreadyCommitted - batch.confirmedHarvestedKg);
-      const granted = Math.min(allocation.quantityKg, headroom);
+      const granted = Number(Math.min(allocation.quantityKg, headroom).toFixed(2));
       if (granted <= 0) continue;
       validated.push({ batchId: allocation.batchId, farmId: allocation.farmId, quantityKg: Number(granted.toFixed(2)) });
     }
@@ -3050,6 +3174,7 @@ export class SimulationEngine {
       policy: this.policy.name,
       seed: this.seed,
       startsAt: formatInstant(this.startsAt),
+      demandEndsAt: formatInstant(this.demandEndsAt),
       endsAt: formatInstant(this.endsAt),
       farms: [...this.world.farms.values()].map((farm) => ({
         farmId: farm.farmId,

@@ -13,9 +13,11 @@ npm run sim -- --json                        # machine-readable
 npm run sim -- --decisions                   # print the decision trace
 ```
 
-No database and no services: the engine is self-contained and a full
-twenty-one-day run takes a few milliseconds. Each line ends with a `causes=`
-histogram naming why every demand that missed its deadline missed it.
+No database and no services: the engine is self-contained and a full run takes
+a few milliseconds. A run covers 28 days: buyers raise demand for 21 of them
+and the remaining 7 are the settlement window, in which the last orders raised
+are delivered, accepted and scored. Each line ends with a `causes=` histogram
+naming why every demand that missed its deadline missed it.
 
 Recorded paired-seed comparisons live in
 [`benchmarks/`](benchmarks/README.md).
@@ -79,9 +81,19 @@ engine records only the safe disruption-to-mission causal link for the Product
 API bridge, never hidden severity. An event may correctly leave final totals
 unchanged when it does not intersect relevant activity.
 
-## Honest status of the baseline-versus-Harvest comparison
+## Current benchmark
 
-**On the current scenario the Harvest policy outperforms the fragmented
+The #91 report uses 21 demand days plus seven settlement days. Across the ten
+unchanged seeds Harvest has nine wins and one tie against baseline, with a
+median paired fulfilment gain of 25 percentage points. Seed 23 still has six
+unmet orders and more waste than baseline. All runs have zero horizon-truncated
+orders. See [the current report](benchmarks/README.md#current-forward-promise-and-settlement-results-91)
+for counts and deterministic repeat evidence. These are synthetic standalone
+outcomes; connected Product API outcomes are measured separately.
+
+## Historical comparison before the settlement window
+
+**On the pre-settlement scenario the Harvest policy outperformed the fragmented
 baseline, and it still loses one seed.** Across the same ten paired seeds, mean
 fulfilment is 39.2% for Harvest against 12.7% for the baseline: seven wins, two
 ties, and one loss. Under the synthetic weather generator that preceded recorded
@@ -125,6 +137,7 @@ label is per day rather than per run. Scenarios that do not declare a reference
 keep the generator unchanged. Forecasts stay `MODEL_PREDICTED` either way, and
 no weather service is contacted at runtime.
 
+
 The per-seed table, the supporting waste and substitution figures, and the
 unmet-demand histogram are in [`benchmarks/README.md`](benchmarks/README.md).
 Every number is synthetic simulation output, not deployed impact.
@@ -158,40 +171,63 @@ them: nobody there holds the whole picture, so nobody notices a crop was
 reported ready this morning or revisits an order that could not be filled. That
 is a modelling choice, and it is the one most worth arguing with.
 
-The fourth defect is not a policy lever at all. It was in the measurement:
+The fourth defect is not a policy lever at all. It was in the measurement, and
+the first attempt at it made the measurement worse:
 
-4. **The run raised orders it could never settle.** `onBuyerDemand` drew a
-   deadline three to seven days out regardless of how much of the twenty-one-day
-   window was left, and `schedule` drops any event past the horizon, so an order
-   whose deadline plus the twelve-hour substitution grace fell outside the
-   window never received its own `DEMAND_DEADLINE`. It sat PENDING until the
-   final sweep and was then scored short. That counted the length of the run as
-   a coordination failure. A buyer now simply does not raise such an order. The
-   deadline is withheld rather than pulled back inside the window, because
-   clamping it would keep the order and turn it into an artificially urgent one.
-   `HORIZON_TRUNCATED` is consequently zero on all ten benchmark seeds, asserted
-   in `tests/fulfilment.test.ts`; the classification stays in the engine as a
-   guard so that a scenario or an injected effect producing such an order cannot
-   have it silently recorded as a late delivery instead.
+4. **The run raised orders it could never settle, and then stopped raising
+   them.** `onBuyerDemand` drew a deadline three to seven days out regardless of
+   how much of the twenty-one-day window was left, and `schedule` drops any event
+   past the horizon, so an order whose deadline plus the twelve-hour substitution
+   grace fell outside the window never received its own `DEMAND_DEADLINE`. It sat
+   PENDING until the final sweep and was then scored short, which counted the
+   length of the run as a coordination failure. The first fix withheld those
+   orders. That took `HORIZON_TRUNCATED` to zero by deleting 29 of 114 normal
+   orders from the measurement: a hotel ordering on day 20 for delivery on day 25
+   is not an unreasonable order, and a benchmark that refuses to score it is
+   answering an easier question than the one asked. The run now has a **7-day
+   settlement window** instead. Buyers still order for 21 days; the run continues
+   to day 28, which is long enough for the latest deadline the ordering window can
+   draw, so every order raised is followed through to a real outcome.
+   `HORIZON_TRUNCATED` is still zero on all ten benchmark seeds, asserted in
+   `tests/fulfilment.test.ts`, but now by construction rather than by omission.
+   The classification stays in the engine as a guard so that a scenario with a
+   shorter settlement window cannot have such an order silently recorded as a
+   late delivery instead.
 
-**That fourth fix changed the world, and the baseline changed with it.** The
-first three were policy and scheduling logic and left every baseline digest
-bit-for-bit identical, which is what let the earlier comparison be read as a
-clean policy delta. Demand generation is not policy, so this one moves both
-arms: 29 of the 114 orders across the ten seeds are no longer raised, and every
+There is a fifth, and it is the one that was hiding behind the first three:
+
+5. **Nothing could be promised until it was already picked.** Harvest committed
+   only against a batch someone had reported READY, which made every promise
+   keepable by making most promises impossible. `docs/product.md` says a buyer
+   may request current **or future** produce, and a forecast that may never be
+   promised against is decoration. The defect was never promising a growing crop;
+   it was promising one **without a date**. The policy now commits against a crop
+   still growing when the grower's own late estimate of readiness, plus the hour
+   to get a vehicle on the road and the journey to collect and deliver, still
+   lands before the buyer needs it — at the same uncertainty-discounted quantity,
+   never the optimistic maximum. Collection is dated with it: a mission planned
+   against the deadline is brought forward the moment the growers report the load
+   ready, and if nobody does the vehicle goes anyway and delivers what is truly
+   in the field. That failure has its own name now, `NOT_READY_IN_TIME`, because
+   calling it spoilage said the crop was lost when it had simply not arrived.
+
+**Both of those changed the world, and the baseline changed with them.** The
+first three defects were policy and scheduling logic and left every baseline
+digest bit-for-bit identical, which is what let the earlier comparison be read
+as a clean policy delta. Demand generation is not policy, so the settlement
+window moves both arms: the order book is 114 again rather than 85, and every
 baseline digest is different. The pairing still holds — both policies face the
-identical reduced order book from the same seeded streams in the same order —
-but the guarantee is now "the same world for both arms", not "the same world as
-before".
+identical order book from the same seeded streams in the same order — but the
+guarantee is "the same world for both arms", not "the same world as before".
 
-It is not a free win for Harvest either. Of the 29 withheld orders, twenty were
-scored failures the coordinator never had a chance at, and nine were orders
-Harvest had actually delivered in full before the run ended. Removing them costs
-Harvest nine successes, raises its waste from 1,759 kg to 1,813 kg because the
-produce those orders would have absorbed now spoils unpicked, and turns two
-seeds that Harvest was winning into ties. The baseline's physical outcome is
-untouched: its waste, accepted kilograms, deliveries and fully met orders are
-identical per seed, and only its fulfilment denominator moved.
+Forward promising is not free for Harvest either. It commits far more (84
+approved commitments across the ten seeds against 63) and delivers far more, and
+its own failure profile changes shape: promises made against crops that are not
+in the ground yet fail in new ways, `APPROVAL_REJECTED` rises from 7 to 19 as the
+approval gate re-checks more proposals against decayed evidence, and
+`MISSION_LATE` rises from 1 to 8 as more vehicles are on the road when a road
+closes. `benchmarks/README.md` carries the per-seed numbers and states what each
+of those costs.
 
 ### Realised weather is the second world change, and the costlier one
 
@@ -231,6 +267,7 @@ What is still unresolved, from the cause histogram:
   not a weather forecast, would move. Knowing a storm is coming does not create
   ready crop.
 
+
 Issue #4 owns the machinery that makes an honest comparison possible —
 identical worlds, isolated policy hooks, reproducible seeds. Issue #11 owns the
 comparison itself. Adjusting scenario constants until the favoured policy wins
@@ -242,12 +279,14 @@ raised at all, and what the weather does to the crop; both are stated here
 together with what they cost each arm. The weather coefficients were set once
 from plausibility and were not revisited after the benchmark was read.
 
+
 ## Control-room outcome boundary
 
 The engine remains authoritative for the simulated physical world: crop
 observations, weather, roads, spoilage, disruptions and the isolated baseline
 policy. After outstanding physical demand is settled, it records a final
-`RUN_SETTLED` frame at the exact scenario horizon.
+`RUN_SETTLED` frame at the exact scenario horizon, which is the end of the
+settlement window rather than the end of the ordering window.
 
 For a connected Harvest run, operational headline figures do not come from
 the engine's older policy counters. The internal Harvest coordination policy is

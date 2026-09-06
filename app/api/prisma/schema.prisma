@@ -187,6 +187,7 @@ model CropBatch {
   cropType              String     @map("crop_type")
   status                String
   availableToPromise    Float      @default(0) @map("available_to_promise")
+  promisableFrom        DateTime?  @map("promisable_from") @db.Timestamptz(3)
   provenance            Provenance
   latestObservationId   String?    @map("latest_observation_id") @db.Uuid
   latestPredictionId    String?    @map("latest_prediction_id") @db.Uuid
@@ -421,6 +422,7 @@ model DeliveryMission {
   estimatedDistanceKm Float? @map("estimated_distance_km")
   estimatedDurationMinutes Int? @map("estimated_duration_minutes")
   estimatedArrival DateTime? @map("estimated_arrival") @db.Timestamptz(3)
+  collectFrom      DateTime? @map("collect_from") @db.Timestamptz(3)
   simulationRunId String? @map("simulation_run_id") @db.Uuid
 
   @@map("delivery_missions")

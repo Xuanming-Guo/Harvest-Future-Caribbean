@@ -26,48 +26,39 @@ npm run sim -- --paired --seeds 42,8675309,7,19,23,31,101,202,303,404
 | `2026-09-04-two-island.json` / `.txt` | Saint Lucia + Martinique, ten paired seeds, the only scope in this directory that can ship |
 | `2026-09-04-recorded-weather.json` / `.txt` | The same ten seeds after realised weather became *recorded* Saint Lucian weather (#90) |
 
-There is no separate `before-horizon-clamp` file. The command was re-run on this
-branch immediately before the change and reproduced
-`2026-09-02-after-engine-defects.json` metric for metric and digest for digest,
-so that file is the pre-clamp column and a copy of it would only be a copy.
 
-For the same reason there is no separate `before-weather` file:
-`2026-09-02-after-horizon-clamp.json` was reproduced metric for metric and
-digest for digest on the weather branch before the weather change landed, so it
-is the pre-weather column.
+## Current forward-promise and settlement results (#91)
 
-## The world moved this time, and the baseline moved with it
+`2026-09-06-forward-settlement.json` is the current standalone report. Each of
+10 unchanged benchmark seeds was run twice per policy, with identical repeated
+digests. Buyers order for 21 days; seven additional days settle those orders.
+No demand is suppressed simply because its deadline exceeds the demand window.
+All 20 policy/seed results have zero `HORIZON_TRUNCATED` orders.
 
-The three coordination fixes were policy and scheduling logic, so the baseline
-arm came out bit-for-bit identical and the comparison could be read as a clean
-policy delta. **The horizon clamp is not like that.** It changes demand
-generation, which is part of the world, so both arms see a different and smaller
-set of orders, and every baseline digest changed.
+| Seed | Baseline fully met | Harvest fully met | Harvest partial | Harvest unmet | Fulfilment delta (pp) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 42 | 1 | 4 | 5 | 2 | +27.27 |
+| 8675309 | 1 | 4 | 5 | 3 | +25.00 |
+| 7 | 1 | 7 | 0 | 3 | +60.00 |
+| 19 | 2 | 5 | 5 | 3 | +23.08 |
+| 23 | 2 | 2 | 2 | 6 | 0.00 |
+| 31 | 3 | 5 | 6 | 2 | +15.38 |
+| 101 | 1 | 3 | 3 | 6 | +16.67 |
+| 202 | 0 | 5 | 2 | 3 | +50.00 |
+| 303 | 1 | 4 | 2 | 6 | +25.00 |
+| 404 | 1 | 7 | 3 | 1 | +54.55 |
 
-What changed is stated precisely rather than waved at. A buyer whose next
-`neededBy` plus the twelve-hour substitution grace would fall after the
-twenty-one-day horizon no longer raises that order at all. Over the ten seeds
-that withholds **29 of 114 orders**. Both policies face the identical reduced
-order book, drawn from the same seeded streams in the same sequence, so the
-pairing that makes the comparison meaningful is intact.
+Nine wins, one tie; median paired improvement is 25 percentage points. Seed 23
+remains a weak outcome: six unmet orders and 90.17 kg more waste than baseline.
+The hero seeds serve at least part of 9/11 and 9/12 orders respectively.
+These are synthetic standalone outcomes, not connected Product API totals or
+real-world evidence. No scenario parameters were tuned to improve the score.
 
-The deadline is *withheld*, never pulled back inside the window. Clamping
-`neededBy` would have kept all 114 orders and turned the late ones into
-unusually urgent ones, manufacturing exactly the tight deadlines a coordination
-benchmark is most sensitive to.
+The extended demand book and weather horizon change the world. Historical
+reports below use their original 21-day horizon and must not be read as a
+controlled before/after comparison of the forward-promise policy alone.
 
-For the baseline the removed orders cost it nothing physical. Per seed, its
-waste, accepted kilograms, completed deliveries and count of fully met orders
-are **identical** before and after the clamp; only four approvals that never led
-to a delivery disappear along with the orders they were for. Its fulfilment
-*rate* rises because the denominator shrank, not because it did anything better.
-
-For Harvest the removed orders were not all failures. Of the 29, twenty were
-scored `HORIZON_TRUNCATED` and nine Harvest had actually delivered in full
-before the run ended, despite their settlement falling outside the window. The
-clamp therefore takes real wins away from Harvest as well as artefactual losses
-from the baseline, and Harvest's waste rises slightly because crop those nine
-orders would have absorbed is now left in the field.
+## Historical reports (before the settlement window)
 
 ## Weather changed the world again, and it cost Harvest most
 
@@ -245,7 +236,9 @@ two ties (19 and 303) and one loss (23)**, at a mean gap of 21.1pp. A claim that
 Harvest leads on every seed has not been true since the clamp, and a claim that
 it never loses stopped being true here.
 
-Supporting figures, means across the same ten seeds.
+
+Both arms score lower on the fuller book. The restored orders are late-window
+ones, which are harder for everyone, and the baseline drops with Harvest.
 
 | Measure | Baseline, pre-clamp | Harvest, before defects | Harvest, after defects | Baseline, clamped | Harvest, clamped | Baseline, synthetic wx | Harvest, synthetic wx | Baseline, recorded wx | Harvest, recorded wx |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -271,12 +264,15 @@ which is the recheck-after-rain trigger doing exactly what it was written to do:
 a report written before 25 mm of rain is no longer evidence, so somebody is
 asked to go and look again.
 
+
 ## Why demand went unmet
 
 `causeCounts` assigns exactly one cause to every demand that ended unmet or
 partially met, at the point it settles. Counts are totals across the same ten
-seeds. The metric did not exist before the engine-defect fixes, so there is no
-column for `2026-09-02-before.json`.
+seeds. `NOT_READY_IN_TIME` is new: it separates a load that came up short
+because the crop had never been reported ready from one that came up short
+because the crop was lost. Both used to read as `SPOILED_BEFORE_PICKUP`, which
+said produce had perished when it had simply not arrived.
 
 | Cause | Baseline, pre-clamp | Harvest, after defects | Baseline, clamped | Harvest, clamped | Baseline, synthetic wx | Harvest, synthetic wx | Baseline, recorded wx | Harvest, recorded wx |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -307,7 +303,8 @@ off the crop. The baseline's total short does not move at all (75 either way);
 weather rearranges *why* it fails (four late missions where before there was
 one, five fewer partial deliveries) without changing how often.
 
-What is left to argue with:
+
+Two of Harvest's rows got worse, and neither is an artefact.
 
 - `INSUFFICIENT_SUPPLY` at 23 against the baseline's 5. Harvest delivers on far
   more orders, so partial deliveries the baseline never attempts register here
@@ -418,6 +415,7 @@ freight price, the customs behaviour, the failure probability and every outcome
 above are synthetic demonstration assumptions. A published ferry route is not
 evidence that a produce service exists on it, and nothing here is evidence that
 a deployed system would move a single kilogram between two islands.
+
 
 ## Determinism
 

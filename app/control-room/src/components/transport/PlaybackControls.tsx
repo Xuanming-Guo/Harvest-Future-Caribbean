@@ -20,6 +20,13 @@ export interface PlaybackControlsProps {
   controls: PlaybackControlsApi;
   /** Simulation instants, drawn as ticks on the scrub track. */
   disruptionMarkers?: number[];
+  /**
+   * When buyers stopped ordering, if the run has a settlement window after it.
+   * The days past it are real run time in which deliveries land and orders
+   * settle, and the label says so rather than leaving them looking like days
+   * on which nothing happened.
+   */
+  demandEndsAtMs?: number;
 }
 
 const CLOCK_FORMAT = new Intl.DateTimeFormat(undefined, {
@@ -85,7 +92,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 export default function PlaybackControls(props: PlaybackControlsProps): React.JSX.Element {
-  const { state, controls, disruptionMarkers = [] } = props;
+  const { state, controls, disruptionMarkers = [], demandEndsAtMs } = props;
   const { atMs, isPlaying, speed, progress, startMs, endMs } = state;
 
   useEffect(() => {
@@ -123,7 +130,16 @@ export default function PlaybackControls(props: PlaybackControlsProps): React.JS
     return Math.min(totalDays, elapsedDays + 1);
   }, [atMs, startMs, endMs, totalDays]);
 
-  const timeValueText = useMemo(() => `${clockText}, day ${dayNumber} of ${totalDays}`, [clockText, dayNumber, totalDays]);
+  const orderingDays = useMemo(() => {
+    if (demandEndsAtMs === undefined || demandEndsAtMs >= endMs) return null;
+    return Math.max(1, Math.round((demandEndsAtMs - startMs) / DAY_MS));
+  }, [demandEndsAtMs, startMs, endMs]);
+  const orderingNote = orderingDays === null ? "" : ` (orders until day ${orderingDays})`;
+
+  const timeValueText = useMemo(
+    () => `${clockText}, day ${dayNumber} of ${totalDays}${orderingNote}`,
+    [clockText, dayNumber, totalDays, orderingNote],
+  );
 
   // The range input carries progress at millipercent precision (0..1000) so
   // scrubbing feels continuous even on a long timeline, while still reporting
@@ -155,7 +171,7 @@ export default function PlaybackControls(props: PlaybackControlsProps): React.JS
       <div className="transport-clock">
         {clockText}
         <small>
-          Day {dayNumber} of {totalDays}
+          Day {dayNumber} of {totalDays}{orderingNote}
         </small>
       </div>
 

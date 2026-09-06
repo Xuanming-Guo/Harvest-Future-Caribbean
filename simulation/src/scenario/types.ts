@@ -34,8 +34,19 @@ export interface Scenario {
   availableIslandIds: readonly string[];
   /** ISO-8601 instant the run clock starts at. */
   startsAtIso: string;
-  /** How long the run covers before it is considered finished. */
+  /** How long buyers keep raising demand. The ordering window. */
   durationDays: number;
+  /**
+   * Extra days the run keeps going after the ordering window closes.
+   *
+   * An order raised on the last ordering day still needs its deadline, its
+   * substitution grace and its settlement event to fall inside the run, or it
+   * is scored short for a reason that is the length of the run rather than
+   * anything a coordinator did. The alternative — refusing to raise such an
+   * order — deletes normal late-window demand from the measurement instead of
+   * measuring it.
+   */
+  settlementDays: number;
   /**
    * Where every quantitative assumption in this scenario came from.
    *

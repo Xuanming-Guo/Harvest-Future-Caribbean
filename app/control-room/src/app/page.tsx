@@ -444,7 +444,7 @@ export default function ControlRoomPage() {
           />
           <section className="panel"><header className="panel-header"><span className="panel-title">What is happening</span></header><div className="panel-body"><EventFeed scene={scene} frames={framesSoFar} onSelect={handleSelect} onSelectAction={handleSelectAction} /></div></section>
         </div>
-        <div className="chrome-footer"><PlaybackControls state={{ ...state, frame }} controls={controls} disruptionMarkers={disruptionMarkers} /></div>
+        <div className="chrome-footer"><PlaybackControls state={{ ...state, frame }} controls={controls} disruptionMarkers={disruptionMarkers} demandEndsAtMs={scene.demandEndsAt ? Date.parse(scene.demandEndsAt) : undefined} /></div>
       </div>
       {preview && (
         <ActionPreview

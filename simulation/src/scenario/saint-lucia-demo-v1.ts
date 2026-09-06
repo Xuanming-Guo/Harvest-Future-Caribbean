@@ -49,6 +49,17 @@ import type {
 const START_ISO = '2026-09-01T06:00:00Z';
 const DURATION_DAYS = 21;
 
+/**
+ * Days the run keeps running after buyers stop ordering.
+ *
+ * A buyer draws a deadline three to seven days out, and settles twelve hours
+ * after it. Seven days of settlement therefore covers the latest deadline the
+ * last ordering day can produce, so no order is ever scored short because the
+ * run stopped watching. Buyers still order for twenty-one days: this window
+ * adds no demand, it only lets the demand already raised finish.
+ */
+const SETTLEMENT_DAYS = 7;
+
 /** Synthetic fallback sites used when the reference snapshot lacks a matching category. */
 const FARM_SITES = [
   { name: 'Mabouya Valley smallholding', latitude: 13.9503, longitude: -60.9312 },
@@ -139,12 +150,14 @@ function buildRoads(
 export const saintLuciaDemoV1: Scenario = {
   scenarioId: 'saint-lucia-demo-v1',
   description:
-    'Cucumber supply from five Mabouya-area smallholdings to three Castries-area buyers over three weeks, ' +
+    'Cucumber supply from five Mabouya-area smallholdings to three Castries-area buyers over three weeks of ordering and a fourth week of settlement, ' +
     'with a rainy period that degrades interior roads and brings forward spoilage.',
   availableIslandIds: ['saint-lucia'],
   startsAtIso: START_ISO,
   durationDays: DURATION_DAYS,
+  settlementDays: SETTLEMENT_DAYS,
   weatherReference: SAINT_LUCIA_WEATHER_REFERENCE,
+
   provenanceNote:
     'SYNTHETIC, with one recorded input. Licensed public place references provide geographic context and ' +
     'realised weather replays recorded Saint Lucian daily conditions from data/saint-lucia-weather-reference.v1 ' +
@@ -345,7 +358,9 @@ export const saintLuciaDemoV1: Scenario = {
     const wetSpellStartDay = weatherStream.int(7, 11);
     const wetSpellLengthDays = weatherStream.int(3, 5);
 
-    for (let day = 0; day < DURATION_DAYS + 1; day += 1) {
+    // Weather covers the settlement window too: those days are real run time,
+    // and a dry patch invented by the map simply ending would flatter both arms.
+    for (let day = 0; day < DURATION_DAYS + SETTLEMENT_DAYS + 1; day += 1) {
       const date = formatDate(startsAt + day * DAY_MS);
       const inWetSpell = day >= wetSpellStartDay && day < wetSpellStartDay + wetSpellLengthDays;
       const rainfallMm = inWetSpell
@@ -416,7 +431,7 @@ export const saintLuciaDemoV1: Scenario = {
     const weather = new WeatherModel({
       islandIds: ['saint-lucia'],
       startsAt,
-      days: DURATION_DAYS + 1,
+      days: DURATION_DAYS + SETTLEMENT_DAYS + 1,
       rainfallMm: (_islandId, date) => rainfallMmByDate.get(date) ?? 0,
       realisedStream: random.stream('scenario:weather:realised'),
       forecastStream: random.stream('weather:forecast'),
@@ -463,4 +478,4 @@ export function requireScenario(scenarioId: string): Scenario {
   return scenario;
 }
 
-export { haversineKm, ROAD_WINDING_FACTOR, START_ISO, DURATION_DAYS };
+export { haversineKm, ROAD_WINDING_FACTOR, START_ISO, DURATION_DAYS, SETTLEMENT_DAYS };

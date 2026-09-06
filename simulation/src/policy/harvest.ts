@@ -8,10 +8,14 @@
  *
  * What it does differently:
  *
- *   - **Promises a conservative quantity.** A grower's estimate is treated as a
- *     central guess and discounted for how stale it is and how much that
- *     grower's reports have disagreed with each other. Promising less is what
- *     makes a promise worth something.
+ *   - **Promises a conservative quantity, from a date it can keep.** A grower's
+ *     estimate is treated as a central guess and discounted for how stale it is
+ *     and how much that grower's reports have disagreed with each other. A crop
+ *     still in the ground may be promised, because a buyer asking for produce
+ *     next week is asking for exactly that, but only from the late end of the
+ *     grower's own stated window and only when the journey still fits before
+ *     the deadline. Promising less, and dating it, is what makes a promise
+ *     worth something.
  *   - **Sources across farms.** One order may draw on several batches, so an
  *     order larger than any single grower's supply is still fillable.
  *   - **Routes commitments through an approval gate.** `docs/architecture.md`
@@ -32,8 +36,11 @@ import type {
   PolicyContext,
   RecoveryProposal,
 } from './types.js';
-import type { BuyerDemand, Commitment, ObservedCropBatch, ObservedDisruption } from '../world/types.js';
-import { DAY_MS, HOUR_MS, formatDate } from '../core/time.js';
+import type { Buyer, BuyerDemand, Commitment, ObservedCropBatch, ObservedDisruption } from '../world/types.js';
+import type { SimulationInstant } from '../core/time.js';
+import { DAY_MS, HOUR_MS, MINUTE_MS, formatDate } from '../core/time.js';
+import { haversineKm, ROAD_WINDING_FACTOR } from '../scenario/saint-lucia-demo-v1.js';
+
 import {
   CUSTOMS_BASE_DELAY_HOURS,
   FREIGHT_PER_KG_XCD,
@@ -44,6 +51,7 @@ import {
   reachableIslandIds,
   shipmentCostXcd,
 } from '../world/maritime.js';
+
 import { STALE_OBSERVATION_MS } from './baseline.js';
 
 /**
@@ -71,6 +79,63 @@ const UNOBSERVED_AVAILABLE_KG = 0;
  */
 export const MAX_READY_HOLD_DAYS = 0.5;
 export const MAX_READY_HOLD_MS = MAX_READY_HOLD_DAYS * DAY_MS;
+
+/**
+ * Soonest a vehicle can be on the road after a commitment is cleared.
+ *
+ * The engine will not schedule a departure inside this hour, so a promise made
+ * without allowing for it is a promise that arrives late. Mirrors the engine
+ * rather than adding a margin of its own.
+ */
+const DISPATCH_LEAD_MS = HOUR_MS;
+
+/**
+ * When the produce on a batch becomes collectable, as the growers have
+ * described it, or null when the batch cannot be promised at all.
+ *
+ * A batch reported READY is collectable now. A batch still growing or maturing
+ * is dated from the *late* end of the grower's own stated window, which is the
+ * conservative reading of a claim about the future and the one that keeps a
+ * forward promise keepable. Nothing else can be promised: a planted field has
+ * no crop in it yet, and a harvested or spoiled one has none left.
+ *
+ * `expectedReadyTo` is what the grower said at planting and is part of the
+ * observed world. The hidden `readyAt` is not read here, and reading it is the
+ * whole thing this benchmark exists to rule out.
+ */
+function collectableFrom(now: SimulationInstant, batch: ObservedCropBatch): SimulationInstant | null {
+  switch (batch.lastReportedStage) {
+    case 'READY':
+      return now;
+    case 'GROWING':
+    case 'MATURING':
+      return batch.expectedReadyTo;
+    default:
+      return null;
+  }
+}
+
+/**
+ * How long collecting from this farm and delivering to this buyer takes.
+ *
+ * Deliberately the same arithmetic the engine uses to schedule the mission it
+ * will actually run — an hour before a vehicle can be got on the road, then
+ * straight-line distance with the same winding factor, one pickup stop and a
+ * drop at 25 minutes each — so a promise is not made on a journey time the
+ * engine then disagrees with and cannot keep. The slowest vehicle in the fleet
+ * is assumed, because a promise should not depend on the fastest one being
+ * free.
+ */
+function collectionLeadMs(context: PolicyContext, batch: ObservedCropBatch, buyer: Buyer): number {
+  const farm = context.farms.get(batch.farmId);
+  if (!farm) return Number.POSITIVE_INFINITY;
+  const cruiseSpeedKmh = Math.min(
+    ...[...context.transporters.values()].map((transporter) => transporter.cruiseSpeedKmh),
+  );
+  if (!Number.isFinite(cruiseSpeedKmh) || cruiseSpeedKmh <= 0) return Number.POSITIVE_INFINITY;
+  const distanceKm = haversineKm(farm.position, buyer.position) * ROAD_WINDING_FACTOR;
+  return DISPATCH_LEAD_MS + (distanceKm / cruiseSpeedKmh) * HOUR_MS + 2 * 25 * MINUTE_MS;
+}
 
 /**
  * How much the grower's reports have disagreed, as a coefficient of variation.
@@ -138,17 +203,29 @@ export const harvestPolicy: CoordinationPolicy = {
     const candidates = [...context.observed.batches.values()]
       .filter((batch) => batch.crop === demand.crop)
       .filter((batch) => context.farms.get(batch.farmId)?.islandId === buyer.islandId)
-      // The defining difference from the baseline. The baseline promises
-      // against the grower's stated calendar window, which is a guess made at
-      // planting. Harvest promises only against a batch someone has actually
-      // reported as ready, so it is committing to produce that exists rather
-      // than produce that is scheduled to exist.
+      // The defining difference from the baseline, and it is a difference of
+      // dating rather than of optimism. The baseline promises against a stated
+      // calendar window and then sends a vehicle whenever it likes. Harvest
+      // will promise a crop that is still growing — a buyer asking for produce
+      // next week wants exactly that — but only when the grower's own late
+      // estimate of readiness, plus the journey it will take to collect and
+      // deliver, still lands before the buyer needs it.
       //
-      // This costs it some orders it might have filled. That is the trade:
-      // fewer promises, and the ones it makes are keepable.
-      .filter((batch) => batch.lastReportedStage === 'READY')
-      .filter((batch) => batch.expectedReadyFrom <= demand.neededBy)
-      .map((batch) => ({ batch, availableKg: harvestPolicy.estimateAvailableKg(context, batch) }))
+      // It still refuses orders it could nominally fill — a crop whose stated
+      // window closes after the buyer needs it is not supply, however much of
+      // it there is. That is the trade: promises dated against the field
+      // rather than against the calendar, and a keepable date is what makes a
+      // promise worth having.
+      .map((batch) => ({ batch, collectableFrom: collectableFrom(context.now, batch) }))
+      .filter((candidate): candidate is { batch: ObservedCropBatch; collectableFrom: SimulationInstant } =>
+        candidate.collectableFrom !== null)
+      .filter((candidate) =>
+        candidate.collectableFrom + collectionLeadMs(context, candidate.batch, buyer) <= demand.neededBy)
+      .map(({ batch, collectableFrom: readyFrom }) => ({
+        batch,
+        forward: readyFrom > context.now,
+        availableKg: harvestPolicy.estimateAvailableKg(context, batch),
+      }))
       .filter((candidate) => candidate.availableKg > 0)
       // Draw on the best-evidenced supply first, then by id so ties are stable
       // across runs. An unstable tiebreak would make the benchmark irreproducible.
@@ -236,6 +313,7 @@ export const harvestPolicy: CoordinationPolicy = {
     // fulfilment is the normal case, not a fallback.
     const allocations: Array<{ batchId: string; farmId: string; quantityKg: number }> = [];
     let remaining = wanted;
+    let forwardCount = 0;
 
     for (const candidate of candidates) {
       if (remaining <= 0) break;
@@ -248,6 +326,7 @@ export const harvestPolicy: CoordinationPolicy = {
         farmId: candidate.batch.farmId,
         quantityKg: Number(take.toFixed(2)),
       });
+      if (candidate.forward) forwardCount += 1;
       remaining -= take;
     }
 
@@ -293,12 +372,14 @@ export const harvestPolicy: CoordinationPolicy = {
       kind: 'HARVEST_PROPOSE_ALLOCATION',
       summary:
         `Proposed ${promised.toFixed(0)} kg of ${wanted.toFixed(0)} kg requested, drawn from ` +
-        `${allocations.length} farm(s) on uncertainty-discounted estimates.`,
+        `${allocations.length} farm(s) on uncertainty-discounted estimates, ` +
+        `${forwardCount} of them against a crop not yet reported ready.`,
       evidence: {
         demandId: demand.demandId,
         requestedKg: wanted,
         promisedKg: Number(promised.toFixed(2)),
         farmCount: allocations.length,
+        forwardPromises: forwardCount,
         shortfallKg: Number(Math.max(0, wanted - promised).toFixed(2)),
         discountApplied: true,
       },

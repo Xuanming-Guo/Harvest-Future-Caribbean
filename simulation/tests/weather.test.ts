@@ -14,7 +14,7 @@
  * driest and the wettest, before any assertion was written.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { SimulationEngine, runScenario } from '../src/engine.js';
 import { assertNoTruthLeak } from '../src/world/observable.js';
@@ -250,24 +250,23 @@ const actsOnForecastStorm = (seed: number): boolean =>
   );
 
 describe('forecasts inform decisions without touching physics', () => {
-  /**
-   * The recorded world almost never gives this path anything to act on.
-   *
-   * Under the synthetic generator one of the ten benchmark seeds triggered it.
-   * Under the recorded reference none of them do, and that is the data talking
-   * rather than a defect: the dataset holds one storm day across all six
-   * station-years, so a *forecast* storm landing inside a hold window is now
-   * genuinely rare. A sweep of seeds 1 to 120 — a range fixed before it was
-   * run, not widened until something appeared — fires the path on exactly one,
-   * seed 52.
-   *
-   * Both halves are asserted. The first keeps the path from rotting into dead
-   * code. The second pins the rarity, so if a future change puts storms back
-   * into this scenario the test fails and this comment has to be rewritten
-   * rather than quietly left wrong.
-   */
-  it('still lets the Harvest policy bring a pickup forward on a forecast storm', () => {
-    expect(actsOnForecastStorm(52)).toBe(true);
+  // Forward commitments change when planning happens, so a particular seed is
+  // no longer a stable way to exercise this branch. Use an explicit forecast
+  // fixture while leaving realised weather and the benchmark seeds untouched.
+  it('still lets the Harvest policy respond to a forecast storm without changing realised weather', () => {
+    const before = capturedFrames(42);
+    const original = WeatherModel.prototype.forecastIssuedOn;
+    const forecast = vi.spyOn(WeatherModel.prototype, 'forecastIssuedOn').mockImplementation(function (this: WeatherModel, islandId, date) {
+      return original.call(this, islandId, date).map((day) => ({ ...day, condition: 'STORM' }));
+    });
+    try {
+      const result = runScenario({ scenarioId: SCENARIO, policy: 'HARVEST', seed: 42, captureFrames: true });
+      expect(result.decisions.some((decision) => decision.kind === 'HARVEST_PULL_PICKUP_FORWARD' && decision.evidence.source === 'FORECAST')).toBe(true);
+      const realised = (frames: ControlRoomFrame[]) => [...new Map(frames.flatMap((frame) => (frame.weather ?? []).map((day) => [day.date, { rain: day.rainMm, wind: day.windKph, condition: day.condition }] as const))).entries()];
+      expect(realised(result.timeline?.frames ?? [])).toEqual(realised(before));
+    } finally {
+      forecast.mockRestore();
+    }
   });
 
   it('records that no benchmark seed reaches that path under recorded weather', () => {

@@ -24,6 +24,7 @@ function auth(persona: string) {
 /** The OrderOutcomeCause vocabulary declared in contracts/openapi.yaml. */
 const ORDER_OUTCOME_CAUSES = [
   "NO_READY_SUPPLY",
+  "NOT_READY_IN_TIME",
   "INSUFFICIENT_SUPPLY",
   "SUPPLY_CHANGED",
   "APPROVAL_REJECTED",
@@ -61,13 +62,19 @@ function cropStandardPayload(status: "DRAFT" | "PUBLISHED" = "PUBLISHED") {
 }
 
 beforeAll(async () => {
+  // The seeded workflow has dated September orders; only freeze Date, not I/O timers.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-06T08:00:00Z"));
   await server.listen({ host: "127.0.0.1", port: 0 });
   const address = server.server.address() as AddressInfo;
   apiBaseUrl = `http://127.0.0.1:${address.port}`;
   for (const persona of ["buyer-hotel", "farmer-ana", "farmer-marcus", "transporter-daniel", "coordinator-maya", "operations-demo"]) await signIn(persona);
 });
 
-afterAll(async () => server.close());
+afterAll(async () => {
+  await server.close();
+  vi.useRealTimers();
+});
 
 describe("participant Product API", () => {
   it("accepts the loopback spelling used by the local control-room preview", async () => {
@@ -826,31 +833,39 @@ describe("participant Product API", () => {
     const causeCounts = finalOutcomes.causes as Record<string, number>;
     expect(Object.values(causeCounts).reduce((sum, count) => sum + count, 0)).toBe(finalOutcomes.partiallyFulfilled + finalOutcomes.unfulfilled);
     expect(Object.keys(causeCounts).every((cause) => ORDER_OUTCOME_CAUSES.includes(cause))).toBe(true);
-    // The engine no longer raises demand it cannot settle inside the run window,
-    // so no order can be truncated by the horizon.
+    // The run continues for a settlement window after buyers stop ordering, long
+    // enough for every deadline the ordering window can produce, so no order is
+    // truncated by the horizon. Zero because late orders are followed through,
+    // not because they are withheld.
     expect(causeCounts.HORIZON_TRUNCATED ?? 0).toBe(0);
     // The Product API's delivery acceptances are what the engine applies back to
     // physical state, so the projection and the engine metric agree.
-    expect(finalSnapshot.deliveryAcceptedKg).toBe(created.json().metrics.totalAcceptedKg);
+    expect(finalSnapshot.deliveryAcceptedKg).toBeCloseTo(created.json().metrics.totalAcceptedKg, 2);
     expect(finalSnapshot.openDemands).toBe(finalOutcomes.total);
     expect(finalSnapshot.completedMissionCount).toBeGreaterThan(0);
     expect(finalSnapshot.approvedCommitmentCount).toBeGreaterThanOrEqual(finalSnapshot.completedMissionCount);
     // Payment behaviour is asserted by its arithmetic rather than by recorded
     // counts, which live in docs/simulation_api_local_testing.md. Synthetic
     // buyers order on simulated 7-day terms and pay once their wait elapses, so
-    // nothing is paid for that was never delivered and the overdue count is back
-    // to zero by the horizon.
+    // nothing is paid for that was never delivered and an order that goes
+    // overdue either gets paid or is still overdue when the run ends.
     const overduePerFrame = timeline.json().frames.map((frame: { operationsSnapshot?: { paymentOverdueCount?: number } }) => frame.operationsSnapshot?.paymentOverdueCount);
     expect(overduePerFrame.every((count: number | undefined) => typeof count === "number")).toBe(true);
     expect(overduePerFrame.at(-1)).toBe(finalSnapshot.paymentOverdueCount);
-    expect(finalSnapshot.paymentOverdueCount).toBe(0);
     const paymentConfirmations = await prisma.domainEvent.count({ where: { simulationRunId: runId, eventType: "PAYMENT_CONFIRMED" } });
     const settled = await prisma.order.findMany({ where: { simulationRunId: runId, paidAt: { not: null } }, select: { paymentTermsDays: true } });
     expect(settled).toHaveLength(paymentConfirmations);
-    // A buyer can only pay for produce it accepted, and every order that ever
-    // ran late was settled, because none is still overdue at the horizon.
-    expect(settled.length).toBeLessThanOrEqual(finalOutcomes.fulfilled + finalOutcomes.partiallyFulfilled);
-    expect(Math.max(...(overduePerFrame as number[]))).toBeLessThanOrEqual(paymentConfirmations);
+    // A buyer can only pay for produce it accepted, and an order can only be
+    // overdue on produce it accepted, so the two together cannot exceed the
+    // recorded delivery acceptances. Counted from the acceptances rather than
+    // from the fulfilled orders, because a delivery the buyer refused outright
+    // is still an acceptance record and still prices the order.
+    const acceptances = await prisma.deliveryAcceptance.count({ where: { simulationRunId: runId } });
+    expect(settled.length + finalSnapshot.paymentOverdueCount).toBeLessThanOrEqual(acceptances);
+    // Overdue is absorbing until payment, so the most that were ever overdue at
+    // once is bounded by those eventually paid plus those still overdue at the
+    // end. Harvest records these terms; it moves no money.
+    expect(Math.max(...(overduePerFrame as number[]))).toBeLessThanOrEqual(paymentConfirmations + finalSnapshot.paymentOverdueCount);
     expect(settled.every((order) => order.paymentTermsDays === 7)).toBe(true);
     for (const forbidden of ["potentialYieldKg", "qualityFraction", "dailySpoilageRate", "severity"]) {
       expect(timeline.body).not.toContain(forbidden);
@@ -1012,9 +1027,12 @@ describe("participant Product API", () => {
       headers: mutationHeaders("operations-demo", "derived-at-horizon"),
       payload: {
         derivedFromRunId: runId,
+        // Day 28: the end of the run, ordering window plus settlement window.
+        // A day-21 injection is now inside it, because the run keeps going
+        // while the last orders are delivered.
         disruptions: [{
           type: "WEATHER",
-          offsetMs: 1_814_400_000,
+          offsetMs: 2_419_200_000,
           durationMs: 86_400_000,
           affectedEntityIds: ["all"],
           publicDescription: "This starts too late to affect the scenario.",
@@ -1057,8 +1075,11 @@ describe("participant Product API", () => {
       prisma.allocation.count({ where: { simulationRunId: runId, status: "APPROVED" } }),
       prisma.deliveryMission.count({ where: { simulationRunId: runId, status: { in: ["DELIVERED", "COMPLETED"] } } }),
     ]);
-    expect(runSnapshot.json().deliveryAcceptedKg).toBe(acceptedDelivery._sum.acceptedQuantity ?? 0);
-    expect(runSnapshot.json().deliveryAcceptedKg).toBe(created.json().metrics.totalAcceptedKg);
+    // To the hundredth of a kilogram, not to the bit: the snapshot rounds its
+    // total and the database sums the acceptances one row at a time, so the two
+    // agree on the figure a participant reads rather than on a double.
+    expect(runSnapshot.json().deliveryAcceptedKg).toBeCloseTo(acceptedDelivery._sum.acceptedQuantity ?? 0, 2);
+    expect(runSnapshot.json().deliveryAcceptedKg).toBeCloseTo(created.json().metrics.totalAcceptedKg, 2);
     expect(runSnapshot.json().approvedCommitmentCount).toBe(approvedCommitments);
     expect(runSnapshot.json().completedMissionCount).toBe(completedMissions);
 
@@ -1122,7 +1143,7 @@ describe("participant Product API", () => {
           { id: buyerId, authSubject: `sim-buyer-${index}`, name: `Sim Buyer ${index}`, role: "BUYER", isSynthetic: true, simulationRunId: run.id },
         ] });
         await prisma.farm.create({ data: { id: farmId, name: `Run ${index} Farm`, farmerId, latitude: 13.95, longitude: -61, simulationRunId: run.id } });
-        await prisma.cropBatch.create({ data: { id: batchId, farmId, cropType: "CUCUMBER", status: "HARVEST_READY", availableToPromise: 10, provenance: "SYNTHETIC", simulationRunId: run.id } });
+        await prisma.cropBatch.create({ data: { id: batchId, farmId, cropType: "CUCUMBER", status: "HARVEST_READY", promisableFrom: new Date("2026-09-06"), availableToPromise: 10, provenance: "SYNTHETIC", simulationRunId: run.id } });
         await prisma.listing.create({ data: { id: listingId, cropBatchId: batchId, farmerId, cropType: "CUCUMBER", quantity: 10, unitPrice: 5, availableFrom: new Date("2026-09-01"), availableUntil: new Date("2026-10-01"), status: "ACTIVE", simulationRunId: run.id } });
         await signIn(`sim-buyer-${index}`);
       }
@@ -1187,7 +1208,7 @@ describe("participant Product API", () => {
 
 describe("fulfilment defects (#53)", () => {
   const anaBatchId = "11111111-1111-4111-8111-111111111111";
-  const listingPayload = { cropBatchId: anaBatchId, quantity: { value: 5, unit: "kg" }, unitPrice: { amount: 6.5, currency: "XCD" }, availableFrom: "2026-09-05", availableUntil: "2026-09-12" };
+  const listingPayload = { cropBatchId: anaBatchId, quantity: { value: 5, unit: "kg" }, unitPrice: { amount: 6.5, currency: "XCD" }, availableFrom: "2026-09-06", availableUntil: "2026-09-12" };
   const orderPayload = { cropType: "CUCUMBER", neededBy: "2026-09-11T12:00:00Z", deliveryLocation: { latitude: 14.0101, longitude: -60.9875 } };
 
   async function observe(cropStage: string, estimate = 40) {
@@ -1199,19 +1220,21 @@ describe("fulfilment defects (#53)", () => {
     });
   }
 
-  it("keeps a growing crop unlistable and withdraws its offers, then reopens supply once it is reported ready", async () => {
+  it("withdraws a ready crop's offers when it stops being ready, then reopens supply once it is reported ready again", async () => {
     await prisma.listing.updateMany({ where: { cropBatchId: anaBatchId }, data: { status: "ACTIVE", quantity: 20 } });
     expect((await observe("GROWING")).statusCode).toBe(201);
 
+    // A crop that was on offer as ready and no longer is has its offers pulled:
+    // a buyer must not be matched to produce that is not there. The forecast
+    // itself survives, and so does a conservative promise dated from the window
+    // the forecast gives, which is the product rather than a leak.
     const growing = await prisma.cropBatch.findUniqueOrThrow({ where: { id: anaBatchId } });
     expect(growing.status).toBe("GROWING");
-    expect(growing.availableToPromise).toBe(0);
+    expect(growing.availableToPromise).toBeGreaterThan(0);
+    expect(growing.promisableFrom).not.toBeNull();
+    expect(growing.promisableFrom!.getTime()).toBeGreaterThan(Date.now());
     expect(await prisma.listing.count({ where: { cropBatchId: anaBatchId, status: "ACTIVE" } })).toBe(0);
     expect(await prisma.listing.count({ where: { cropBatchId: anaBatchId, status: "WITHDRAWN" } })).toBeGreaterThan(0);
-
-    const blocked = await server.inject({ method: "POST", url: "/v1/listings", headers: mutationHeaders("farmer-ana", "list-growing"), payload: listingPayload });
-    expect(blocked.statusCode).toBe(422);
-    expect(blocked.json().code).toBe("CROP_NOT_READY");
 
     expect((await observe("HARVEST_READY")).statusCode).toBe(201);
     const ready = await prisma.cropBatch.findUniqueOrThrow({ where: { id: anaBatchId } });
@@ -1239,7 +1262,7 @@ describe("fulfilment defects (#53)", () => {
     const detail = await server.inject({ method: "GET", url: `/v1/orders/${orderId}`, headers: auth("buyer-hotel") });
     expect(detail.json().outcomeCause).toBe("NO_READY_SUPPLY");
 
-    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", availableToPromise: 12 } });
+    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", promisableFrom: new Date("2026-09-06"), availableToPromise: 12 } });
     const published = await server.inject({ method: "POST", url: "/v1/listings", headers: mutationHeaders("farmer-ana", "rematch-supply"), payload: listingPayload });
     expect(published.statusCode).toBe(201);
 
@@ -1254,7 +1277,7 @@ describe("fulfilment defects (#53)", () => {
     await prisma.order.updateMany({ where: { cropType: "CUCUMBER", lifecycleStatus: { in: ["REQUESTED", "AWAITING_APPROVAL"] } }, data: { lifecycleStatus: "CANCELLED" } });
     await prisma.allocation.updateMany({ where: { status: "PROPOSED" }, data: { status: "STALE" } });
     await prisma.listing.updateMany({ where: { cropType: "CUCUMBER" }, data: { status: "SOLD_OUT" } });
-    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", availableToPromise: 6 } });
+    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", promisableFrom: new Date("2026-09-06"), availableToPromise: 6 } });
     const published = await server.inject({ method: "POST", url: "/v1/listings", headers: mutationHeaders("farmer-ana", "soft-hold-supply"), payload: { ...listingPayload, quantity: { value: 6, unit: "kg" } } });
     expect(published.statusCode).toBe(201);
 
@@ -1275,12 +1298,12 @@ describe("safe partial commitment (#53)", () => {
     await prisma.order.updateMany({ where: { cropType: "CUCUMBER", lifecycleStatus: { in: ["REQUESTED", "AWAITING_APPROVAL"] } }, data: { lifecycleStatus: "CANCELLED" } });
     await prisma.allocation.updateMany({ where: { status: "PROPOSED" }, data: { status: "STALE" } });
     await prisma.listing.updateMany({ where: { cropType: "CUCUMBER" }, data: { status: "SOLD_OUT" } });
-    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", availableToPromise: available } });
+    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", promisableFrom: new Date("2026-09-06"), availableToPromise: available } });
     const published = await server.inject({
       method: "POST",
       url: "/v1/listings",
       headers: mutationHeaders("farmer-ana", "partial-supply"),
-      payload: { cropBatchId: anaBatchId, quantity: { value: available, unit: "kg" }, unitPrice: { amount: 6.5, currency: "XCD" }, availableFrom: "2026-09-05", availableUntil: "2026-09-12" },
+      payload: { cropBatchId: anaBatchId, quantity: { value: available, unit: "kg" }, unitPrice: { amount: 6.5, currency: "XCD" }, availableFrom: "2026-09-06", availableUntil: "2026-09-12" },
     });
     expect(published.statusCode).toBe(201);
   }
@@ -1357,6 +1380,128 @@ describe("safe partial commitment (#53)", () => {
   });
 });
 
+describe("forward promises (#91)", () => {
+  const anaBatchId = "11111111-1111-4111-8111-111111111111";
+  const deliveryLocation = { latitude: 14.0101, longitude: -60.9875 };
+
+  // Dates are relative because the forecast window is: the fixture model dates a
+  // harvest from when it ran, so a hard-coded window would only be right on the
+  // day it was written.
+  const dayFromNow = (days: number) => new Date(Date.now() + days * 24 * 60 * 60 * 1_000).toISOString().slice(0, 10);
+
+  /** Leaves one growing cucumber batch as the only supply on the marketplace. */
+  async function onlyGrowingSupply() {
+    await prisma.order.updateMany({ where: { cropType: "CUCUMBER", lifecycleStatus: { in: ["REQUESTED", "AWAITING_APPROVAL"] } }, data: { lifecycleStatus: "CANCELLED" } });
+    await prisma.allocation.updateMany({ where: { status: "PROPOSED" }, data: { status: "STALE" } });
+    await prisma.listing.updateMany({ where: { cropType: "CUCUMBER" }, data: { status: "SOLD_OUT" } });
+    const observed = await server.inject({
+      method: "POST",
+      url: "/v1/crop-observations",
+      headers: mutationHeaders("farmer-ana", "observe-forward-growing"),
+      payload: { cropBatchId: anaBatchId, observedAt: new Date().toISOString(), cropStage: "GROWING", estimatedQuantity: { value: 40, unit: "kg" }, provenance: "OBSERVED" },
+    });
+    expect(observed.statusCode).toBe(201);
+    const batch = await server.inject({ method: "GET", url: `/v1/crop-batches/${anaBatchId}`, headers: auth("farmer-ana") });
+    expect(batch.statusCode).toBe(200);
+    return batch.json() as { status: string; availableToPromise: { value: number }; promisableFrom?: string };
+  }
+
+  it("promises a growing crop from its forecast window and refuses a listing that opens before it", async () => {
+    const batch = await onlyGrowingSupply();
+    // The conservative q10, not the optimistic maximum, and dated.
+    expect(batch.status).toBe("GROWING");
+    expect(batch.availableToPromise.value).toBeGreaterThan(0);
+    expect(batch.promisableFrom).toBe(dayFromNow(1));
+
+    const early = await server.inject({
+      method: "POST",
+      url: "/v1/listings",
+      headers: mutationHeaders("farmer-ana", "forward-listing-early"),
+      payload: { cropBatchId: anaBatchId, quantity: { value: 5, unit: "kg" }, unitPrice: { amount: 6.5, currency: "XCD" }, availableFrom: dayFromNow(0), availableUntil: dayFromNow(8) },
+    });
+    expect(early.statusCode).toBe(422);
+    expect(early.json().code).toBe("LISTING_BEFORE_HARVEST_WINDOW");
+
+    const published = await server.inject({
+      method: "POST",
+      url: "/v1/listings",
+      headers: mutationHeaders("farmer-ana", "forward-listing"),
+      payload: { cropBatchId: anaBatchId, quantity: { value: 5, unit: "kg" }, unitPrice: { amount: 6.5, currency: "XCD" }, availableFrom: batch.promisableFrom, availableUntil: dayFromNow(8) },
+    });
+    expect(published.statusCode).toBe(201);
+    expect(published.json().availableFrom).toBe(batch.promisableFrom);
+  });
+
+  it("matches an order the growing crop can reach and names why it cannot reach an earlier one", async () => {
+    const batch = await onlyGrowingSupply();
+    const published = await server.inject({
+      method: "POST",
+      url: "/v1/listings",
+      headers: mutationHeaders("farmer-ana", "forward-listing-match"),
+      payload: { cropBatchId: anaBatchId, quantity: { value: 5, unit: "kg" }, unitPrice: { amount: 6.5, currency: "XCD" }, availableFrom: batch.promisableFrom, availableUntil: dayFromNow(8) },
+    });
+    expect(published.statusCode).toBe(201);
+
+    // Due minutes after the harvest window opens: the produce exists on paper
+    // but cannot be picked, driven and unloaded in five minutes.
+    const tooSoon = await server.inject({
+      method: "POST",
+      url: "/v1/orders",
+      headers: mutationHeaders("buyer-hotel", "forward-order-too-soon"),
+      payload: { cropType: "CUCUMBER", requestedQuantity: { value: 5, unit: "kg" }, neededBy: `${batch.promisableFrom}T00:05:00Z`, deliveryLocation },
+    });
+    expect(tooSoon.statusCode).toBe(201);
+    const waiting = await prisma.order.findUniqueOrThrow({ where: { id: tooSoon.json().orderId } });
+    expect(waiting.lifecycleStatus).toBe("REQUESTED");
+    expect(waiting.outcomeCause).toBe("NOT_READY_IN_TIME");
+    expect(waiting.outcomeNote).toContain("cannot be harvested and delivered");
+
+    // Two days later the same supply is a keepable promise.
+    const inTime = await server.inject({
+      method: "POST",
+      url: "/v1/orders",
+      headers: mutationHeaders("buyer-hotel", "forward-order-in-time"),
+      payload: { cropType: "CUCUMBER", requestedQuantity: { value: 5, unit: "kg" }, neededBy: `${dayFromNow(3)}T12:00:00Z`, deliveryLocation },
+    });
+    expect(inTime.statusCode).toBe(201);
+    const matched = await prisma.order.findUniqueOrThrow({ where: { id: inTime.json().orderId } });
+    expect(matched.lifecycleStatus).toBe("AWAITING_APPROVAL");
+    expect(matched.outcomeCause).toBeNull();
+  });
+
+  it("dates the delivery mission from the harvest window rather than from today", async () => {
+    const batch = await onlyGrowingSupply();
+    await server.inject({
+      method: "POST",
+      url: "/v1/listings",
+      headers: mutationHeaders("farmer-ana", "forward-listing-mission"),
+      payload: { cropBatchId: anaBatchId, quantity: { value: 5, unit: "kg" }, unitPrice: { amount: 6.5, currency: "XCD" }, availableFrom: batch.promisableFrom, availableUntil: dayFromNow(8) },
+    });
+    const placed = await server.inject({
+      method: "POST",
+      url: "/v1/orders",
+      headers: mutationHeaders("buyer-hotel", "forward-order-mission"),
+      payload: { cropType: "CUCUMBER", requestedQuantity: { value: 5, unit: "kg" }, neededBy: `${dayFromNow(4)}T12:00:00Z`, deliveryLocation },
+    });
+    const orderId = placed.json().orderId as string;
+
+    for (const persona of ["buyer-hotel", "farmer-ana"]) {
+      const approvals = (await server.inject({ method: "GET", url: "/v1/approvals?status=PENDING", headers: auth(persona) })).json().items;
+      const approval = approvals.find((item: { context?: { orderId?: string } }) => item.context?.orderId === orderId);
+      if (approval) expect((await decide(persona, approval.approvalId, "APPROVE")).statusCode).toBe(200);
+    }
+
+    const mission = await prisma.deliveryMission.findFirstOrThrow({ where: { orderId } });
+    expect(mission.collectFrom).not.toBeNull();
+    // The load is collectable when the crop is, and the estimated arrival runs
+    // from there. Dating it from today would tell a transporter to leave now
+    // for a field with nothing in it.
+    expect(mission.collectFrom!.toISOString().slice(0, 10)).toBe(batch.promisableFrom);
+    expect(mission.estimatedArrival!.getTime()).toBeGreaterThan(mission.collectFrom!.getTime());
+    expect(mission.estimatedArrival!.getTime()).toBeLessThanOrEqual(mission.deadline.getTime());
+  });
+});
+
 describe("payment terms and status (#74)", () => {
   const anaBatchId = "11111111-1111-4111-8111-111111111111";
   const unitPrice = 7.5;
@@ -1368,12 +1513,12 @@ describe("payment terms and status (#74)", () => {
     await prisma.order.updateMany({ where: { cropType: "CUCUMBER", lifecycleStatus: { in: ["REQUESTED", "AWAITING_APPROVAL"] } }, data: { lifecycleStatus: "CANCELLED" } });
     await prisma.allocation.updateMany({ where: { status: "PROPOSED" }, data: { status: "STALE" } });
     await prisma.listing.updateMany({ where: { cropType: "CUCUMBER" }, data: { status: "SOLD_OUT" } });
-    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", availableToPromise: available } });
+    await prisma.cropBatch.update({ where: { id: anaBatchId }, data: { status: "HARVEST_READY", promisableFrom: new Date("2026-09-06"), availableToPromise: available } });
     const published = await server.inject({
       method: "POST",
       url: "/v1/listings",
       headers: mutationHeaders("farmer-ana", "payment-supply"),
-      payload: { cropBatchId: anaBatchId, quantity: { value: available, unit: "kg" }, unitPrice: { amount: unitPrice, currency: "XCD" }, availableFrom: "2026-09-05", availableUntil: "2026-09-26" },
+      payload: { cropBatchId: anaBatchId, quantity: { value: available, unit: "kg" }, unitPrice: { amount: unitPrice, currency: "XCD" }, availableFrom: "2026-09-06", availableUntil: "2026-09-26" },
     });
     expect(published.statusCode).toBe(201);
   }

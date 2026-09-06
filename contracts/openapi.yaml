@@ -152,6 +152,7 @@ paths:
                 status: GROWING
                 latestObservationId: 12121212-1212-4212-8212-121212121212
                 availableToPromise: {value: 380, unit: kg}
+                promisableFrom: '2026-09-18'
                 provenance: MODEL_PREDICTED
         default: {$ref: '#/components/responses/Problem'}
   /v1/crop-standards:
@@ -1630,6 +1631,15 @@ components:
         latestObservationId: {type: string, format: uuid}
         latestPredictionId: {type: string, format: uuid}
         availableToPromise: {$ref: './common.schema.json#/$defs/Quantity'}
+        promisableFrom:
+          description: >-
+            First date the produce counted in `availableToPromise` can be
+            handed over. Today for a batch reported harvest ready, the start of
+            the forecast harvest window for one still growing. A listing may
+            not open before it, and matching will not pair supply with an order
+            it cannot reach in time. Absent until a forecast has been produced.
+          type: string
+          format: date
         provenance: {$ref: './common.schema.json#/$defs/Provenance'}
         verificationStatus: {$ref: '#/components/schemas/VerificationStatus'}
         latestDecision: {$ref: '#/components/schemas/BatchDecisionExplanation'}
@@ -1990,7 +2000,7 @@ components:
         The latest recorded reason an order is not (yet) fulfilled. Written at
         each matching, approval, and delivery decision so an unfulfilled order
         always carries one explainable cause; absent on fulfilled orders.
-      enum: [NO_READY_SUPPLY, INSUFFICIENT_SUPPLY, SUPPLY_CHANGED, APPROVAL_REJECTED, APPROVAL_TIMEOUT, MISSION_LATE, DELIVERY_REJECTED, CANCELLED, HORIZON_TRUNCATED]
+      enum: [NO_READY_SUPPLY, NOT_READY_IN_TIME, INSUFFICIENT_SUPPLY, SUPPLY_CHANGED, APPROVAL_REJECTED, APPROVAL_TIMEOUT, MISSION_LATE, DELIVERY_REJECTED, CANCELLED, HORIZON_TRUNCATED]
     PaymentStatus:
       description: >-
         Derived at read time from the delivery acceptance time plus the order's
@@ -2198,6 +2208,14 @@ components:
         vehicleId: {type: string, format: uuid}
         quantity: {$ref: './common.schema.json#/$defs/Quantity'}
         deadline: {type: string, format: date-time}
+        collectFrom:
+          description: >-
+            First instant the whole load is collectable, from the harvest
+            windows of the listings it draws on. A mission offered today may be
+            a mission for next week; this is what says so. Absent on missions
+            created before forward promises existed.
+          type: string
+          format: date-time
         stops: {type: array, minItems: 2, items: {$ref: '#/components/schemas/DeliveryStop'}}
         currentStopSequence: {type: integer, minimum: 0}
         estimatedDistanceKm: {type: number, minimum: 0}
@@ -2594,6 +2612,14 @@ components:
         description: {type: string, minLength: 1}
         startsAt: {type: string, format: date-time}
         durationDays: {type: integer, minimum: 1}
+        settlementDays:
+          description: >-
+            Extra days the run continues after buyers stop ordering, so an
+            order raised on the last ordering day can still be delivered and
+            settled inside the run. Absent on a scenario with no settlement
+            window.
+          type: integer
+          minimum: 0
         availablePolicies: {type: array, items: {enum: [BASELINE, HARVEST]}}
         availableDecisionModes: {type: array, items: {enum: [DETERMINISTIC, LLM_ASSISTED]}}
         islands: {type: array, minItems: 1, items: {$ref: '#/components/schemas/SimulationIsland'}}

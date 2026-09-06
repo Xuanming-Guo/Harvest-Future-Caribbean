@@ -46,9 +46,12 @@ Retrieved **2026-09-04**; every one of the six requests returned HTTP 200 with a
 complete series and no null in any field, and each record stores the exact URL
 that produced it.
 
-Coverage is the scenario's own calendar window — `START_ISO` is
+Coverage is the original scenario calendar window — `START_ISO` is
 `2026-09-01` and `DURATION_DAYS` is 21, so the run touches 1–22 September —
 taken across the most recent complete year available and the two before it.
+The seven-day settlement window added in #91 extends beyond this dataset.
+Days 23�29 September use the seeded synthetic generator and are labelled
+`SYNTHETIC`, with no recorded date; they are not presented as recorded weather.
 
 | Station | Role | Requested | Model grid cell | Years |
 | --- | --- | --- | --- | --- |

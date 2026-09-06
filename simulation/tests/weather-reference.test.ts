@@ -213,14 +213,20 @@ describe('choosing a recorded year', () => {
 });
 
 describe('the demo scenario runs on the record', () => {
-  it('opts in, and every day of the run is labelled PUBLIC_REFERENCE', () => {
+  it('labels covered days PUBLIC_REFERENCE and uncovered settlement days SYNTHETIC', () => {
     expect(saintLuciaDemoV1.weatherReference).toBe(SAINT_LUCIA_WEATHER_REFERENCE);
 
     const frames = runScenario({ scenarioId: saintLuciaDemoV1.scenarioId, policy: 'HARVEST', seed: 42, captureFrames: true })
       .timeline?.frames ?? [];
     const days = frames.flatMap((frame) => frame.weather ?? []);
     expect(days.length).toBeGreaterThan(0);
+    expect(days.some((day) => day.date > '2026-09-22')).toBe(true);
     for (const day of days) {
+      if (day.date > '2026-09-22') {
+        expect(day.evidenceType).toBe(SYNTHETIC_WEATHER_EVIDENCE);
+        expect(day.recordedDate).toBeUndefined();
+        continue;
+      }
       expect(day.evidenceType).toBe(REFERENCE_WEATHER_EVIDENCE);
       // The run is 2026; the record is not. A reader must be able to see which
       // real day a value came from.
@@ -281,7 +287,7 @@ describe('scenarios that did not opt in are untouched', () => {
   it('leaves the regional islands on the synthetic generator', () => {
     expect(caribbeanIslandsV1.weatherReference).toBeUndefined();
 
-    const frames = runScenario({ scenarioId: caribbeanIslandsV1.scenarioId, policy: 'HARVEST', seed: 42, captureFrames: true })
+    const frames = runScenario({ scenarioId: caribbeanIslandsV1.scenarioId, policy: 'HARVEST', seed: 42, captureFrames: true, islandIds: ['saint-lucia', 'martinique'] })
       .timeline?.frames ?? [];
     const days = frames.flatMap((frame) => frame.weather ?? []);
     expect(days.length).toBeGreaterThan(0);

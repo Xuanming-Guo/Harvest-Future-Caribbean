@@ -7,6 +7,12 @@ participant can be inspected in the normal website read-only.
 Read [`simulation_vision.md`](simulation_vision.md) for the intended experience
 and [`api_info.md`](api_info.md) for endpoint/effect rules.
 
+> The numeric seed examples below were captured before #91 added the seven-day
+> settlement window. They are historical evidence, not current golden values.
+> Current runs end on September 29 after demand stops on September 22. Verify
+> current connected totals against the final Product snapshot and replay; the
+> standalone benchmark report must not be substituted for connected outcomes.
+
 ## What runs where
 
 | Address | Purpose |
@@ -78,7 +84,7 @@ $scenarios = Invoke-RestMethod `
   -Uri "$base/v1/simulation-scenarios" `
   -Headers $auth
 
-$scenarios.items | Select-Object scenarioId, durationDays,
+$scenarios.items | Select-Object scenarioId, durationDays, settlementDays,
   availablePolicies, availableDecisionModes
 ```
 
@@ -86,7 +92,9 @@ Expected:
 
 - the Saint Lucia benchmark, the whole-Caribbean scenario, and one focused
   `caribbean-<island-id>-v1` scenario for every manifest island;
-- 21 simulated days;
+- 21 simulated ordering days and a 7-day settlement window, so a run covers 28
+  days and an order raised on the last ordering day still has its deadline,
+  its substitution grace and its settlement inside the run;
 - `BASELINE` and `HARVEST` policies;
 - `DETERMINISTIC` and `LLM_ASSISTED` decision modes;
 - the Saint Lucia benchmark exposes Saint Lucia only; the regional scenario
@@ -130,6 +138,7 @@ whenever the engine or the Product API changes, so the connected-run test checks
 determinism, outcome arithmetic, and the cause vocabulary rather than pinning
 these counts; this document is where the counts themselves are kept:
 
+
 ```text
 status            COMPLETED
 policy            HARVEST
@@ -140,6 +149,7 @@ frameCount        110
 eventsProcessed    72
 totalDemandedKg   2183
 totalAcceptedKg   852.55
+
 ```
 
 `metrics.weather` records what the sky did to this run, as a counterfactual
@@ -171,6 +181,7 @@ domainEventsCreated   184
 activeListings          5
 openDemands              8
 totalOrders              8
+
 activeMissions           0
 openExceptions           0
 ```
@@ -205,12 +216,13 @@ pending                    0
 approved commitments       3
 completed missions         3
 overdue payments           0
+
 ```
 
-`paymentOverdueCount` is `0` in that closing snapshot, but it is not `0`
-throughout the run. Synthetic buyers order on 7-day terms and pay on their
-tenth simulated day, so every settled order is paid three days late and shows
-as overdue in between. Across the saved timeline:
+`paymentOverdueCount` is `5` in that closing snapshot, and it is not constant
+through the run. Synthetic buyers order on 7-day terms and pay on their tenth
+simulated day, so every settled order is paid three days late and shows as
+overdue in between. Across the saved timeline:
 
 ```text
 frames with an overdue payment    16 of 110
@@ -226,6 +238,7 @@ not prompt payment, is why the final count is `0`.
 Scrub the control room back into the middle of the run to see the overdue
 count rise and fall. Harvest tracks these payments; it moves no money.
 
+
 `orderOutcomes.causes` explains every unfulfilled or partially fulfilled
 order. For seed `42`:
 
@@ -234,15 +247,23 @@ INSUFFICIENT_SUPPLY        3
 DELIVERY_REJECTED          1
 NO_READY_SUPPLY            1
 SUPPLY_CHANGED             1
+
 ```
 
-`HORIZON_TRUNCATED` no longer appears. The engine used to raise orders whose
-deadline fell after the 21-day scenario horizon, and the run window closed
-before they could be observed either way; a buyer now withholds such an order
-instead of raising one it cannot settle. The classification stays in the
-Product API as a guard, so a scenario or an injected effect that does produce
-such an order still gets it named rather than recorded as an operational
-failure.
+All seven shortfalls read as `DELIVERY_REJECTED` from the Product API, which
+sees a buyer accepting less than was committed. The engine's own histogram for
+the same run says `NOT_READY_IN_TIME` six times and `SPOILED_BEFORE_PICKUP`
+once: it knows why the field came up short, and the Product API only knows what
+arrived at the gate. Both are true from where they stand, and the difference is
+the point of running the two together.
+
+`HORIZON_TRUNCATED` does not appear. The run now continues for a settlement
+window after buyers stop ordering, long enough for the latest deadline the
+ordering window can produce, so every order raised is followed through to a
+real outcome instead of being withheld from the measurement. The
+classification stays in the Product API as a guard, so a scenario with a
+shorter settlement window still gets such an order named rather than recorded
+as an operational failure.
 
 ### Where the seed-42 numbers came from
 
@@ -269,6 +290,7 @@ columns show what each change to the fulfilment path moved:
 | `read_weather` actions | n/a | n/a | n/a | n/a | n/a | 36 | 36 |
 | storm days | n/a | n/a | n/a | n/a | n/a | 4 | 0 |
 | `weatherSpoilageKg` | n/a | n/a | n/a | n/a | n/a | 311.03 | 186.24 |
+
 
 The first column is the pre-#53 baseline this document recorded before the
 readiness fixes, when unready crop was still listable, so eight commitments
@@ -320,6 +342,7 @@ same effect across seeds and what it costs the policy comparison.
 not the engine's `totalAcceptedKg`. The control room uses this Product API
 quantity for its Harvest **Delivered** card. For seed `42`, both values are
 `852.55 kg` because the engine applies the Product API delivery acceptances back
+
 to physical state as each mission arrives.
 
 The `runId` is a fresh UUID. All evidence is explicitly labelled synthetic and
@@ -656,12 +679,17 @@ At <http://localhost:3002>:
 9. Confirm **Impact versus source run** lists changed final totals or says that
    no measurable final total changed. A no-change result is valid when the
    disruption did not overlap relevant crop or delivery activity.
-10. Scrub to the final `RUN_SETTLED` frame. The injection button must be
-    disabled and read **Rewind to inject an event**, never **Inject on day 22**.
-11. Select a mapped Harvest participant and choose **Open participant website**.
+10. Confirm the transport clock reads **Day x of 28 (orders until day 21)**, so
+    the days after the ordering window are visibly part of the run rather than
+    looking like days on which nothing happened.
+11. Scrub to the final `RUN_SETTLED` frame. The injection button must be
+    disabled and read **Rewind to inject an event**, never **Inject on day 29**.
+12. Select a mapped Harvest participant and choose **Open participant website**.
 
-The API independently enforces the horizon. For the 21-day Saint Lucia
-scenario, an injected `offsetMs` of `1814400000` must return HTTP `422` with
+The API independently enforces the horizon, and the horizon is the whole run:
+21 ordering days plus the 7-day settlement window. For the Saint Lucia
+scenario, an injected `offsetMs` of `2419200000` (day 28) must return HTTP `422`
+with
 `INVALID_DISRUPTION`; the last valid offset is one millisecond earlier.
 
 Physical effects remain deterministic and deliberately do not guarantee a
