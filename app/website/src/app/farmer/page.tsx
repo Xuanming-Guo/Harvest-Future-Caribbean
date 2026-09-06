@@ -79,7 +79,12 @@ export default function FarmerHome() {
   );
   const openBatches = cropBatches.filter((batch) => batch.status !== "CLOSED");
   const readyBatches = cropBatches.filter((batch) => batch.status === "HARVEST_READY");
-  const stillToOffer = readyBatches.filter((batch) => !offeredBatchIds.has(batch.cropBatchId)).length;
+  const offerableBatches = cropBatches.filter((batch) =>
+    ["GROWING", "MATURING", "HARVEST_READY", "HARVESTED"].includes(batch.status) &&
+    (batch.availableToPromise.value > 0 || offeredBatchIds.has(batch.cropBatchId)) &&
+    (batch.promisableFrom || ["HARVEST_READY", "HARVESTED"].includes(batch.status)),
+  );
+  const stillToOffer = offerableBatches.filter((batch) => !offeredBatchIds.has(batch.cropBatchId)).length;
   const buyerNeeds = opportunities.data?.items ?? [];
   const pendingApprovals = approvals.data?.items ?? [];
   const collections = (missions.data?.items ?? []).filter((mission) => OPEN_MISSION_STATUSES.includes(mission.status));
@@ -120,7 +125,7 @@ export default function FarmerHome() {
           onDismiss={(key) => setDismissed((keys) => [...keys, key])}
           ledger={[
             ["Crops on your farm", String(openBatches.length)],
-            ["Safe to sell now", formatKg(safeToSell)],
+            ["Available to promise", formatKg(safeToSell)],
             ["Ready to harvest", String(readyBatches.length)],
             ["Accepted by buyers", formatKg(acceptedKg)],
           ]}
@@ -178,7 +183,7 @@ export default function FarmerHome() {
           primary
           defaultOpen
           title="Update what is growing"
-          summary={openBatches.length ? `${plural(openBatches.length, "crop")} · ${formatKg(safeToSell)} safe to sell` : "No crops recorded yet"}
+          summary={openBatches.length ? `${plural(openBatches.length, "crop")} · ${formatKg(safeToSell)} safe to promise` : "No crops recorded yet"}
         >
           <p className="section-lede">Tell Harvest what you see in the field. Each update keeps your harvest range and the amount you can safely sell close to the truth.</p>
           {!cropBatches.length ? (
@@ -194,7 +199,7 @@ export default function FarmerHome() {
                       <div>
                         <Badge tone={batch.status === "HARVEST_READY" ? "ready" : undefined}>{batch.status === "HARVEST_READY" ? "Ready" : titleCase(batch.status)}</Badge>
                         <h3>{titleCase(batch.cropType)}</h3>
-                        <p>{formatKg(batch.availableToPromise.value)} can be sold safely</p>
+                        <p>{formatKg(batch.availableToPromise.value)} is safe to promise{batch.promisableFrom ? ` from ${formatDate(batch.promisableFrom, false)}` : ""}</p>
                       </div>
                       <ArrowRight size={18} aria-hidden="true" />
                     </Link>
@@ -219,22 +224,22 @@ export default function FarmerHome() {
           icon={Wheat}
           primary
           defaultOpen
-          title="Report produce ready"
-          summary={!readyBatches.length ? "Nothing is ready to offer yet" : stillToOffer ? `${plural(stillToOffer, "crop")} still to offer` : "Everything ready is already offered"}
+          title="Offer current or future harvests"
+          summary={!offerableBatches.length ? "No forecast supply to offer yet" : stillToOffer ? `${plural(stillToOffer, "crop")} still to offer` : "Available harvests are already offered"}
         >
-          <p className="section-lede">Once a crop is picked and ready, offer it so buyers can see it. Harvest never lets you offer more than is safe to promise.</p>
-          {!readyBatches.length ? (
-            <EmptyState title="No crop is ready yet" detail="Mark a crop as harvest ready in its update form and it appears here to offer." />
+          <p className="section-lede">Offer ready produce or reserve a future harvest from its forecast date. Harvest checks the safe quantity and collection window before a commitment can be approved.</p>
+          {!offerableBatches.length ? (
+            <EmptyState title="No forecast supply to offer yet" detail="Share a crop update to get a safe quantity and the earliest date you can promise it." />
           ) : (
-            readyBatches.map((batch) => {
+            offerableBatches.map((batch) => {
               const offered = offeredBatchIds.has(batch.cropBatchId);
               return (
                 <article className="task-action" key={batch.cropBatchId}>
                   <span className="crop-symbol crop-symbol-ready"><Wheat aria-hidden="true" /></span>
                   <div>
-                    <Badge tone={offered ? "active" : "ready"}>{offered ? "Offered" : "Ready"}</Badge>
+                    <Badge tone={offered ? "active" : "ready"}>{offered ? "Offered" : ["HARVEST_READY", "HARVESTED"].includes(batch.status) ? "Ready" : "Future harvest"}</Badge>
                     <h3>{titleCase(batch.cropType)}</h3>
-                    <p>{offered ? `Buyers can already see this crop. ${formatKg(batch.availableToPromise.value)} is still safe to promise.` : `${formatKg(batch.availableToPromise.value)} is safe to promise today.`}</p>
+                    <p>{offered ? `Buyers can already see this crop. ${formatKg(batch.availableToPromise.value)} is still safe to promise.` : `${formatKg(batch.availableToPromise.value)} is safe to promise${batch.promisableFrom ? ` from ${formatDate(batch.promisableFrom, false)}` : ""}.`}</p>
                   </div>
                   <Link className={`button${offered ? " button-secondary" : ""}`} href={`/crops/${batch.cropBatchId}#offer-produce`}>
                     <Store size={17} aria-hidden="true" />{offered ? "Change the offer" : "Offer it to buyers"}

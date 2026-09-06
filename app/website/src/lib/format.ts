@@ -2,10 +2,13 @@ export const compactId = (value?: string) => (value ? `${value.slice(0, 8)}...` 
 
 export const formatDate = (value?: string, includeTime = true) => {
   if (!value) return "-";
+  // Contract dates are calendar days, not midnight UTC instants. Shifting a
+  // forecast date into UTC-4 would advertise the harvest one day too early.
+  const calendarDay = /^\d{4}-\d{2}-\d{2}$/.test(value);
   return new Intl.DateTimeFormat("en-LC", {
     dateStyle: "medium",
-    ...(includeTime ? { timeStyle: "short" } : {}),
-    timeZone: "America/St_Lucia",
+    ...(includeTime && !calendarDay ? { timeStyle: "short" } : {}),
+    timeZone: calendarDay ? "UTC" : "America/St_Lucia",
   }).format(new Date(value));
 };
 

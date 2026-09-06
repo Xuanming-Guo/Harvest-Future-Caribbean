@@ -1130,10 +1130,27 @@ input:focus-visible, button:focus-visible, summary:focus-visible { outline:2px s
 .chrome-left[hidden] { display:none !important; }
 .transport > .harvest-select { width:76px; flex:0 0 76px; }
 @media (max-width:600px) {
-  .chrome-left { position:fixed; left:10px; right:10px; bottom:108px; width:auto; max-height:43dvh; z-index:2; }
+  .chrome-left { position:fixed; left:10px; right:10px; bottom:124px; width:auto; max-height:43dvh; z-index:2; }
   .transport .scrubber { flex-basis:100%; order:2; }
   .transport-clock { min-width:0; flex:1; }
   .transport-buttons { gap:2px; }
   .transport-button { width:28px; height:30px; }
   .transport { padding:10px; }
+}
+
+/* Chromium's standard scrollbar colours override its custom pseudo-elements,
+   including arrow suppression. Let the Harvest pseudo-elements own this UI. */
+@supports selector(::-webkit-scrollbar) {
+  *, .chrome-left { scrollbar-width:auto; scrollbar-color:auto; }
+}
+@media (min-width:601px) {
+  .chrome-left:not(:has(.workspace-details[open])) { overflow:visible; }
+  .chrome-left:not(:has(.workspace-details[open])) .map-explorer {
+    display:flex; flex-direction:column; flex:1; min-height:0; overflow:auto;
+  }
+  .map-explorer > * { flex-shrink:0; }
+  .chrome-left:not(:has(.workspace-details[open])) .island-directory {
+    flex:1; min-height:70px; max-height:none;
+  }
+  .workspace-details { flex-shrink:0; }
 }

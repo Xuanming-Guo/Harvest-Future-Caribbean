@@ -320,7 +320,8 @@ export default function CropDetailPage() {
             )}
           </div>
           <div className="section-gap" id="offer-produce" data-tour="crop-listing"><Card>
-            <SectionTitle title="Offer produce to buyers" detail={`Up to ${batch.data.availableToPromise.value} kg safe to list`} />
+            <SectionTitle title="Offer produce to buyers" detail={`Up to ${batch.data.availableToPromise.value} kg safe to promise`} />
+            {batch.data.promisableFrom && <p className="section-lede">Earliest promise date: <strong>{formatDate(batch.data.promisableFrom, false)}</strong>. Choose this date or later below; a growing crop is reserved for its forecast window, not marked ready today.</p>}
             <form className="form-grid four-fields" onSubmit={(event: FormEvent) => { event.preventDefault(); listing.mutate(); }}>
               <div className="field"><label>Quantity (kg)</label><input type="number" min="0.1" max={batch.data.availableToPromise.value} step="0.1" value={listingQuantity} onChange={(event) => setListingQuantity(Number(event.target.value))} /></div>
               <div className="field"><label>Price per kg (EC$)</label><input type="number" min="0" step="0.25" value={price} onChange={(event) => setPrice(Number(event.target.value))} /></div>

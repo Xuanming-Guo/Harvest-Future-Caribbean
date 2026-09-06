@@ -47,7 +47,7 @@ test("signs in to role-specific product workspaces and signs out", async ({ page
   await expect(page.getByRole("link", { name: "Simulation" })).toHaveCount(0);
   await expect(page.getByText("Know what buyers need, show what you can supply, coordinate collection and keep a clear delivery history.")).toBeVisible();
   await expect(page.getByText("Recommended now")).toBeVisible();
-  for (const section of ["Update what is growing", "Report produce ready", "View buyer demand", "Respond to an opportunity", "Track collection", "View previous deliveries"]) {
+  for (const section of ["Update what is growing", "Offer current or future harvests", "View buyer demand", "Respond to an opportunity", "Track collection", "View previous deliveries"]) {
     await expect(page.getByRole("button", { name: new RegExp(section) })).toBeVisible();
   }
   await expect(page.getByRole("button", { name: /Update what is growing/ })).toHaveAttribute("aria-expanded", "true");
@@ -79,7 +79,7 @@ test("keeps the farmer's recommended action reachable on a small screen", async 
   await expect(action).toBeVisible();
   const button = await action.boundingBox();
   expect(button!.height).toBeGreaterThanOrEqual(48);
-  const summary = await page.getByRole("button", { name: /Report produce ready/ }).boundingBox();
+  const summary = await page.getByRole("button", { name: /Offer current or future harvests/ }).boundingBox();
   expect(summary!.height).toBeGreaterThanOrEqual(44);
   const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
   expect(scrollWidth).toBeLessThanOrEqual(375);

@@ -225,13 +225,14 @@ function describeFrame(frame: ControlRoomFrame, previous: ControlRoomFrame | und
 export default function EventFeed({ scene, frames, onSelect, onSelectAction, maxItems = 40 }: EventFeedProps): React.JSX.Element {
   const names = useMemo(() => buildNameLookup(scene), [scene]);
 
-  const notable: Array<{ frame: ControlRoomFrame; previous: ControlRoomFrame | undefined }> = [];
+  const notable: Array<{ index: number; frame: ControlRoomFrame; previous: ControlRoomFrame | undefined }> = [];
   for (let index = 0; index < frames.length; index += 1) {
     const frame = frames[index] as ControlRoomFrame;
-    if (isNotableEvent(frame.eventType)) notable.push({ frame, previous: frames[index - 1] });
+    if (isNotableEvent(frame.eventType)) notable.push({ index, frame, previous: frames[index - 1] });
   }
 
-  const physicalItems = notable.map(({ frame, previous }) => ({
+  const physicalItems = notable.map(({ index, frame, previous }) => ({
+    key: `frame-${index}`,
     kind: "physical" as const,
     at: frame.atMs,
     frame,
@@ -257,7 +258,7 @@ export default function EventFeed({ scene, frames, onSelect, onSelectAction, max
           const participant = scene.participants.find((candidate) => candidate.simulationActorId === item.action.simulationActorId);
           return (
             <button
-              key={item.action.actionId}
+              key={`action-${item.action.actionId}`}
               type="button"
               className={`feed-item is-agent${item.action.status === "REJECTED" ? " is-alert" : ""}`}
               onClick={() => onSelectAction(item.action)}
@@ -278,7 +279,7 @@ export default function EventFeed({ scene, frames, onSelect, onSelectAction, max
 
         return (
           <button
-            key={`${frame.atMs}-${frame.eventType}`}
+            key={item.key}
             type="button"
             className={classes}
             onClick={() => onSelect(entry.entityId)}

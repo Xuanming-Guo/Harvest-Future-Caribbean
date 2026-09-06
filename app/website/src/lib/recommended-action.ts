@@ -78,14 +78,16 @@ export function recommendedActions(input: RecommendedActionInput): RecommendedAc
 
   // 1. Harvested produce that is safe to sell but has never been offered.
   const unoffered = input.batches
-    .filter((batch) => batch.status === "HARVEST_READY" && batch.availableToPromise.value > 0 && !offeredBatchIds.has(batch.cropBatchId))
+    .filter((batch) => (["HARVEST_READY", "HARVESTED"].includes(batch.status) || (["GROWING", "MATURING"].includes(batch.status) && Boolean(batch.promisableFrom))) && batch.availableToPromise.value > 0 && !offeredBatchIds.has(batch.cropBatchId))
     .sort((left, right) => right.availableToPromise.value - left.availableToPromise.value)[0];
   if (unoffered) {
     actions.push({
       key: `REPORT_PRODUCE_READY:${unoffered.cropBatchId}`,
       kind: "REPORT_PRODUCE_READY",
-      headline: `${formatKg(unoffered.availableToPromise.value)} of ${cropName(unoffered.cropType)} is ready to sell`,
-      support: "No buyer can see it until you offer it. Harvest keeps the offer inside the amount that is safe to promise, so you never sell more than you have.",
+      headline: ["HARVEST_READY", "HARVESTED"].includes(unoffered.status)
+        ? `${formatKg(unoffered.availableToPromise.value)} of ${cropName(unoffered.cropType)} is ready to sell`
+        : `${formatKg(unoffered.availableToPromise.value)} of ${cropName(unoffered.cropType)} can be promised from ${formatDate(unoffered.promisableFrom!, false)}`,
+      support: "No buyer can see it until you offer it. Harvest keeps the offer inside the amount that is safe to promise, with the forecast date carried into collection planning.",
       actionLabel: "Offer it to buyers",
       href: `/crops/${unoffered.cropBatchId}#offer-produce`,
       sectionId: WORKSPACE_SECTIONS.ready,
@@ -99,7 +101,7 @@ export function recommendedActions(input: RecommendedActionInput): RecommendedAc
       .map((listing) => [listing.cropType.toUpperCase(), listing.cropBatchId] as const),
   );
   const opportunity = [...input.opportunities]
-    .filter((item) => offeredCropTypes.has(item.cropType.toUpperCase()))
+    .filter((item) => offeredCropTypes.has(item.cropType.toUpperCase()) && Date.parse(item.neededBy) >= input.now.getTime())
     .sort((left, right) => left.neededBy.localeCompare(right.neededBy))[0];
   if (opportunity) {
     actions.push({
