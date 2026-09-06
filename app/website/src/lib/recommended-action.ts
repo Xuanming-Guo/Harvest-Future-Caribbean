@@ -180,7 +180,7 @@ export function recommendedActions(input: RecommendedActionInput): RecommendedAc
       kind: "UPDATE_WHAT_IS_GROWING",
       headline: `Tell Harvest how the ${cropName(stale.cropType)} is doing`,
       support: stale.latestObservationId
-        ? "This crop has waited longest for an update. A short note keeps your harvest range and your safe-to-sell amount close to the field."
+        ? "This crop has waited longest for an update. A short note keeps your harvest range and your available-to-promise amount close to the field."
         : "This crop has never been reported. A short note gives it a harvest range and an amount you can safely sell.",
       actionLabel: "Update what is growing",
       href: `/crops/${stale.cropBatchId}`,
